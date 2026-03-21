@@ -1,0 +1,22 @@
+package ur:extension@0.1.0;
+
+interface host {
+    /// Test-only host import -- proves guest-to-host callback works.
+    /// Remove once real host imports land.
+    log: func(msg: string);
+}
+
+interface extension {
+    record extension-manifest {
+        id: string,
+        name: string,
+    }
+
+    register: func() -> extension-manifest;
+    call-tool: func(name: string, args-json: string) -> result<string, string>;
+}
+
+world ur-extension {
+    import host;
+    export extension;
+}
