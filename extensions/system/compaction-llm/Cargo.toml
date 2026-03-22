@@ -1,5 +1,5 @@
 [package]
-name = "test-extension"
+name = "compaction-llm"
 version = "0.1.0"
 edition = "2024"
 
@@ -41,7 +41,6 @@ map_err_ignore = "warn"
 redundant_type_annotations = "warn"
 renamed_function_params = "warn"
 semicolon_outside_block = "warn"
-# Opt out cargo lints that don't apply to extensions
 cargo_common_metadata = "allow"
 multiple_crate_versions = "allow"
 undocumented_unsafe_blocks = "warn"

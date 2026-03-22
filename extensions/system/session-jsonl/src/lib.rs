@@ -1,0 +1,38 @@
+wit_bindgen::generate!({
+    path: "../../../wit",
+    world: "session-extension",
+});
+
+use exports::ur::extension::extension::Guest as ExtGuest;
+use exports::ur::extension::session_provider::Guest as SessionGuest;
+use ur::extension::types::{ConfigEntry, Message, SessionInfo};
+
+struct SessionJsonl;
+
+impl ExtGuest for SessionJsonl {
+    fn init(_config: Vec<ConfigEntry>) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn call_tool(_name: String, _args_json: String) -> Result<String, String> {
+        Err("no tools implemented".into())
+    }
+}
+
+impl SessionGuest for SessionJsonl {
+    fn load(_id: String) -> Result<Vec<Message>, String> {
+        Ok(Vec::new())
+    }
+
+    fn append(_id: String, _msg: Message) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn list_sessions() -> Result<Vec<SessionInfo>, String> {
+        Ok(Vec::new())
+    }
+}
+
+export!(SessionJsonl);
+
+// Rust guideline compliant 2026-02-21

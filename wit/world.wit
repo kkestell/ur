@@ -1,22 +1,136 @@
-package ur:extension@0.1.0;
+package ur:extension@0.2.0;
 
-interface host {
-    /// Test-only host import -- proves guest-to-host callback works.
-    /// Remove once real host imports land.
-    log: func(msg: string);
-}
-
-interface extension {
-    record extension-manifest {
-        id: string,
-        name: string,
+/// Shared types used across all interfaces.
+interface types {
+    /// A single message in a conversation.
+    record message {
+        role: string,
+        content: string,
     }
 
-    register: func() -> extension-manifest;
+    /// Options for a completion request.
+    record complete-opts {
+        model: option<string>,
+        max-tokens: option<u32>,
+    }
+
+    /// Token usage statistics.
+    record usage {
+        input-tokens: u32,
+        output-tokens: u32,
+    }
+
+    /// The result of a completion request.
+    record completion {
+        message: message,
+        usage: option<usage>,
+    }
+
+    /// Summary information about a session.
+    record session-info {
+        id: string,
+        title: option<string>,
+    }
+
+    /// A key-value configuration entry.
+    record config-entry {
+        key: string,
+        value: string,
+    }
+}
+
+/// Platform capabilities imported by all extensions.
+///
+/// Extensions call `host.*` for platform services. The host routes
+/// each call to the active provider for the corresponding slot.
+interface host {
+    use types.{message, complete-opts, completion, session-info, config-entry};
+
+    /// Emit a log message to the host.
+    log: func(msg: string);
+
+    /// Request a completion from the active LLM provider.
+    complete: func(messages: list<message>, opts: option<complete-opts>) -> result<completion, string>;
+
+    /// Load all messages for a session.
+    load-session: func(id: string) -> result<list<message>, string>;
+
+    /// Append a message to a session.
+    append-session: func(id: string, msg: message) -> result<_, string>;
+
+    /// List available sessions.
+    list-sessions: func() -> result<list<session-info>, string>;
+
+    /// Compact a message history.
+    compact: func(messages: list<message>) -> result<list<message>, string>;
+}
+
+/// Common extension lifecycle and generic tool support.
+interface extension {
+    use types.{config-entry};
+
+    /// Initialize the extension with configuration.
+    init: func(config: list<config-entry>) -> result<_, string>;
+
+    /// Call a named tool with JSON arguments.
     call-tool: func(name: string, args-json: string) -> result<string, string>;
 }
 
-world ur-extension {
+/// Exported by extensions filling the `llm-provider` slot.
+interface llm-provider {
+    use types.{message, complete-opts, completion};
+
+    /// Perform a completion.
+    complete: func(messages: list<message>, opts: option<complete-opts>) -> result<completion, string>;
+}
+
+/// Exported by extensions filling the `session-provider` slot.
+interface session-provider {
+    use types.{message, session-info};
+
+    /// Load all messages for a session.
+    load: func(id: string) -> result<list<message>, string>;
+
+    /// Append a message to a session.
+    append: func(id: string, msg: message) -> result<_, string>;
+
+    /// List available sessions.
+    list-sessions: func() -> result<list<session-info>, string>;
+}
+
+/// Exported by extensions filling the `compaction-provider` slot.
+interface compaction-provider {
+    use types.{message};
+
+    /// Compact a message history into fewer messages.
+    compact: func(messages: list<message>) -> result<list<message>, string>;
+}
+
+// -- Worlds ---------------------------------------------------------------
+
+/// World for extensions that provide LLM completions.
+world llm-extension {
+    import host;
+    export extension;
+    export llm-provider;
+}
+
+/// World for extensions that provide session persistence.
+world session-extension {
+    import host;
+    export extension;
+    export session-provider;
+}
+
+/// World for extensions that provide compaction.
+world compaction-extension {
+    import host;
+    export extension;
+    export compaction-provider;
+}
+
+/// World for general-purpose extensions with no slot.
+world general-extension {
     import host;
     export extension;
 }
