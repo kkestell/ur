@@ -200,16 +200,16 @@ This section is already comprehensive. Minor additions only.
 
 ## Acceptance Criteria
 
-- [ ] `SmokeHarness` handles build, temp dir, WASM copy, and `run()`/`run_err()` helpers
-- [ ] `smoke-test.py` is the single entry point, iterates test modules in order
-- [ ] Each test module has a `run(h)` function covering one logical area
-- [ ] No assertions — no `assert`, no `exit(1)` on missing output
-- [ ] Error paths use `run_err()` (catches non-zero exit) instead of assertions
-- [ ] New coverage items from each section above are included
-- [ ] `make smoke-test` updated to call `python3 scripts/smoke-test.py`
-- [ ] Integration test skips gracefully when `GOOGLE_API_KEY` is unset
-- [ ] Stdlib only — no third-party Python dependencies
-- [ ] Delete `scripts/smoke-test.sh` after new suite is verified
+- [x] `SmokeHarness` handles build, temp dir, WASM copy, and `run()`/`run_err()` helpers
+- [x] `smoke-test.py` is the single entry point, iterates test modules in order
+- [x] Each test module has a `run(h)` function covering one logical area
+- [x] No assertions — no `assert`, no `exit(1)` on missing output
+- [x] Error paths use `run_err()` (catches non-zero exit) instead of assertions
+- [x] New coverage items from each section above are included
+- [x] `make smoke-test` updated to call `python3 scripts/smoke-test.py`
+- [x] Integration test skips gracefully when `GOOGLE_API_KEY` is unset
+- [x] Stdlib only — no third-party Python dependencies
+- [x] Delete `scripts/smoke-test.sh` after new suite is verified
 
 ## References
 

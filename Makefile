@@ -76,4 +76,4 @@ fmt-check:
 verify: fmt-check check test clippy
 
 smoke-test:
-	bash scripts/smoke-test.sh
+	python3 scripts/smoke-test.py
