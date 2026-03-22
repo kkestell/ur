@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+use wasmtime::Engine;
+
 use crate::discovery::{self, DiscoveredExtension, SourceTier};
 use crate::slot::{Cardinality, find_slot, validate_required_slots};
 
@@ -124,8 +126,12 @@ pub fn merge(
 /// # Errors
 ///
 /// Returns an error if discovery or manifest I/O fails.
-pub fn scan_and_load(ur_root: &Path, workspace: &Path) -> Result<WorkspaceManifest> {
-    let discovered = discovery::discover(ur_root, workspace)?;
+pub fn scan_and_load(
+    engine: &Engine,
+    ur_root: &Path,
+    workspace: &Path,
+) -> Result<WorkspaceManifest> {
+    let discovered = discovery::discover(engine, ur_root, workspace)?;
     let existing = load_manifest(ur_root, workspace)?;
     let merged = merge(existing, discovered, workspace);
     validate_required_slots(merged.extensions.iter().map(|e| (&e.slot, e.enabled)))?;
@@ -356,7 +362,7 @@ mod tests {
     #[test]
     fn enable_disabled_extension_succeeds() {
         let mut m = manifest(vec![entry("a", Some("llm-provider"), "system", false)]);
-        assert!(enable(&mut m, "a").is_ok());
+        enable(&mut m, "a").unwrap();
         assert!(m.extensions[0].enabled);
     }
 
@@ -372,7 +378,7 @@ mod tests {
             entry("a", Some("session-provider"), "system", true),
             entry("b", Some("session-provider"), "user", false),
         ]);
-        assert!(enable(&mut m, "b").is_ok());
+        enable(&mut m, "b").unwrap();
         assert!(!m.extensions[0].enabled); // a was switched off
         assert!(m.extensions[1].enabled); // b is now on
     }
@@ -383,7 +389,7 @@ mod tests {
             entry("a", Some("llm-provider"), "system", true),
             entry("b", Some("llm-provider"), "user", false),
         ]);
-        assert!(enable(&mut m, "b").is_ok());
+        enable(&mut m, "b").unwrap();
         assert!(m.extensions[0].enabled); // a still on
         assert!(m.extensions[1].enabled);
     }
@@ -404,7 +410,7 @@ mod tests {
             entry("c", Some("session-provider"), "system", true),
             entry("d", Some("compaction-provider"), "system", true),
         ]);
-        assert!(disable(&mut m, "a").is_ok());
+        disable(&mut m, "a").unwrap();
         assert!(!m.extensions[0].enabled);
     }
 
@@ -432,7 +438,7 @@ mod tests {
             entry("c", Some("session-provider"), "system", true),
             entry("d", Some("compaction-provider"), "system", true),
         ]);
-        assert!(disable(&mut m, "a").is_ok());
+        disable(&mut m, "a").unwrap();
     }
 
     #[test]
@@ -457,7 +463,7 @@ mod tests {
     #[test]
     fn find_entry_returns_error_for_unknown() {
         let m = manifest(vec![]);
-        assert!(find_entry(&m, "nope").is_err());
+        find_entry(&m, "nope").unwrap_err();
     }
 
     #[test]
@@ -472,7 +478,7 @@ mod tests {
     #[test]
     fn find_entry_index_returns_error_for_unknown() {
         let m = manifest(vec![]);
-        assert!(find_entry_index(&m, "nope").is_err());
+        find_entry_index(&m, "nope").unwrap_err();
     }
 
     // --- escape_workspace_path test ---

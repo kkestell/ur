@@ -29,6 +29,8 @@ pub enum Command {
         #[command(subcommand)]
         action: ModelAction,
     },
+    /// Run a single agent turn (tracer bullet).
+    Run,
 }
 
 #[derive(Subcommand, Debug)]

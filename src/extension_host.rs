@@ -3,9 +3,13 @@
 use std::fmt;
 use std::path::Path;
 
-use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
+use wasmtime::component::{Component, HasSelf, Linker, ResourceAny, ResourceTable};
 use wasmtime::{Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi_http::WasiHttpCtx;
+use wasmtime_wasi_http::p2::{WasiHttpCtxView, WasiHttpView};
+
+use crate::slot;
 
 /// Bindgen-generated bindings for all four extension worlds.
 ///
@@ -61,6 +65,7 @@ pub use worlds::general::ur::extension::types as wit_types;
 /// WASI host state for an extension instance.
 pub struct HostState {
     wasi_ctx: WasiCtx,
+    http_ctx: WasiHttpCtx,
     resource_table: ResourceTable,
 }
 
@@ -75,6 +80,16 @@ impl WasiView for HostState {
         WasiCtxView {
             ctx: &mut self.wasi_ctx,
             table: &mut self.resource_table,
+        }
+    }
+}
+
+impl WasiHttpView for HostState {
+    fn http(&mut self) -> WasiHttpCtxView<'_> {
+        WasiHttpCtxView {
+            ctx: &mut self.http_ctx,
+            table: &mut self.resource_table,
+            hooks: Default::default(),
         }
     }
 }
@@ -157,28 +172,28 @@ fn build_host_state() -> HostState {
     let wasi_ctx = WasiCtxBuilder::new().inherit_stdio().build();
     HostState {
         wasi_ctx,
+        http_ctx: WasiHttpCtx::new(),
         resource_table: ResourceTable::new(),
     }
 }
 
 impl ExtensionInstance {
-    /// Compiles and instantiates an extension against the world for its slot.
-    ///
-    /// The `slot` parameter selects the world: `"llm-provider"`,
-    /// `"session-provider"`, `"compaction-provider"`, or `None` for
-    /// general-purpose extensions.
+    /// Compiles and instantiates an extension, auto-detecting its slot
+    /// from the component's exports.
     ///
     /// # Errors
     ///
     /// Returns an error if the component cannot be loaded, or if the
     /// WASM component does not satisfy the world's export requirements.
-    pub fn load(engine: &Engine, path: &Path, slot: Option<&str>) -> wasmtime::Result<Self> {
+    pub fn load(engine: &Engine, path: &Path) -> wasmtime::Result<Self> {
         let component = Component::from_file(engine, path)?;
+        let detected = slot::detect_slot(engine, &component);
 
-        match slot {
+        match detected {
             Some("llm-provider") => {
                 let mut linker = Linker::new(engine);
                 wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
+                wasmtime_wasi_http::p2::add_only_http_to_linker_sync(&mut linker)?;
                 worlds::llm::LlmExtension::add_to_linker::<_, HasSelf<_>>(&mut linker, |state| {
                     state
                 })?;
@@ -213,7 +228,7 @@ impl ExtensionInstance {
                 )?;
                 Ok(Self::Compaction { store, bindings })
             }
-            _ => {
+            Some(_) | None => {
                 let mut linker = Linker::new(engine);
                 wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
                 worlds::general::GeneralExtension::add_to_linker::<_, HasSelf<_>>(
@@ -226,6 +241,48 @@ impl ExtensionInstance {
                 )?;
                 Ok(Self::General { store, bindings })
             }
+        }
+    }
+
+    /// Returns the slot name for this extension, or `None` for general extensions.
+    pub fn slot_name(&self) -> Option<&'static str> {
+        match self {
+            Self::Llm { .. } => Some("llm-provider"),
+            Self::Session { .. } => Some("session-provider"),
+            Self::Compaction { .. } => Some("compaction-provider"),
+            Self::General { .. } => None,
+        }
+    }
+
+    /// Returns the extension's self-declared identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the guest call traps.
+    pub fn id(&mut self) -> wasmtime::Result<String> {
+        match self {
+            Self::Llm { store, bindings } => bindings.ur_extension_extension().call_id(store),
+            Self::Session { store, bindings } => bindings.ur_extension_extension().call_id(store),
+            Self::Compaction { store, bindings } => {
+                bindings.ur_extension_extension().call_id(store)
+            }
+            Self::General { store, bindings } => bindings.ur_extension_extension().call_id(store),
+        }
+    }
+
+    /// Returns the extension's self-declared human-readable name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the guest call traps.
+    pub fn name(&mut self) -> wasmtime::Result<String> {
+        match self {
+            Self::Llm { store, bindings } => bindings.ur_extension_extension().call_name(store),
+            Self::Session { store, bindings } => bindings.ur_extension_extension().call_name(store),
+            Self::Compaction { store, bindings } => {
+                bindings.ur_extension_extension().call_name(store)
+            }
+            Self::General { store, bindings } => bindings.ur_extension_extension().call_name(store),
         }
     }
 
@@ -255,6 +312,28 @@ impl ExtensionInstance {
             }
             Self::General { store, bindings } => {
                 bindings.ur_extension_extension().call_init(store, &entries)
+            }
+        }
+    }
+
+    /// Lists the tools this extension can handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the guest call traps.
+    pub fn list_tools(&mut self) -> wasmtime::Result<Vec<wit_types::ToolDescriptor>> {
+        match self {
+            Self::Llm { store, bindings } => {
+                bindings.ur_extension_extension().call_list_tools(store)
+            }
+            Self::Session { store, bindings } => {
+                bindings.ur_extension_extension().call_list_tools(store)
+            }
+            Self::Compaction { store, bindings } => {
+                bindings.ur_extension_extension().call_list_tools(store)
+            }
+            Self::General { store, bindings } => {
+                bindings.ur_extension_extension().call_list_tools(store)
             }
         }
     }
@@ -329,18 +408,65 @@ impl ExtensionInstance {
     ///
     /// Returns an error if the guest call traps, or `Ok(Err(...))`
     /// if this is not an LLM provider.
+    #[expect(
+        dead_code,
+        reason = "The non-streaming wrapper stays available while callers migrate"
+    )]
     pub fn complete(
         &mut self,
         messages: &[wit_types::Message],
         model: &str,
         settings: &[wit_types::ConfigSetting],
+        tools: &[wit_types::ToolDescriptor],
     ) -> wasmtime::Result<Result<wit_types::Completion, String>> {
         match self {
             Self::Llm { store, bindings } => bindings
                 .ur_extension_llm_provider()
-                .call_complete(store, messages, model, settings),
+                .call_complete(store, messages, model, settings, tools),
             _ => Ok(Err("not an llm-provider".into())),
         }
+    }
+
+    /// Begins a streaming completion and pulls chunks via a callback.
+    ///
+    /// Calls `complete-streaming` on the LLM provider, then pulls
+    /// `completion-chunk` values from the returned resource until
+    /// exhausted. Each chunk is passed to `on_chunk`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the guest call traps, or `Ok(Err(...))`
+    /// if this is not an LLM provider.
+    pub fn complete_streaming(
+        &mut self,
+        messages: &[wit_types::Message],
+        model: &str,
+        settings: &[wit_types::ConfigSetting],
+        tools: &[wit_types::ToolDescriptor],
+        mut on_chunk: impl FnMut(&wit_types::CompletionChunk),
+    ) -> wasmtime::Result<Result<(), String>> {
+        let Self::Llm { store, bindings } = self else {
+            return Ok(Err("not an llm-provider".into()));
+        };
+
+        let stream: ResourceAny = match bindings
+            .ur_extension_llm_streaming_provider()
+            .call_complete_streaming(&mut *store, messages, model, settings, tools)?
+        {
+            Ok(s) => s,
+            Err(e) => return Ok(Err(e)),
+        };
+
+        let accessor = bindings
+            .ur_extension_llm_streaming_provider()
+            .completion_stream();
+
+        while let Some(chunk) = accessor.call_next(&mut *store, stream)? {
+            on_chunk(&chunk);
+        }
+
+        stream.resource_drop(&mut *store)?;
+        Ok(Ok(()))
     }
 
     /// Loads session messages from a session provider extension.
@@ -386,6 +512,10 @@ impl ExtensionInstance {
     ///
     /// Returns an error if the guest call traps, or `Ok(Err(...))`
     /// if this is not a session provider.
+    #[expect(
+        dead_code,
+        reason = "Session listing remains available for upcoming CLI flows"
+    )]
     pub fn list_sessions(
         &mut self,
     ) -> wasmtime::Result<Result<Vec<wit_types::SessionInfo>, String>> {

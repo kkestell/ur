@@ -1,15 +1,14 @@
-//! Three-tier extension discovery via `extension.toml` scanning.
+//! Three-tier extension discovery via WASM component inspection.
 
 use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use walkdir::WalkDir;
+use wasmtime::Engine;
 
-use crate::slot::validate_slot_name;
+use crate::extension_host::ExtensionInstance;
 
 /// Which directory tier an extension was discovered in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,21 +26,6 @@ impl fmt::Display for SourceTier {
             Self::Workspace => write!(f, "workspace"),
         }
     }
-}
-
-/// Sidecar TOML schema for extension metadata.
-#[derive(Debug, Deserialize)]
-struct ExtensionTomlFile {
-    extension: ExtensionToml,
-}
-
-/// The `[extension]` table in `extension.toml`.
-#[derive(Debug, Deserialize)]
-struct ExtensionToml {
-    id: String,
-    name: String,
-    slot: Option<String>,
-    wasm: String,
 }
 
 /// An extension found during directory scanning.
@@ -66,15 +50,18 @@ pub fn compute_checksum(path: &Path) -> Result<String> {
     Ok(format!("sha256:{hash:x}"))
 }
 
-/// Scans all three tiers for `extension.toml` files and parses each.
-///
-/// No WASM loading occurs at discovery time.
+/// Scans all three tiers for `.wasm` files, compiles each, inspects
+/// exports for slot detection, and instantiates to query identity.
 ///
 /// # Errors
 ///
 /// Returns an error on duplicate extension IDs, unknown slot names,
-/// or TOML parse failures.
-pub fn discover(ur_root: &Path, workspace: &Path) -> Result<Vec<DiscoveredExtension>> {
+/// or WASM loading failures.
+pub fn discover(
+    engine: &Engine,
+    ur_root: &Path,
+    workspace: &Path,
+) -> Result<Vec<DiscoveredExtension>> {
     let mut extensions = Vec::new();
     let mut seen_ids = HashSet::new();
 
@@ -89,53 +76,97 @@ pub fn discover(ur_root: &Path, workspace: &Path) -> Result<Vec<DiscoveredExtens
             continue;
         }
 
-        for entry in WalkDir::new(dir) {
+        // Each immediate subdirectory is an extension.
+        let entries =
+            std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))?;
+
+        for entry in entries {
             let entry = entry.with_context(|| format!("scanning {}", dir.display()))?;
-            let path = entry.path();
-            if path.file_name().is_some_and(|n| n == "extension.toml") {
-                let ext = load_discovered(path, *tier)?;
-
-                if !seen_ids.insert(ext.id.clone()) {
-                    bail!("duplicate extension id: {}", ext.id);
-                }
-
-                extensions.push(ext);
+            let ext_dir = entry.path();
+            if !ext_dir.is_dir() {
+                continue;
             }
+
+            let wasm_path = find_wasm_file(&ext_dir);
+            let Some(wasm_path) = wasm_path else {
+                continue;
+            };
+
+            let ext = load_discovered(engine, &wasm_path, *tier)?;
+
+            if !seen_ids.insert(ext.id.clone()) {
+                bail!("duplicate extension id: {}", ext.id);
+            }
+
+            extensions.push(ext);
         }
     }
 
     Ok(extensions)
 }
 
-/// Parses a single `extension.toml` and resolves the WASM path.
-fn load_discovered(toml_path: &Path, source: SourceTier) -> Result<DiscoveredExtension> {
-    let contents = std::fs::read_to_string(toml_path)
-        .with_context(|| format!("reading {}", toml_path.display()))?;
-
-    let parsed: ExtensionTomlFile =
-        toml::from_str(&contents).with_context(|| format!("parsing {}", toml_path.display()))?;
-
-    let meta = parsed.extension;
-
-    if let Some(ref slot) = meta.slot {
-        validate_slot_name(slot)?;
+/// Finds the first `.wasm` file in a directory, checking common locations.
+fn find_wasm_file(ext_dir: &Path) -> Option<PathBuf> {
+    // Check root of the extension directory first.
+    if let Some(path) = find_wasm_in_dir(ext_dir) {
+        return Some(path);
     }
 
-    let toml_dir = toml_path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("no parent for {}", toml_path.display()))?;
-    let wasm_path = toml_dir.join(&meta.wasm);
+    // Check target/wasm32-wasip2/release/ for source extensions.
+    let target_dir = ext_dir.join("target/wasm32-wasip2/release");
+    if target_dir.is_dir()
+        && let Some(path) = find_wasm_in_dir(&target_dir)
+    {
+        return Some(path);
+    }
 
-    let checksum = compute_checksum(&wasm_path)
+    None
+}
+
+/// Finds the first `.wasm` file directly inside a directory (non-recursive).
+fn find_wasm_in_dir(dir: &Path) -> Option<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return None;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "wasm") && path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Compiles a WASM component, detects its slot, instantiates to query identity.
+fn load_discovered(
+    engine: &Engine,
+    wasm_path: &Path,
+    source: SourceTier,
+) -> Result<DiscoveredExtension> {
+    let checksum = compute_checksum(wasm_path)
         .with_context(|| format!("checksum for {}", wasm_path.display()))?;
 
-    let abs_path = std::fs::canonicalize(&wasm_path)
+    let abs_path = std::fs::canonicalize(wasm_path)
         .with_context(|| format!("canonicalizing {}", wasm_path.display()))?;
 
+    // Load and detect slot.
+    let mut instance = ExtensionInstance::load(engine, &abs_path)
+        .map_err(|e| anyhow::anyhow!("loading {}: {e}", wasm_path.display()))?;
+
+    let detected_slot = instance.slot_name().map(str::to_owned);
+
+    // Query identity from the component.
+    let id = instance
+        .id()
+        .map_err(|e| anyhow::anyhow!("calling id() on {}: {e}", wasm_path.display()))?;
+    let name = instance
+        .name()
+        .map_err(|e| anyhow::anyhow!("calling name() on {}: {e}", wasm_path.display()))?;
+
     Ok(DiscoveredExtension {
-        id: meta.id,
-        name: meta.name,
-        slot: meta.slot,
+        id,
+        name,
+        slot: detected_slot,
         source,
         wasm_path: abs_path,
         checksum,

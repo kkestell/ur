@@ -5,7 +5,7 @@ wit_bindgen::generate!({
 
 use exports::ur::extension::extension::Guest as ExtGuest;
 use exports::ur::extension::session_provider::Guest as SessionGuest;
-use ur::extension::types::{ConfigEntry, Message, SessionInfo};
+use ur::extension::types::{ConfigEntry, Message, SessionInfo, ToolDescriptor};
 
 struct SessionJsonl;
 
@@ -16,6 +16,18 @@ impl ExtGuest for SessionJsonl {
 
     fn call_tool(_name: String, _args_json: String) -> Result<String, String> {
         Err("no tools implemented".into())
+    }
+
+    fn id() -> String {
+        "session-jsonl".into()
+    }
+
+    fn name() -> String {
+        "Session JSONL".into()
+    }
+
+    fn list_tools() -> Vec<ToolDescriptor> {
+        vec![]
     }
 }
 

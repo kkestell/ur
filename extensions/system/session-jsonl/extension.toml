@@ -1,5 +1,0 @@
-[extension]
-id = "session-jsonl"
-name = "Session JSONL"
-slot = "session-provider"
-wasm = "target/wasm32-wasip2/release/session_jsonl.wasm"

@@ -2,10 +2,33 @@ package ur:extension@0.2.0;
 
 /// Shared types used across all interfaces.
 interface types {
+    /// A tool call requested by the LLM.
+    record tool-call {
+        id: string,
+        name: string,
+        arguments-json: string,
+        /// Opaque provider-specific metadata to echo back on the next request.
+        provider-metadata-json: string,
+    }
+
+    /// The result of a tool invocation, linked back to the original call.
+    record tool-result {
+        tool-call-id: string,
+        tool-name: string,
+        content: string,
+    }
+
+    /// A single part of a message — text, tool call, or tool result.
+    variant message-part {
+        text(string),
+        tool-call(tool-call),
+        tool-result(tool-result),
+    }
+
     /// A single message in a conversation.
     record message {
         role: string,
-        content: string,
+        parts: list<message-part>,
     }
 
     /// Token usage statistics.
@@ -86,6 +109,20 @@ interface types {
         key: string,
         value: setting-value,
     }
+
+    /// Describes a tool that an extension can handle.
+    record tool-descriptor {
+        name: string,
+        description: string,
+        parameters-json-schema: string,
+    }
+
+    /// A single chunk from a streaming completion.
+    record completion-chunk {
+        delta-parts: list<message-part>,
+        finish-reason: option<string>,
+        usage: option<usage>,
+    }
 }
 
 /// Platform capabilities imported by all extensions.
@@ -119,18 +156,27 @@ interface host {
 
 /// Common extension lifecycle and generic tool support.
 interface extension {
-    use types.{config-entry};
+    use types.{config-entry, tool-descriptor};
 
     /// Initialize the extension with configuration.
     init: func(config: list<config-entry>) -> result<_, string>;
 
     /// Call a named tool with JSON arguments.
     call-tool: func(name: string, args-json: string) -> result<string, string>;
+
+    /// The extension's unique identifier.
+    id: func() -> string;
+
+    /// The extension's human-readable name.
+    name: func() -> string;
+
+    /// Declare the tools this extension can handle.
+    list-tools: func() -> list<tool-descriptor>;
 }
 
 /// Exported by extensions filling the `llm-provider` slot.
 interface llm-provider {
-    use types.{message, completion, model-descriptor, config-setting};
+    use types.{message, completion, model-descriptor, config-setting, tool-descriptor};
 
     /// The provider's short identifier (e.g. "anthropic", "openai").
     ///
@@ -141,7 +187,26 @@ interface llm-provider {
     list-models: func() -> list<model-descriptor>;
 
     /// Perform a completion with a resolved model and typed settings.
-    complete: func(messages: list<message>, model: string, settings: list<config-setting>) -> result<completion, string>;
+    complete: func(messages: list<message>, model: string, settings: list<config-setting>,
+                   tools: list<tool-descriptor>) -> result<completion, string>;
+}
+
+/// Exported by extensions filling the `llm-provider` slot (streaming).
+interface llm-streaming-provider {
+    use types.{message, config-setting, completion-chunk, tool-descriptor};
+
+    /// A stream of completion chunks pulled incrementally.
+    resource completion-stream {
+        /// Returns the next chunk, or `none` when the stream is exhausted.
+        next: func() -> option<completion-chunk>;
+    }
+
+    /// Begin a streaming completion. The caller pulls chunks via the
+    /// returned resource handle.
+    complete-streaming: func(messages: list<message>, model: string,
+                             settings: list<config-setting>,
+                             tools: list<tool-descriptor>)
+        -> result<completion-stream, string>;
 }
 
 /// Exported by extensions filling the `session-provider` slot.
@@ -168,11 +233,21 @@ interface compaction-provider {
 
 // -- Worlds ---------------------------------------------------------------
 
-/// World for extensions that provide LLM completions.
+/// World for extensions that provide LLM completions (host-side bindings).
 world llm-extension {
     import host;
     export extension;
     export llm-provider;
+    export llm-streaming-provider;
+}
+
+/// World for LLM extensions that make outbound HTTP requests (guest-side).
+world llm-extension-http {
+    import host;
+    import wasi:http/outgoing-handler@0.2.6;
+    export extension;
+    export llm-provider;
+    export llm-streaming-provider;
 }
 
 /// World for extensions that provide session persistence.

@@ -4,6 +4,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 UR="$ROOT/target/debug/ur"
 
+# Load .env from project root
+if [ -f "$ROOT/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$ROOT/.env"
+    set +a
+fi
+
 # ── Build ────────────────────────────────────────────────────────────
 echo "Building host..."
 cargo build --manifest-path "$ROOT/Cargo.toml" 2>&1
@@ -12,9 +20,9 @@ echo "Building extensions..."
 for dir in \
     extensions/system/session-jsonl \
     extensions/system/compaction-llm \
-    extensions/system/llm-openai \
-    extensions/user/llm-anthropic \
-    extensions/workspace/test-extension
+    extensions/system/llm-google \
+    extensions/workspace/test-extension \
+    extensions/workspace/llm-test
 do
     cargo build --manifest-path "$ROOT/$dir/Cargo.toml" \
         --target wasm32-wasip2 --release 2>&1
@@ -29,48 +37,30 @@ WORKSPACE="$TMPDIR/workspace"
 
 mkdir -p "$UR_ROOT/extensions/system/session-jsonl"
 mkdir -p "$UR_ROOT/extensions/system/compaction-llm"
-mkdir -p "$UR_ROOT/extensions/system/llm-openai"
-mkdir -p "$UR_ROOT/extensions/user/llm-anthropic"
+mkdir -p "$UR_ROOT/extensions/system/llm-google"
 mkdir -p "$WORKSPACE/.ur/extensions/test-extension"
+mkdir -p "$WORKSPACE/.ur/extensions/llm-test"
 
-# Copy WASM artifacts and generate extension.toml sidecar files
-write_toml() {
-    local dir="$1" id="$2" name="$3" wasm="$4" slot="${5:-}"
+# Copy WASM artifacts into tier directories (no TOML needed).
+copy_wasm() {
+    local dir="$1" wasm="$2"
     cp "$wasm" "$dir/"
-    local wasm_name
-    wasm_name="$(basename "$wasm")"
-    {
-        echo "[extension]"
-        echo "id = \"$id\""
-        echo "name = \"$name\""
-        [ -n "$slot" ] && echo "slot = \"$slot\""
-        echo "wasm = \"$wasm_name\""
-    } > "$dir/extension.toml"
 }
 
-write_toml "$UR_ROOT/extensions/system/session-jsonl" \
-    "session-jsonl" "Session JSONL" \
-    "$ROOT/extensions/system/session-jsonl/target/wasm32-wasip2/release/session_jsonl.wasm" \
-    "session-provider"
+copy_wasm "$UR_ROOT/extensions/system/session-jsonl" \
+    "$ROOT/extensions/system/session-jsonl/target/wasm32-wasip2/release/session_jsonl.wasm"
 
-write_toml "$UR_ROOT/extensions/system/compaction-llm" \
-    "compaction-llm" "Compaction LLM" \
-    "$ROOT/extensions/system/compaction-llm/target/wasm32-wasip2/release/compaction_llm.wasm" \
-    "compaction-provider"
+copy_wasm "$UR_ROOT/extensions/system/compaction-llm" \
+    "$ROOT/extensions/system/compaction-llm/target/wasm32-wasip2/release/compaction_llm.wasm"
 
-write_toml "$UR_ROOT/extensions/system/llm-openai" \
-    "llm-openai" "LLM OpenAI" \
-    "$ROOT/extensions/system/llm-openai/target/wasm32-wasip2/release/llm_openai.wasm" \
-    "llm-provider"
+copy_wasm "$UR_ROOT/extensions/system/llm-google" \
+    "$ROOT/extensions/system/llm-google/target/wasm32-wasip2/release/llm_google.wasm"
 
-write_toml "$UR_ROOT/extensions/user/llm-anthropic" \
-    "llm-anthropic" "LLM Anthropic" \
-    "$ROOT/extensions/user/llm-anthropic/target/wasm32-wasip2/release/llm_anthropic.wasm" \
-    "llm-provider"
-
-write_toml "$WORKSPACE/.ur/extensions/test-extension" \
-    "test-extension" "Test Extension" \
+copy_wasm "$WORKSPACE/.ur/extensions/test-extension" \
     "$ROOT/extensions/workspace/test-extension/target/wasm32-wasip2/release/test_extension.wasm"
+
+copy_wasm "$WORKSPACE/.ur/extensions/llm-test" \
+    "$ROOT/extensions/workspace/llm-test/target/wasm32-wasip2/release/llm_test.wasm"
 
 run() {
     echo ""
@@ -95,26 +85,16 @@ run extensions list
 
 run extensions inspect session-jsonl
 
-# Enable second llm-provider (allowed — at-least-1)
-run extensions enable llm-anthropic
+run extensions inspect llm-google
 
-# Disable first llm-provider (anthropic still covers it)
-run extensions disable llm-openai
-
-# Verify list reflects changes
-run extensions list
-
-# Cannot disable last llm-provider
-fail extensions disable llm-anthropic
+# Cannot disable only llm-provider
+fail extensions disable llm-google
 
 # Cannot disable only compaction-provider
 fail extensions disable compaction-llm
 
 # Cannot disable only session-provider
 fail extensions disable session-jsonl
-
-# Re-enable openai
-run extensions enable llm-openai
 
 # Enable no-slot workspace extension (always allowed)
 run extensions enable test-extension
@@ -132,7 +112,7 @@ echo "═══ Model role tests ═══"
 # List shows default model with no config file
 run model list
 
-# Get default resolves to first provider's default model
+# Get default resolves to google's default model
 run model get default
 
 # Get unknown role falls back to default
@@ -141,14 +121,14 @@ run model get fast
 # Show available settings for the resolved default model
 run model config default
 
-# Set default role to anthropic provider (validated against list-models)
-run model set default anthropic/claude-sonnet-4-6
+# Set default role to google provider (validated against list-models)
+run model set default google/gemini-3-flash-preview
 
 # Verify it persisted
 run model get default
 
-# Set a fast role to openai
-run model set fast openai/gpt-5.4
+# Set a fast role to gemini-3-pro-preview
+run model set fast google/gemini-3-pro-preview
 
 # List shows both roles
 run model list
@@ -160,34 +140,92 @@ run model config fast
 # Reject invalid model references
 fail model set default fake/nonexistent
 fail model set default invalid-no-slash
-fail model set default anthropic/nonexistent-model
+fail model set default google/nonexistent-model
 
 # ── Provider setting tests ───────────────────────────────────────────
 echo ""
 echo "═══ Provider setting tests ═══"
 
 # Set an integer setting
-run model setting default thinking_budget 8000
+run model setting default temperature 150
 
-# Set an enum setting
-run model setting fast reasoning_effort high
+# Set another integer setting
+run model setting fast max_output_tokens 4096
 
 # Reject unknown setting key
 fail model setting default nonexistent_key 42
 
 # Reject out-of-range integer
-fail model setting default thinking_budget 999999
-
-# Reject invalid enum value
-fail model setting fast reasoning_effort turbo
+fail model setting default temperature 999
 
 # Reject wrong type (string for integer)
-fail model setting default thinking_budget abc
+fail model setting default temperature abc
 
 # Verify config file has provider settings
 echo ""
 echo "Config file contents:"
 cat "$UR_ROOT/config.toml"
+
+# ── Deterministic agent turn test ─────────────────────────────────────
+echo ""
+echo "═══ Agent turn test ═══"
+
+# Enable test-extension (tool provider) and llm-test (deterministic LLM)
+run extensions enable test-extension
+run extensions enable llm-test
+
+# Set default role to the deterministic test LLM
+run model set default test/echo
+
+# Run a full agent turn
+OUTPUT="$(UR_ROOT="$UR_ROOT" "$UR" -w "$WORKSPACE" run 2>&1)"
+echo "$OUTPUT"
+
+# Verify the full turn loop fired
+for expected in \
+    "[turn] loading session" \
+    "[turn] session loaded" \
+    "[turn] adding user message" \
+    "[turn] calling LLM streaming" \
+    "[turn] LLM returned tool call" \
+    "[turn] dispatching tool" \
+    "[turn] tool result" \
+    "[turn] LLM returned message" \
+    "[turn] appending" \
+    "[turn] compacting"
+do
+    if ! echo "$OUTPUT" | grep -qF "$expected"; then
+        echo "FAIL: missing expected output: $expected"
+        exit 1
+    fi
+done
+echo "Agent turn test passed."
+
+# Disable llm-test and reset model so it doesn't interfere with real API test
+run extensions disable llm-test
+run model set default google/gemini-3-flash-preview
+
+# ── Real API integration test ─────────────────────────────────────────
+echo ""
+echo "═══ Integration test ═══"
+
+# Run a single agent turn with real API
+OUTPUT="$(UR_ROOT="$UR_ROOT" GOOGLE_API_KEY="$GOOGLE_API_KEY" "$UR" -w "$WORKSPACE" run 2>&1)" || true
+echo "$OUTPUT"
+
+for expected in \
+    "[turn] loading session" \
+    "[turn] session loaded" \
+    "[turn] adding user message" \
+    "[turn] resolving role" \
+    "[turn] calling LLM streaming"
+do
+    if ! echo "$OUTPUT" | grep -qF "$expected"; then
+        echo "FAIL: missing expected output: $expected"
+        exit 1
+    fi
+done
+echo "Integration test passed."
 
 echo ""
 echo "All smoke tests passed."

@@ -54,9 +54,8 @@ pub fn collect_provider_models(
             continue;
         }
         let path = Path::new(&entry.wasm_path);
-        let mut instance =
-            extension_host::ExtensionInstance::load(engine, path, Some("llm-provider"))
-                .map_err(|e| anyhow::anyhow!("loading {}: {e}", entry.id))?;
+        let mut instance = extension_host::ExtensionInstance::load(engine, path)
+            .map_err(|e| anyhow::anyhow!("loading {}: {e}", entry.id))?;
         let init_result = instance
             .init(&[])
             .map_err(|e| anyhow::anyhow!("init {}: {e}", entry.id))?;
@@ -95,7 +94,7 @@ pub fn resolve_role(
         return Ok((p.to_owned(), m.to_owned()));
     }
 
-    for (provider_id, models) in provider_models.iter() {
+    for (provider_id, models) in provider_models {
         if let Some(model) = models.iter().find(|m| m.is_default) {
             return Ok((provider_id.clone(), model.id.clone()));
         }
@@ -293,7 +292,7 @@ mod tests {
     fn resolve_role_no_providers_errors() {
         let config = UserConfig::default();
         let pm = BTreeMap::new();
-        assert!(resolve_role(&config, "default", &pm).is_err());
+        resolve_role(&config, "default", &pm).unwrap_err();
     }
 
     // --- find_descriptor tests ---
@@ -329,7 +328,10 @@ mod tests {
 
     fn enum_schema(allowed: &[&str]) -> wit_types::SettingSchema {
         wit_types::SettingSchema::Enumeration(wit_types::SettingEnum {
-            allowed: allowed.iter().map(|s| s.to_string()).collect(),
+            allowed: allowed
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
             default_val: allowed[0].to_string(),
         })
     }
@@ -346,12 +348,12 @@ mod tests {
 
     #[test]
     fn parse_setting_value_integer_out_of_bounds() {
-        assert!(parse_setting_value("200", &int_schema(0, 100), "k").is_err());
+        parse_setting_value("200", &int_schema(0, 100), "k").unwrap_err();
     }
 
     #[test]
     fn parse_setting_value_integer_non_numeric() {
-        assert!(parse_setting_value("abc", &int_schema(0, 100), "k").is_err());
+        parse_setting_value("abc", &int_schema(0, 100), "k").unwrap_err();
     }
 
     #[test]
@@ -362,7 +364,7 @@ mod tests {
 
     #[test]
     fn parse_setting_value_enum_invalid() {
-        assert!(parse_setting_value("nope", &enum_schema(&["low", "high"]), "k").is_err());
+        parse_setting_value("nope", &enum_schema(&["low", "high"]), "k").unwrap_err();
     }
 
     #[test]
@@ -379,6 +381,6 @@ mod tests {
 
     #[test]
     fn parse_setting_value_boolean_invalid() {
-        assert!(parse_setting_value("yes", &bool_schema(), "k").is_err());
+        parse_setting_value("yes", &bool_schema(), "k").unwrap_err();
     }
 }

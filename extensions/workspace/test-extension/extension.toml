@@ -1,4 +1,0 @@
-[extension]
-id = "test-extension"
-name = "Test Extension"
-wasm = "target/wasm32-wasip2/release/test_extension.wasm"

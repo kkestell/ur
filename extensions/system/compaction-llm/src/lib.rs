@@ -5,7 +5,7 @@ wit_bindgen::generate!({
 
 use exports::ur::extension::compaction_provider::Guest as CompactionGuest;
 use exports::ur::extension::extension::Guest as ExtGuest;
-use ur::extension::types::{ConfigEntry, Message};
+use ur::extension::types::{ConfigEntry, Message, ToolDescriptor};
 
 struct CompactionLlm;
 
@@ -16,6 +16,18 @@ impl ExtGuest for CompactionLlm {
 
     fn call_tool(_name: String, _args_json: String) -> Result<String, String> {
         Err("no tools implemented".into())
+    }
+
+    fn id() -> String {
+        "compaction-llm".into()
+    }
+
+    fn name() -> String {
+        "Compaction LLM".into()
+    }
+
+    fn list_tools() -> Vec<ToolDescriptor> {
+        vec![]
     }
 }
 

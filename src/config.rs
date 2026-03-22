@@ -247,7 +247,7 @@ mod tests {
             max: 100,
             default_val: 50,
         };
-        assert!(validate_integer(50, &schema, "k").is_ok());
+        validate_integer(50, &schema, "k").unwrap();
     }
 
     #[test]
@@ -277,8 +277,8 @@ mod tests {
             max: 100,
             default_val: 50,
         };
-        assert!(validate_integer(0, &schema, "k").is_ok());
-        assert!(validate_integer(100, &schema, "k").is_ok());
+        validate_integer(0, &schema, "k").unwrap();
+        validate_integer(100, &schema, "k").unwrap();
     }
 
     // --- validate_enum tests ---
@@ -289,7 +289,7 @@ mod tests {
             allowed: vec!["a".into(), "b".into()],
             default_val: "a".into(),
         };
-        assert!(validate_enum("b", &schema, "k").is_ok());
+        validate_enum("b", &schema, "k").unwrap();
     }
 
     #[test]
@@ -370,6 +370,8 @@ mod tests {
             .insert("budget".into(), toml::Value::Integer(99999));
 
         let desc = make_descriptor(vec![int_setting("budget", 0, 10000, 4000)]);
-        assert!(config.settings_for("anthropic", "claude", &desc).is_err());
+        config
+            .settings_for("anthropic", "claude", &desc)
+            .unwrap_err();
     }
 }

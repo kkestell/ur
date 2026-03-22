@@ -1,6 +1,8 @@
 //! Host-declared extension slots with cardinality enforcement.
 
 use anyhow::{Result, bail};
+use wasmtime::Engine;
+use wasmtime::component::Component;
 
 /// How many extensions may fill a slot simultaneously.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,16 +43,32 @@ pub fn find_slot(name: &str) -> Option<&'static SlotDefinition> {
     SLOTS.iter().find(|s| s.name == name)
 }
 
-/// Validates that a slot name is known to the host.
+/// Mapping from WIT export interface names to slot names.
 ///
-/// # Errors
+/// The exact export name includes the package and version from `world.wit`.
+/// We check for the slot-specific interface export to determine which slot
+/// a component fills. General extensions export only `extension`.
+const SLOT_EXPORTS: &[(&str, &str)] = &[
+    ("ur:extension/llm-provider@0.2.0", "llm-provider"),
+    ("ur:extension/session-provider@0.2.0", "session-provider"),
+    (
+        "ur:extension/compaction-provider@0.2.0",
+        "compaction-provider",
+    ),
+];
+
+/// Detects an extension's slot by inspecting its compiled component exports.
 ///
-/// Returns an error if the slot name is not recognized.
-pub fn validate_slot_name(name: &str) -> Result<()> {
-    if find_slot(name).is_none() {
-        bail!("unknown slot: {name}");
+/// Returns `Some("llm-provider")` etc. for slot extensions, or `None` for
+/// general extensions that only export the base `extension` interface.
+pub fn detect_slot(engine: &Engine, component: &Component) -> Option<&'static str> {
+    let ct = component.component_type();
+    for &(export_name, slot_name) in SLOT_EXPORTS {
+        if ct.get_export(engine, export_name).is_some() {
+            return Some(slot_name);
+        }
     }
-    Ok(())
+    None
 }
 
 /// Validates that all required slots are satisfied.
@@ -113,16 +131,6 @@ mod tests {
         assert!(find_slot("bogus-slot").is_none());
     }
 
-    #[test]
-    fn validate_slot_name_ok_for_known() {
-        assert!(validate_slot_name("llm-provider").is_ok());
-    }
-
-    #[test]
-    fn validate_slot_name_err_for_unknown() {
-        assert!(validate_slot_name("bogus").is_err());
-    }
-
     // Helper: build entries for validate_required_slots
     fn entries(items: &[(&str, bool)]) -> Vec<(Option<String>, bool)> {
         items
@@ -138,7 +146,7 @@ mod tests {
             ("compaction-provider", true),
             ("llm-provider", true),
         ]);
-        assert!(validate_required_slots(e.iter().map(|(s, en)| (s, *en))).is_ok());
+        validate_required_slots(e.iter().map(|(s, en)| (s, *en))).unwrap();
     }
 
     #[test]
@@ -180,7 +188,7 @@ mod tests {
             ("llm-provider", true),
             ("llm-provider", true),
         ]);
-        assert!(validate_required_slots(e.iter().map(|(s, en)| (s, *en))).is_ok());
+        validate_required_slots(e.iter().map(|(s, en)| (s, *en))).unwrap();
     }
 
     #[test]

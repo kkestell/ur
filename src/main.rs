@@ -5,6 +5,7 @@ mod extension_host;
 mod manifest;
 mod model;
 mod slot;
+mod turn;
 
 use std::env;
 use std::path::PathBuf;
@@ -30,33 +31,37 @@ fn main() -> Result<()> {
 
     let workspace = std::fs::canonicalize(&workspace)?;
 
+    let engine = Engine::default();
+
     match args.command {
         Command::Extensions { action } => match action {
             ExtensionAction::List => {
-                let m = manifest::scan_and_load(&ur_root, &workspace)?;
+                let m = manifest::scan_and_load(&engine, &ur_root, &workspace)?;
                 cli::print_list(&m);
             }
             ExtensionAction::Enable { id } => {
-                let mut m = manifest::scan_and_load(&ur_root, &workspace)?;
+                let mut m = manifest::scan_and_load(&engine, &ur_root, &workspace)?;
                 manifest::enable(&mut m, &id)?;
                 manifest::save_manifest(&ur_root, &workspace, &m)?;
                 println!("Enabled {id}");
             }
             ExtensionAction::Disable { id } => {
-                let mut m = manifest::scan_and_load(&ur_root, &workspace)?;
+                let mut m = manifest::scan_and_load(&engine, &ur_root, &workspace)?;
                 manifest::disable(&mut m, &id)?;
                 manifest::save_manifest(&ur_root, &workspace, &m)?;
                 println!("Disabled {id}");
             }
             ExtensionAction::Inspect { id } => {
-                let m = manifest::scan_and_load(&ur_root, &workspace)?;
+                let m = manifest::scan_and_load(&engine, &ur_root, &workspace)?;
                 let entry = manifest::find_entry(&m, &id)?;
                 cli::print_inspect(entry);
             }
         },
+        Command::Run => {
+            turn::run(&engine, &ur_root, &workspace)?;
+        }
         Command::Model { action } => {
-            let engine = Engine::default();
-            let m = manifest::scan_and_load(&ur_root, &workspace)?;
+            let m = manifest::scan_and_load(&engine, &ur_root, &workspace)?;
             let providers = model::collect_provider_models(&engine, &m)?;
             let mut config = config::UserConfig::load(&ur_root)?;
 
