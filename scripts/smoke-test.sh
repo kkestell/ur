@@ -122,11 +122,72 @@ run extensions enable test-extension
 # Disable test-extension (no slot — always allowed)
 run extensions disable test-extension
 
-# Instantiate all enabled extensions against their typed worlds + call init()
-run extensions check
-
 # Final state
 run extensions list
+
+# ── Model role tests ─────────────────────────────────────────────────
+echo ""
+echo "═══ Model role tests ═══"
+
+# Zero-config: list shows default model with no config file
+run model list
+
+# Zero-config: get default resolves to first provider's default model
+run model get default
+
+# Zero-config: get unknown role falls back to default
+run model get fast
+
+# Show available settings for the resolved default model
+run model config default
+
+# Set default role to anthropic provider (validated against list-models)
+run model set default anthropic/claude-sonnet-4-6
+
+# Verify it persisted
+run model get default
+
+# Set a fast role to openai
+run model set fast openai/gpt-5.4
+
+# List shows both roles
+run model list
+
+# Show settings for each role
+run model config default
+run model config fast
+
+# Reject invalid model references
+fail model set default fake/nonexistent
+fail model set default invalid-no-slash
+fail model set default anthropic/nonexistent-model
+
+# ── Provider setting tests ───────────────────────────────────────────
+echo ""
+echo "═══ Provider setting tests ═══"
+
+# Set an integer setting
+run model setting default thinking_budget 8000
+
+# Set an enum setting
+run model setting fast reasoning_effort high
+
+# Reject unknown setting key
+fail model setting default nonexistent_key 42
+
+# Reject out-of-range integer
+fail model setting default thinking_budget 999999
+
+# Reject invalid enum value
+fail model setting fast reasoning_effort turbo
+
+# Reject wrong type (string for integer)
+fail model setting default thinking_budget abc
+
+# Verify config file has provider settings
+echo ""
+echo "Config file contents:"
+cat "$UR_ROOT/config.toml"
 
 echo ""
 echo "All smoke tests passed."

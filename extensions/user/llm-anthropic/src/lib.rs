@@ -5,7 +5,10 @@ wit_bindgen::generate!({
 
 use exports::ur::extension::extension::Guest as ExtGuest;
 use exports::ur::extension::llm_provider::Guest as LlmGuest;
-use ur::extension::types::{CompleteOpts, Completion, ConfigEntry, Message, Usage};
+use ur::extension::types::{
+    Completion, ConfigEntry, ConfigSetting, Message, ModelDescriptor, SettingDescriptor,
+    SettingInteger, SettingSchema, Usage,
+};
 
 struct LlmAnthropic;
 
@@ -20,7 +23,34 @@ impl ExtGuest for LlmAnthropic {
 }
 
 impl LlmGuest for LlmAnthropic {
-    fn complete(messages: Vec<Message>, _opts: Option<CompleteOpts>) -> Result<Completion, String> {
+    fn provider_id() -> String {
+        "anthropic".into()
+    }
+
+    fn list_models() -> Vec<ModelDescriptor> {
+        vec![ModelDescriptor {
+            id: "claude-sonnet-4-6".into(),
+            name: "Claude Sonnet 4.6".into(),
+            description: "Balanced performance and cost".into(),
+            is_default: true,
+            settings: vec![SettingDescriptor {
+                key: "thinking_budget".into(),
+                name: "Thinking Budget".into(),
+                description: "Token budget for extended thinking".into(),
+                schema: SettingSchema::Integer(SettingInteger {
+                    min: 0,
+                    max: 128_000,
+                    default_val: 4_000,
+                }),
+            }],
+        }]
+    }
+
+    fn complete(
+        messages: Vec<Message>,
+        _model: String,
+        _settings: Vec<ConfigSetting>,
+    ) -> Result<Completion, String> {
         let reply = format!("anthropic stub: received {} messages", messages.len());
         Ok(Completion {
             message: Message {
@@ -36,5 +66,3 @@ impl LlmGuest for LlmAnthropic {
 }
 
 export!(LlmAnthropic);
-
-// Rust guideline compliant 2026-02-21

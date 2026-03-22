@@ -86,7 +86,7 @@ impl worlds::general::ur::extension::types::Host for HostState {}
 /// Unified host interface implementation.
 ///
 /// Platform capabilities are stubbed — actual routing to active
-/// providers will be implemented in a later step.
+/// providers will be wired up via role resolution.
 impl wit_host::Host for HostState {
     fn log(&mut self, msg: String) {
         println!("[host log] {msg}");
@@ -95,7 +95,7 @@ impl wit_host::Host for HostState {
     fn complete(
         &mut self,
         _messages: Vec<wit_types::Message>,
-        _opts: Option<wit_types::CompleteOpts>,
+        _role: Option<String>,
     ) -> Result<wit_types::Completion, String> {
         Err("not yet routed".into())
     }
@@ -285,6 +285,44 @@ impl ExtensionInstance {
         }
     }
 
+    /// Returns the provider ID declared by an LLM provider extension.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the guest call traps, or `Ok(Err(...))`
+    /// if this is not an LLM provider.
+    pub fn provider_id(&mut self) -> wasmtime::Result<Result<String, String>> {
+        match self {
+            Self::Llm { store, bindings } => {
+                let id = bindings
+                    .ur_extension_llm_provider()
+                    .call_provider_id(store)?;
+                Ok(Ok(id))
+            }
+            _ => Ok(Err("not an llm-provider".into())),
+        }
+    }
+
+    /// Lists models declared by an LLM provider extension.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the guest call traps, or `Ok(Err(...))`
+    /// if this is not an LLM provider.
+    pub fn list_models(
+        &mut self,
+    ) -> wasmtime::Result<Result<Vec<wit_types::ModelDescriptor>, String>> {
+        match self {
+            Self::Llm { store, bindings } => {
+                let models = bindings
+                    .ur_extension_llm_provider()
+                    .call_list_models(store)?;
+                Ok(Ok(models))
+            }
+            _ => Ok(Err("not an llm-provider".into())),
+        }
+    }
+
     /// Calls `complete` on an LLM provider extension.
     ///
     /// # Errors
@@ -294,12 +332,13 @@ impl ExtensionInstance {
     pub fn complete(
         &mut self,
         messages: &[wit_types::Message],
-        opts: Option<&wit_types::CompleteOpts>,
+        model: &str,
+        settings: &[wit_types::ConfigSetting],
     ) -> wasmtime::Result<Result<wit_types::Completion, String>> {
         match self {
             Self::Llm { store, bindings } => bindings
                 .ur_extension_llm_provider()
-                .call_complete(store, messages, opts),
+                .call_complete(store, messages, model, settings),
             _ => Ok(Err("not an llm-provider".into())),
         }
     }
@@ -376,5 +415,3 @@ impl ExtensionInstance {
         }
     }
 }
-
-// Rust guideline compliant 2026-02-21

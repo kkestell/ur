@@ -1,20 +1,20 @@
 mod cli;
+mod config;
 mod discovery;
 mod extension_host;
 mod manifest;
+mod model;
 mod slot;
 
 use std::env;
 use std::path::PathBuf;
-
-use std::path::Path;
 
 use anyhow::Result;
 use clap::Parser;
 use mimalloc::MiMalloc;
 use wasmtime::Engine;
 
-use cli::{Cli, Command, ExtensionAction};
+use cli::{Cli, Command, ExtensionAction, ModelAction};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -53,34 +53,29 @@ fn main() -> Result<()> {
                 let entry = manifest::find_entry(&m, &id)?;
                 cli::print_inspect(entry);
             }
-            ExtensionAction::Check => {
-                let m = manifest::scan_and_load(&ur_root, &workspace)?;
-                let engine = Engine::default();
-                check_extensions(&engine, &m)?;
-            }
         },
+        Command::Model { action } => {
+            let engine = Engine::default();
+            let m = manifest::scan_and_load(&ur_root, &workspace)?;
+            let providers = model::collect_provider_models(&engine, &m)?;
+            let mut config = config::UserConfig::load(&ur_root)?;
+
+            match action {
+                ModelAction::List => model::cmd_list(&config, &providers)?,
+                ModelAction::Get { role } => model::cmd_get(&config, &providers, &role)?,
+                ModelAction::Set { role, model_ref } => {
+                    model::cmd_set(&ur_root, &mut config, &providers, &role, &model_ref)?;
+                }
+                ModelAction::Config { role } => {
+                    model::cmd_config(&config, &providers, &role)?;
+                }
+                ModelAction::Setting { role, key, value } => {
+                    model::cmd_setting(&ur_root, &mut config, &providers, &role, &key, &value)?;
+                }
+            }
+        }
     }
 
-    Ok(())
-}
-
-/// Instantiates all enabled extensions and calls `init()`.
-fn check_extensions(engine: &Engine, manifest: &manifest::WorkspaceManifest) -> Result<()> {
-    for entry in &manifest.extensions {
-        if !entry.enabled {
-            continue;
-        }
-        let path = Path::new(&entry.wasm_path);
-        let mut instance =
-            extension_host::ExtensionInstance::load(engine, path, entry.slot.as_deref())
-                .map_err(|e| anyhow::anyhow!("loading {}: {e}", entry.id))?;
-
-        match instance.init(&[]) {
-            Ok(Ok(())) => println!("{}: ok", entry.id),
-            Ok(Err(e)) => println!("{}: init error: {e}", entry.id),
-            Err(e) => println!("{}: trap: {e}", entry.id),
-        }
-    }
     Ok(())
 }
 

@@ -24,6 +24,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ExtensionAction,
     },
+    /// Manage model role mappings.
+    Model {
+        #[command(subcommand)]
+        action: ModelAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -36,8 +41,38 @@ pub enum ExtensionAction {
     Disable { id: String },
     /// Show details for an extension.
     Inspect { id: String },
-    /// Instantiate all enabled extensions and call `init()`.
-    Check,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ModelAction {
+    /// Show all role mappings.
+    List,
+    /// Show what a role resolves to.
+    Get {
+        /// Role name (e.g. "default", "fast").
+        role: String,
+    },
+    /// Map a role to a provider/model pair.
+    Set {
+        /// Role name (e.g. "default", "fast").
+        role: String,
+        /// Provider/model reference (e.g. "anthropic/claude-sonnet-4-6").
+        model_ref: String,
+    },
+    /// Show available settings for a role's resolved model.
+    Config {
+        /// Role name to inspect.
+        role: String,
+    },
+    /// Set a provider setting for a role's resolved model.
+    Setting {
+        /// Role name whose model to configure.
+        role: String,
+        /// Setting key (e.g. `thinking_budget`).
+        key: String,
+        /// Setting value (e.g. "8000", "high", "true").
+        value: String,
+    },
 }
 
 /// Prints extensions in a tabular format.
@@ -70,5 +105,3 @@ fn print_row(ext: &ManifestEntry) {
         ext.id, ext.name, slot_display, ext.source, enabled_display
     );
 }
-
-// Rust guideline compliant 2026-02-21

@@ -8,12 +8,6 @@ interface types {
         content: string,
     }
 
-    /// Options for a completion request.
-    record complete-opts {
-        model: option<string>,
-        max-tokens: option<u32>,
-    }
-
     /// Token usage statistics.
     record usage {
         input-tokens: u32,
@@ -37,6 +31,61 @@ interface types {
         key: string,
         value: string,
     }
+
+    /// Schema for an integer setting with bounds and default.
+    record setting-integer {
+        min: s64,
+        max: s64,
+        default-val: s64,
+    }
+
+    /// Schema for an enumeration setting with allowed values and default.
+    record setting-enum {
+        allowed: list<string>,
+        default-val: string,
+    }
+
+    /// Schema for a boolean setting with default.
+    record setting-boolean {
+        default-val: bool,
+    }
+
+    /// Typed schema describing what values a setting accepts.
+    variant setting-schema {
+        integer(setting-integer),
+        enumeration(setting-enum),
+        boolean(setting-boolean),
+    }
+
+    /// Describes a single configurable setting for a model.
+    record setting-descriptor {
+        key: string,
+        name: string,
+        description: string,
+        schema: setting-schema,
+    }
+
+    /// Describes a model offered by an LLM provider.
+    record model-descriptor {
+        id: string,
+        name: string,
+        description: string,
+        is-default: bool,
+        settings: list<setting-descriptor>,
+    }
+
+    /// A typed setting value.
+    variant setting-value {
+        integer(s64),
+        enumeration(string),
+        boolean(bool),
+    }
+
+    /// A key-value pair with a typed value, for passing settings to providers.
+    record config-setting {
+        key: string,
+        value: setting-value,
+    }
 }
 
 /// Platform capabilities imported by all extensions.
@@ -44,13 +93,16 @@ interface types {
 /// Extensions call `host.*` for platform services. The host routes
 /// each call to the active provider for the corresponding slot.
 interface host {
-    use types.{message, complete-opts, completion, session-info, config-entry};
+    use types.{message, completion, session-info, config-entry};
 
     /// Emit a log message to the host.
     log: func(msg: string);
 
     /// Request a completion from the active LLM provider.
-    complete: func(messages: list<message>, opts: option<complete-opts>) -> result<completion, string>;
+    ///
+    /// `role` selects which model mapping to use (e.g. "fast").
+    /// `None` resolves to the "default" role.
+    complete: func(messages: list<message>, role: option<string>) -> result<completion, string>;
 
     /// Load all messages for a session.
     load-session: func(id: string) -> result<list<message>, string>;
@@ -78,10 +130,18 @@ interface extension {
 
 /// Exported by extensions filling the `llm-provider` slot.
 interface llm-provider {
-    use types.{message, complete-opts, completion};
+    use types.{message, completion, model-descriptor, config-setting};
 
-    /// Perform a completion.
-    complete: func(messages: list<message>, opts: option<complete-opts>) -> result<completion, string>;
+    /// The provider's short identifier (e.g. "anthropic", "openai").
+    ///
+    /// Used as the prefix in model references like "anthropic/claude-sonnet-4".
+    provider-id: func() -> string;
+
+    /// Declare available models and their settings schemas.
+    list-models: func() -> list<model-descriptor>;
+
+    /// Perform a completion with a resolved model and typed settings.
+    complete: func(messages: list<message>, model: string, settings: list<config-setting>) -> result<completion, string>;
 }
 
 /// Exported by extensions filling the `session-provider` slot.
