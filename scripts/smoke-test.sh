@@ -129,13 +129,13 @@ run extensions list
 echo ""
 echo "═══ Model role tests ═══"
 
-# Zero-config: list shows default model with no config file
+# List shows default model with no config file
 run model list
 
-# Zero-config: get default resolves to first provider's default model
+# Get default resolves to first provider's default model
 run model get default
 
-# Zero-config: get unknown role falls back to default
+# Get unknown role falls back to default
 run model get fast
 
 # Show available settings for the resolved default model

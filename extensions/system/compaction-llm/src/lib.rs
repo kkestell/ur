@@ -27,5 +27,3 @@ impl CompactionGuest for CompactionLlm {
 }
 
 export!(CompactionLlm);
-
-// Rust guideline compliant 2026-02-21

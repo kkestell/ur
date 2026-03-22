@@ -188,3 +188,188 @@ fn default_value(schema: &wit_types::SettingSchema) -> wit_types::SettingValue {
         wit_types::SettingSchema::Boolean(s) => wit_types::SettingValue::Boolean(s.default_val),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- parse_model_ref tests ---
+
+    #[test]
+    fn parse_model_ref_valid() {
+        assert_eq!(
+            parse_model_ref("anthropic/claude-sonnet-4-6"),
+            Some(("anthropic", "claude-sonnet-4-6"))
+        );
+    }
+
+    #[test]
+    fn parse_model_ref_empty_provider() {
+        assert_eq!(parse_model_ref("/model"), None);
+    }
+
+    #[test]
+    fn parse_model_ref_empty_model() {
+        assert_eq!(parse_model_ref("provider/"), None);
+    }
+
+    #[test]
+    fn parse_model_ref_no_slash() {
+        assert_eq!(parse_model_ref("justprovider"), None);
+    }
+
+    #[test]
+    fn parse_model_ref_multiple_slashes() {
+        assert_eq!(parse_model_ref("a/b/c"), None);
+    }
+
+    // --- resolve_role tests ---
+
+    #[test]
+    fn resolve_role_returns_configured_role() {
+        let mut config = UserConfig::default();
+        config.roles.insert("fast".into(), "openai/gpt-5".into());
+        assert_eq!(config.resolve_role("fast"), Some(("openai", "gpt-5")));
+    }
+
+    #[test]
+    fn resolve_role_returns_none_for_unconfigured() {
+        let config = UserConfig::default();
+        assert_eq!(config.resolve_role("missing"), None);
+    }
+
+    // --- validate_integer tests ---
+
+    #[test]
+    fn validate_integer_within_bounds() {
+        let schema = wit_types::SettingInteger {
+            min: 0,
+            max: 100,
+            default_val: 50,
+        };
+        assert!(validate_integer(50, &schema, "k").is_ok());
+    }
+
+    #[test]
+    fn validate_integer_below_min() {
+        let schema = wit_types::SettingInteger {
+            min: 10,
+            max: 100,
+            default_val: 50,
+        };
+        assert!(validate_integer(5, &schema, "k").is_err());
+    }
+
+    #[test]
+    fn validate_integer_above_max() {
+        let schema = wit_types::SettingInteger {
+            min: 0,
+            max: 100,
+            default_val: 50,
+        };
+        assert!(validate_integer(101, &schema, "k").is_err());
+    }
+
+    #[test]
+    fn validate_integer_at_boundaries() {
+        let schema = wit_types::SettingInteger {
+            min: 0,
+            max: 100,
+            default_val: 50,
+        };
+        assert!(validate_integer(0, &schema, "k").is_ok());
+        assert!(validate_integer(100, &schema, "k").is_ok());
+    }
+
+    // --- validate_enum tests ---
+
+    #[test]
+    fn validate_enum_allowed_value() {
+        let schema = wit_types::SettingEnum {
+            allowed: vec!["a".into(), "b".into()],
+            default_val: "a".into(),
+        };
+        assert!(validate_enum("b", &schema, "k").is_ok());
+    }
+
+    #[test]
+    fn validate_enum_disallowed_value() {
+        let schema = wit_types::SettingEnum {
+            allowed: vec!["a".into(), "b".into()],
+            default_val: "a".into(),
+        };
+        assert!(validate_enum("c", &schema, "k").is_err());
+    }
+
+    // --- settings_for tests ---
+
+    fn make_descriptor(settings: Vec<wit_types::SettingDescriptor>) -> wit_types::ModelDescriptor {
+        wit_types::ModelDescriptor {
+            id: "test-model".into(),
+            name: "Test Model".into(),
+            description: String::new(),
+            is_default: false,
+            settings,
+        }
+    }
+
+    fn int_setting(key: &str, min: i64, max: i64, default: i64) -> wit_types::SettingDescriptor {
+        wit_types::SettingDescriptor {
+            key: key.into(),
+            name: key.into(),
+            description: String::new(),
+            schema: wit_types::SettingSchema::Integer(wit_types::SettingInteger {
+                min,
+                max,
+                default_val: default,
+            }),
+        }
+    }
+
+    #[test]
+    fn settings_for_returns_defaults_when_no_overrides() {
+        let config = UserConfig::default();
+        let desc = make_descriptor(vec![int_setting("budget", 0, 10000, 4000)]);
+        let settings = config.settings_for("anthropic", "claude", &desc).unwrap();
+        assert_eq!(settings.len(), 1);
+        assert_eq!(settings[0].key, "budget");
+        assert!(matches!(
+            settings[0].value,
+            wit_types::SettingValue::Integer(4000)
+        ));
+    }
+
+    #[test]
+    fn settings_for_returns_overridden_values() {
+        let mut config = UserConfig::default();
+        config
+            .providers
+            .entry("anthropic".into())
+            .or_default()
+            .entry("claude".into())
+            .or_default()
+            .insert("budget".into(), toml::Value::Integer(8000));
+
+        let desc = make_descriptor(vec![int_setting("budget", 0, 10000, 4000)]);
+        let settings = config.settings_for("anthropic", "claude", &desc).unwrap();
+        assert!(matches!(
+            settings[0].value,
+            wit_types::SettingValue::Integer(8000)
+        ));
+    }
+
+    #[test]
+    fn settings_for_rejects_invalid_override() {
+        let mut config = UserConfig::default();
+        config
+            .providers
+            .entry("anthropic".into())
+            .or_default()
+            .entry("claude".into())
+            .or_default()
+            .insert("budget".into(), toml::Value::Integer(99999));
+
+        let desc = make_descriptor(vec![int_setting("budget", 0, 10000, 4000)]);
+        assert!(config.settings_for("anthropic", "claude", &desc).is_err());
+    }
+}

@@ -80,7 +80,7 @@ pub fn collect_provider_models(
 /// Resolves a role to `(provider_id, model_id)`.
 ///
 /// Tries the requested role, falls back to `"default"`, then falls back
-/// to the first provider's default model (zero-config).
+/// to the first provider's default model.
 pub fn resolve_role(
     config: &UserConfig,
     role: &str,
@@ -227,4 +227,158 @@ pub fn cmd_setting(
 
     println!("{provider_id}/{model_id}: {key} = {value}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn descriptor(id: &str, is_default: bool) -> wit_types::ModelDescriptor {
+        wit_types::ModelDescriptor {
+            id: id.into(),
+            name: id.into(),
+            description: String::new(),
+            is_default,
+            settings: vec![],
+        }
+    }
+
+    fn sample_providers() -> ProviderModels {
+        let mut pm = BTreeMap::new();
+        pm.insert(
+            "anthropic".into(),
+            vec![
+                descriptor("claude-sonnet", true),
+                descriptor("claude-opus", false),
+            ],
+        );
+        pm.insert("openai".into(), vec![descriptor("gpt-5", false)]);
+        pm
+    }
+
+    // --- resolve_role tests ---
+
+    #[test]
+    fn resolve_role_explicit_mapping() {
+        let mut config = UserConfig::default();
+        config.roles.insert("fast".into(), "openai/gpt-5".into());
+        let pm = sample_providers();
+        let (p, m) = resolve_role(&config, "fast", &pm).unwrap();
+        assert_eq!(p, "openai");
+        assert_eq!(m, "gpt-5");
+    }
+
+    #[test]
+    fn resolve_role_falls_back_to_default() {
+        let mut config = UserConfig::default();
+        config
+            .roles
+            .insert("default".into(), "anthropic/claude-opus".into());
+        let pm = sample_providers();
+        let (p, m) = resolve_role(&config, "unknown-role", &pm).unwrap();
+        assert_eq!(p, "anthropic");
+        assert_eq!(m, "claude-opus");
+    }
+
+    #[test]
+    fn resolve_role_falls_back_to_first_provider_default_model() {
+        let config = UserConfig::default();
+        let pm = sample_providers();
+        let (p, m) = resolve_role(&config, "anything", &pm).unwrap();
+        assert_eq!(p, "anthropic");
+        assert_eq!(m, "claude-sonnet");
+    }
+
+    #[test]
+    fn resolve_role_no_providers_errors() {
+        let config = UserConfig::default();
+        let pm = BTreeMap::new();
+        assert!(resolve_role(&config, "default", &pm).is_err());
+    }
+
+    // --- find_descriptor tests ---
+
+    #[test]
+    fn find_descriptor_known_provider_and_model() {
+        let pm = sample_providers();
+        let d = find_descriptor(&pm, "anthropic", "claude-opus").unwrap();
+        assert_eq!(d.id, "claude-opus");
+    }
+
+    #[test]
+    fn find_descriptor_unknown_provider() {
+        let pm = sample_providers();
+        assert!(find_descriptor(&pm, "google", "gemini").is_none());
+    }
+
+    #[test]
+    fn find_descriptor_unknown_model_in_known_provider() {
+        let pm = sample_providers();
+        assert!(find_descriptor(&pm, "anthropic", "nonexistent").is_none());
+    }
+
+    // --- parse_setting_value tests ---
+
+    fn int_schema(min: i64, max: i64) -> wit_types::SettingSchema {
+        wit_types::SettingSchema::Integer(wit_types::SettingInteger {
+            min,
+            max,
+            default_val: min,
+        })
+    }
+
+    fn enum_schema(allowed: &[&str]) -> wit_types::SettingSchema {
+        wit_types::SettingSchema::Enumeration(wit_types::SettingEnum {
+            allowed: allowed.iter().map(|s| s.to_string()).collect(),
+            default_val: allowed[0].to_string(),
+        })
+    }
+
+    fn bool_schema() -> wit_types::SettingSchema {
+        wit_types::SettingSchema::Boolean(wit_types::SettingBoolean { default_val: false })
+    }
+
+    #[test]
+    fn parse_setting_value_integer_valid() {
+        let v = parse_setting_value("50", &int_schema(0, 100), "k").unwrap();
+        assert_eq!(v, toml::Value::Integer(50));
+    }
+
+    #[test]
+    fn parse_setting_value_integer_out_of_bounds() {
+        assert!(parse_setting_value("200", &int_schema(0, 100), "k").is_err());
+    }
+
+    #[test]
+    fn parse_setting_value_integer_non_numeric() {
+        assert!(parse_setting_value("abc", &int_schema(0, 100), "k").is_err());
+    }
+
+    #[test]
+    fn parse_setting_value_enum_valid() {
+        let v = parse_setting_value("high", &enum_schema(&["low", "high"]), "k").unwrap();
+        assert_eq!(v, toml::Value::String("high".into()));
+    }
+
+    #[test]
+    fn parse_setting_value_enum_invalid() {
+        assert!(parse_setting_value("nope", &enum_schema(&["low", "high"]), "k").is_err());
+    }
+
+    #[test]
+    fn parse_setting_value_boolean_true() {
+        let v = parse_setting_value("true", &bool_schema(), "k").unwrap();
+        assert_eq!(v, toml::Value::Boolean(true));
+    }
+
+    #[test]
+    fn parse_setting_value_boolean_false() {
+        let v = parse_setting_value("false", &bool_schema(), "k").unwrap();
+        assert_eq!(v, toml::Value::Boolean(false));
+    }
+
+    #[test]
+    fn parse_setting_value_boolean_invalid() {
+        assert!(parse_setting_value("yes", &bool_schema(), "k").is_err());
+    }
 }

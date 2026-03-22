@@ -19,5 +19,3 @@ impl ExtGuest for TestExtension {
 }
 
 export!(TestExtension);
-
-// Rust guideline compliant 2026-02-21

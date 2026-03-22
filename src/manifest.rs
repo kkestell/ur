@@ -220,4 +220,268 @@ fn find_entry_index(manifest: &WorkspaceManifest, id: &str) -> Result<usize> {
         .ok_or_else(|| anyhow::anyhow!("extension not found: {id}"))
 }
 
-// Rust guideline compliant 2026-02-21
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(id: &str, slot: Option<&str>, source: &str, enabled: bool) -> ManifestEntry {
+        ManifestEntry {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            slot: slot.map(str::to_owned),
+            source: source.to_owned(),
+            wasm_path: String::new(),
+            checksum: String::new(),
+            enabled,
+        }
+    }
+
+    fn discovered(id: &str, slot: Option<&str>, source: SourceTier) -> DiscoveredExtension {
+        DiscoveredExtension {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            slot: slot.map(str::to_owned),
+            source,
+            wasm_path: PathBuf::new(),
+            checksum: String::new(),
+        }
+    }
+
+    fn manifest(entries: Vec<ManifestEntry>) -> WorkspaceManifest {
+        WorkspaceManifest {
+            workspace: "/test".to_owned(),
+            extensions: entries,
+        }
+    }
+
+    // --- merge tests ---
+
+    #[test]
+    fn merge_fresh_defaults_system_enabled_user_disabled() {
+        let result = merge(
+            None,
+            vec![
+                discovered("sys", Some("llm-provider"), SourceTier::System),
+                discovered("usr", Some("llm-provider"), SourceTier::User),
+                discovered("ws", Some("llm-provider"), SourceTier::Workspace),
+            ],
+            Path::new("/test"),
+        );
+        assert!(
+            result
+                .extensions
+                .iter()
+                .find(|e| e.id == "sys")
+                .unwrap()
+                .enabled
+        );
+        assert!(
+            !result
+                .extensions
+                .iter()
+                .find(|e| e.id == "usr")
+                .unwrap()
+                .enabled
+        );
+        assert!(
+            !result
+                .extensions
+                .iter()
+                .find(|e| e.id == "ws")
+                .unwrap()
+                .enabled
+        );
+    }
+
+    #[test]
+    fn merge_preserves_existing_enabled_state() {
+        let existing = manifest(vec![
+            entry("a", Some("llm-provider"), "system", false), // was disabled
+        ]);
+        let result = merge(
+            Some(existing),
+            vec![discovered("a", Some("llm-provider"), SourceTier::System)],
+            Path::new("/test"),
+        );
+        assert!(!result.extensions[0].enabled);
+    }
+
+    #[test]
+    fn merge_drops_extensions_no_longer_discovered() {
+        let existing = manifest(vec![
+            entry("gone", Some("llm-provider"), "system", true),
+            entry("kept", Some("llm-provider"), "system", true),
+        ]);
+        let result = merge(
+            Some(existing),
+            vec![discovered("kept", Some("llm-provider"), SourceTier::System)],
+            Path::new("/test"),
+        );
+        assert_eq!(result.extensions.len(), 1);
+        assert_eq!(result.extensions[0].id, "kept");
+    }
+
+    #[test]
+    fn merge_adds_new_extensions_alongside_existing() {
+        let existing = manifest(vec![entry("old", Some("llm-provider"), "system", true)]);
+        let result = merge(
+            Some(existing),
+            vec![
+                discovered("old", Some("llm-provider"), SourceTier::System),
+                discovered("new", Some("llm-provider"), SourceTier::User),
+            ],
+            Path::new("/test"),
+        );
+        assert_eq!(result.extensions.len(), 2);
+        assert!(
+            result
+                .extensions
+                .iter()
+                .find(|e| e.id == "old")
+                .unwrap()
+                .enabled
+        );
+        assert!(
+            !result
+                .extensions
+                .iter()
+                .find(|e| e.id == "new")
+                .unwrap()
+                .enabled
+        );
+    }
+
+    // --- enable tests ---
+
+    #[test]
+    fn enable_disabled_extension_succeeds() {
+        let mut m = manifest(vec![entry("a", Some("llm-provider"), "system", false)]);
+        assert!(enable(&mut m, "a").is_ok());
+        assert!(m.extensions[0].enabled);
+    }
+
+    #[test]
+    fn enable_already_enabled_returns_error() {
+        let mut m = manifest(vec![entry("a", Some("llm-provider"), "system", true)]);
+        assert!(enable(&mut m, "a").is_err());
+    }
+
+    #[test]
+    fn enable_exactly_one_slot_disables_current_occupant() {
+        let mut m = manifest(vec![
+            entry("a", Some("session-provider"), "system", true),
+            entry("b", Some("session-provider"), "user", false),
+        ]);
+        assert!(enable(&mut m, "b").is_ok());
+        assert!(!m.extensions[0].enabled); // a was switched off
+        assert!(m.extensions[1].enabled); // b is now on
+    }
+
+    #[test]
+    fn enable_at_least_one_slot_does_not_disable_others() {
+        let mut m = manifest(vec![
+            entry("a", Some("llm-provider"), "system", true),
+            entry("b", Some("llm-provider"), "user", false),
+        ]);
+        assert!(enable(&mut m, "b").is_ok());
+        assert!(m.extensions[0].enabled); // a still on
+        assert!(m.extensions[1].enabled);
+    }
+
+    #[test]
+    fn enable_unknown_extension_returns_error() {
+        let mut m = manifest(vec![]);
+        assert!(enable(&mut m, "nope").is_err());
+    }
+
+    // --- disable tests ---
+
+    #[test]
+    fn disable_enabled_extension_succeeds() {
+        let mut m = manifest(vec![
+            entry("a", Some("llm-provider"), "system", true),
+            entry("b", Some("llm-provider"), "system", true),
+            entry("c", Some("session-provider"), "system", true),
+            entry("d", Some("compaction-provider"), "system", true),
+        ]);
+        assert!(disable(&mut m, "a").is_ok());
+        assert!(!m.extensions[0].enabled);
+    }
+
+    #[test]
+    fn disable_already_disabled_returns_error() {
+        let mut m = manifest(vec![entry("a", Some("llm-provider"), "system", false)]);
+        assert!(disable(&mut m, "a").is_err());
+    }
+
+    #[test]
+    fn disable_last_provider_of_required_slot_returns_error() {
+        let mut m = manifest(vec![
+            entry("a", Some("session-provider"), "system", true),
+            entry("b", Some("compaction-provider"), "system", true),
+            entry("c", Some("llm-provider"), "system", true),
+        ]);
+        assert!(disable(&mut m, "a").is_err());
+    }
+
+    #[test]
+    fn disable_one_of_multiple_at_least_one_succeeds() {
+        let mut m = manifest(vec![
+            entry("a", Some("llm-provider"), "system", true),
+            entry("b", Some("llm-provider"), "system", true),
+            entry("c", Some("session-provider"), "system", true),
+            entry("d", Some("compaction-provider"), "system", true),
+        ]);
+        assert!(disable(&mut m, "a").is_ok());
+    }
+
+    #[test]
+    fn disable_unknown_extension_returns_error() {
+        let mut m = manifest(vec![]);
+        assert!(disable(&mut m, "nope").is_err());
+    }
+
+    // --- find_entry / find_entry_index tests ---
+
+    #[test]
+    fn find_entry_returns_correct_entry() {
+        let m = manifest(vec![
+            entry("a", None, "system", true),
+            entry("b", None, "user", false),
+        ]);
+        let e = find_entry(&m, "b").unwrap();
+        assert_eq!(e.id, "b");
+        assert_eq!(e.source, "user");
+    }
+
+    #[test]
+    fn find_entry_returns_error_for_unknown() {
+        let m = manifest(vec![]);
+        assert!(find_entry(&m, "nope").is_err());
+    }
+
+    #[test]
+    fn find_entry_index_returns_correct_index() {
+        let m = manifest(vec![
+            entry("a", None, "system", true),
+            entry("b", None, "user", false),
+        ]);
+        assert_eq!(find_entry_index(&m, "b").unwrap(), 1);
+    }
+
+    #[test]
+    fn find_entry_index_returns_error_for_unknown() {
+        let m = manifest(vec![]);
+        assert!(find_entry_index(&m, "nope").is_err());
+    }
+
+    // --- escape_workspace_path test ---
+
+    #[test]
+    fn escape_workspace_path_replaces_slashes() {
+        // Use a path that won't be canonicalized (non-existent)
+        let escaped = escape_workspace_path(Path::new("/foo/bar/baz"));
+        // canonicalize fails for non-existent, so falls back to raw path
+        assert_eq!(escaped, "foo_bar_baz");
+    }
+}

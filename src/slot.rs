@@ -96,4 +96,100 @@ pub fn validate_required_slots<'a>(
     }
 }
 
-// Rust guideline compliant 2026-02-21
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_slot_returns_known_slots() {
+        for name in ["session-provider", "compaction-provider", "llm-provider"] {
+            assert!(find_slot(name).is_some(), "expected Some for {name}");
+            assert_eq!(find_slot(name).unwrap().name, name);
+        }
+    }
+
+    #[test]
+    fn find_slot_returns_none_for_unknown() {
+        assert!(find_slot("bogus-slot").is_none());
+    }
+
+    #[test]
+    fn validate_slot_name_ok_for_known() {
+        assert!(validate_slot_name("llm-provider").is_ok());
+    }
+
+    #[test]
+    fn validate_slot_name_err_for_unknown() {
+        assert!(validate_slot_name("bogus").is_err());
+    }
+
+    // Helper: build entries for validate_required_slots
+    fn entries(items: &[(&str, bool)]) -> Vec<(Option<String>, bool)> {
+        items
+            .iter()
+            .map(|(slot, enabled)| (Some(slot.to_string()), *enabled))
+            .collect()
+    }
+
+    #[test]
+    fn validate_required_slots_passes_when_satisfied() {
+        let e = entries(&[
+            ("session-provider", true),
+            ("compaction-provider", true),
+            ("llm-provider", true),
+        ]);
+        assert!(validate_required_slots(e.iter().map(|(s, en)| (s, *en))).is_ok());
+    }
+
+    #[test]
+    fn validate_required_slots_fails_exactly_one_zero_providers() {
+        let e = entries(&[
+            // no session-provider
+            ("compaction-provider", true),
+            ("llm-provider", true),
+        ]);
+        assert!(validate_required_slots(e.iter().map(|(s, en)| (s, *en))).is_err());
+    }
+
+    #[test]
+    fn validate_required_slots_fails_exactly_one_two_providers() {
+        let e = entries(&[
+            ("session-provider", true),
+            ("session-provider", true), // duplicate
+            ("compaction-provider", true),
+            ("llm-provider", true),
+        ]);
+        assert!(validate_required_slots(e.iter().map(|(s, en)| (s, *en))).is_err());
+    }
+
+    #[test]
+    fn validate_required_slots_fails_at_least_one_zero_providers() {
+        let e = entries(&[
+            ("session-provider", true),
+            ("compaction-provider", true),
+            // no llm-provider
+        ]);
+        assert!(validate_required_slots(e.iter().map(|(s, en)| (s, *en))).is_err());
+    }
+
+    #[test]
+    fn validate_required_slots_passes_at_least_one_multiple_providers() {
+        let e = entries(&[
+            ("session-provider", true),
+            ("compaction-provider", true),
+            ("llm-provider", true),
+            ("llm-provider", true),
+        ]);
+        assert!(validate_required_slots(e.iter().map(|(s, en)| (s, *en))).is_ok());
+    }
+
+    #[test]
+    fn validate_required_slots_disabled_not_counted() {
+        let e = entries(&[
+            ("session-provider", false), // disabled
+            ("compaction-provider", true),
+            ("llm-provider", true),
+        ]);
+        assert!(validate_required_slots(e.iter().map(|(s, en)| (s, *en))).is_err());
+    }
+}
