@@ -37,6 +37,13 @@ fn parse_setting_value(
                 .map_err(|_err| anyhow::anyhow!("setting '{key}': '{raw}' is not a boolean"))?;
             Ok(toml::Value::Boolean(b))
         }
+        wit_types::SettingSchema::Number(num_schema) => {
+            let n: f64 = raw
+                .parse()
+                .map_err(|_err| anyhow::anyhow!("setting '{key}': '{raw}' is not a number"))?;
+            config::validate_number(n, num_schema, key)?;
+            Ok(toml::Value::Float(n))
+        }
     }
 }
 
@@ -186,6 +193,12 @@ pub fn cmd_config(config: &UserConfig, provider_models: &ProviderModels, role: &
             }
             wit_types::SettingSchema::Boolean(s) => {
                 format!("boolean  (default: {})", s.default_val)
+            }
+            wit_types::SettingSchema::Number(s) => {
+                format!(
+                    "number  {}..{}  (default: {})",
+                    s.min, s.max, s.default_val
+                )
             }
         };
         println!("  {:<20}{type_info}", setting.key);
@@ -410,6 +423,38 @@ mod tests {
     #[test]
     fn parse_setting_value_boolean_invalid() {
         parse_setting_value("yes", &bool_schema(), "k").unwrap_err();
+    }
+
+    // --- parse_setting_value number tests ---
+
+    fn num_schema(min: f64, max: f64) -> wit_types::SettingSchema {
+        wit_types::SettingSchema::Number(wit_types::SettingNumber {
+            min,
+            max,
+            default_val: min,
+        })
+    }
+
+    #[test]
+    fn parse_setting_value_number_valid() {
+        let v = parse_setting_value("0.7", &num_schema(0.0, 2.0), "k").unwrap();
+        assert_eq!(v, toml::Value::Float(0.7));
+    }
+
+    #[test]
+    fn parse_setting_value_number_integer_string() {
+        let v = parse_setting_value("1", &num_schema(0.0, 2.0), "k").unwrap();
+        assert_eq!(v, toml::Value::Float(1.0));
+    }
+
+    #[test]
+    fn parse_setting_value_number_out_of_bounds() {
+        parse_setting_value("5.0", &num_schema(0.0, 2.0), "k").unwrap_err();
+    }
+
+    #[test]
+    fn parse_setting_value_number_non_numeric() {
+        parse_setting_value("abc", &num_schema(0.0, 2.0), "k").unwrap_err();
     }
 
     // --- format_property tests ---

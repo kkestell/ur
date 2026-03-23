@@ -148,6 +148,26 @@ pub(crate) fn validate_enum(s: &str, schema: &wit_types::SettingEnum, key: &str)
     Ok(())
 }
 
+/// Validates that a float falls within the schema's bounds.
+///
+/// # Errors
+///
+/// Returns an error if `n` is outside `[schema.min, schema.max]`.
+pub(crate) fn validate_number(
+    n: f64,
+    schema: &wit_types::SettingNumber,
+    key: &str,
+) -> Result<()> {
+    if n < schema.min || n > schema.max {
+        bail!(
+            "setting '{key}': {n} is outside range {}..{}",
+            schema.min,
+            schema.max
+        );
+    }
+    Ok(())
+}
+
 /// Converts a TOML value to a typed `SettingValue` according to the schema.
 fn convert_toml_value(
     val: &toml::Value,
@@ -175,6 +195,14 @@ fn convert_toml_value(
                 .ok_or_else(|| anyhow::anyhow!("setting '{key}': expected boolean"))?;
             Ok(wit_types::SettingValue::Boolean(b))
         }
+        wit_types::SettingSchema::Number(num_schema) => {
+            let n = val
+                .as_float()
+                .or_else(|| val.as_integer().map(|i| i as f64))
+                .ok_or_else(|| anyhow::anyhow!("setting '{key}': expected number"))?;
+            validate_number(n, num_schema, key)?;
+            Ok(wit_types::SettingValue::Number(n))
+        }
     }
 }
 
@@ -186,6 +214,7 @@ fn default_value(schema: &wit_types::SettingSchema) -> wit_types::SettingValue {
             wit_types::SettingValue::Enumeration(s.default_val.clone())
         }
         wit_types::SettingSchema::Boolean(s) => wit_types::SettingValue::Boolean(s.default_val),
+        wit_types::SettingSchema::Number(s) => wit_types::SettingValue::Number(s.default_val),
     }
 }
 
@@ -377,6 +406,137 @@ mod tests {
         let desc = make_descriptor(vec![int_setting("budget", 0, 10000, 4000)]);
         config
             .settings_for("anthropic", "claude", &desc)
+            .unwrap_err();
+    }
+
+    // --- validate_number tests ---
+
+    #[test]
+    fn validate_number_within_bounds() {
+        let schema = wit_types::SettingNumber {
+            min: 0.0,
+            max: 2.0,
+            default_val: 1.0,
+        };
+        validate_number(1.0, &schema, "k").unwrap();
+    }
+
+    #[test]
+    fn validate_number_below_min() {
+        let schema = wit_types::SettingNumber {
+            min: 0.0,
+            max: 2.0,
+            default_val: 1.0,
+        };
+        assert!(validate_number(-0.1, &schema, "k").is_err());
+    }
+
+    #[test]
+    fn validate_number_above_max() {
+        let schema = wit_types::SettingNumber {
+            min: 0.0,
+            max: 2.0,
+            default_val: 1.0,
+        };
+        assert!(validate_number(2.1, &schema, "k").is_err());
+    }
+
+    #[test]
+    fn validate_number_at_boundaries() {
+        let schema = wit_types::SettingNumber {
+            min: 0.0,
+            max: 2.0,
+            default_val: 1.0,
+        };
+        validate_number(0.0, &schema, "k").unwrap();
+        validate_number(2.0, &schema, "k").unwrap();
+    }
+
+    // --- number settings_for tests ---
+
+    fn num_setting(key: &str, min: f64, max: f64, default: f64) -> wit_types::SettingDescriptor {
+        wit_types::SettingDescriptor {
+            key: key.into(),
+            name: key.into(),
+            description: String::new(),
+            schema: wit_types::SettingSchema::Number(wit_types::SettingNumber {
+                min,
+                max,
+                default_val: default,
+            }),
+        }
+    }
+
+    #[test]
+    fn settings_for_number_returns_default() {
+        let config = UserConfig::default();
+        let desc = make_descriptor(vec![num_setting("temperature", 0.0, 2.0, 1.0)]);
+        let settings = config
+            .settings_for("provider", "model", &desc)
+            .unwrap();
+        assert_eq!(settings[0].key, "temperature");
+        assert!(matches!(
+            settings[0].value,
+            wit_types::SettingValue::Number(v) if (v - 1.0).abs() < f64::EPSILON
+        ));
+    }
+
+    #[test]
+    fn settings_for_number_override_from_float() {
+        let mut config = UserConfig::default();
+        config
+            .providers
+            .entry("provider".into())
+            .or_default()
+            .entry("model".into())
+            .or_default()
+            .insert("temperature".into(), toml::Value::Float(0.7));
+
+        let desc = make_descriptor(vec![num_setting("temperature", 0.0, 2.0, 1.0)]);
+        let settings = config
+            .settings_for("provider", "model", &desc)
+            .unwrap();
+        assert!(matches!(
+            settings[0].value,
+            wit_types::SettingValue::Number(v) if (v - 0.7).abs() < f64::EPSILON
+        ));
+    }
+
+    #[test]
+    fn settings_for_number_override_from_integer() {
+        let mut config = UserConfig::default();
+        config
+            .providers
+            .entry("provider".into())
+            .or_default()
+            .entry("model".into())
+            .or_default()
+            .insert("temperature".into(), toml::Value::Integer(1));
+
+        let desc = make_descriptor(vec![num_setting("temperature", 0.0, 2.0, 1.0)]);
+        let settings = config
+            .settings_for("provider", "model", &desc)
+            .unwrap();
+        assert!(matches!(
+            settings[0].value,
+            wit_types::SettingValue::Number(v) if (v - 1.0).abs() < f64::EPSILON
+        ));
+    }
+
+    #[test]
+    fn settings_for_number_rejects_out_of_range() {
+        let mut config = UserConfig::default();
+        config
+            .providers
+            .entry("provider".into())
+            .or_default()
+            .entry("model".into())
+            .or_default()
+            .insert("temperature".into(), toml::Value::Float(5.0));
+
+        let desc = make_descriptor(vec![num_setting("temperature", 0.0, 2.0, 1.0)]);
+        config
+            .settings_for("provider", "model", &desc)
             .unwrap_err();
     }
 }

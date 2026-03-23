@@ -73,11 +73,19 @@ interface types {
         default-val: bool,
     }
 
+    /// Schema for a floating-point setting with bounds and default.
+    record setting-number {
+        min: f64,
+        max: f64,
+        default-val: f64,
+    }
+
     /// Typed schema describing what values a setting accepts.
     variant setting-schema {
         integer(setting-integer),
         enumeration(setting-enum),
         boolean(setting-boolean),
+        number(setting-number),
     }
 
     /// Describes a single configurable setting for a model.
@@ -107,6 +115,7 @@ interface types {
         integer(s64),
         enumeration(string),
         boolean(bool),
+        number(f64),
     }
 
     /// A key-value pair with a typed value, for passing settings to providers.
