@@ -8,7 +8,7 @@ from smoke_test.harness import SmokeHarness
 from smoke_test import (
     test_agent_turn,
     test_extensions,
-    test_integration,
+    test_google_provider,
     test_model_roles,
     test_model_settings,
 )
@@ -23,7 +23,7 @@ def main() -> None:
             test_model_roles,
             test_model_settings,
             test_agent_turn,
-            test_integration,
+            test_google_provider,
         ):
             print()
             print(f"═══ {module.__name__.split('.')[-1]} ═══")

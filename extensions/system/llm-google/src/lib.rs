@@ -13,7 +13,7 @@ use exports::ur::extension::llm_streaming_provider::{
 };
 use ur::extension::types::{
     Completion, CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
-    SettingDescriptor, SettingInteger, SettingSchema, ToolCall, ToolDescriptor, Usage,
+    SettingDescriptor, SettingEnum, SettingInteger, SettingSchema, ToolCall, ToolDescriptor, Usage,
 };
 use wasi::http::outgoing_handler;
 use wasi::http::types::{Fields, IncomingBody, Method, OutgoingBody, OutgoingRequest, Scheme};
@@ -32,6 +32,18 @@ fn get_api_key() -> Result<String, String> {
 }
 
 struct LlmGoogle;
+
+const GEMINI_3_FLASH_PREVIEW: &str = "gemini-3-flash-preview";
+const GEMINI_3_1_PRO_PREVIEW: &str = "gemini-3.1-pro-preview";
+const GEMINI_3_1_FLASH_LITE_PREVIEW: &str = "gemini-3.1-flash-lite-preview";
+
+// Gemini 3.1 text models advertise up to 64k output tokens in the current docs.
+const GOOGLE_MAX_OUTPUT_TOKENS: i64 = 65_536;
+const GOOGLE_DEFAULT_MAX_OUTPUT_TOKENS: i64 = 8_192;
+
+const FLASH_THINKING_LEVELS: &[&str] = &["minimal", "low", "medium", "high"];
+const PRO_THINKING_LEVELS: &[&str] = &["low", "medium", "high"];
+const FLASH_LITE_THINKING_LEVELS: &[&str] = &["minimal", "low", "medium", "high"];
 
 // ── Extension lifecycle ──────────────────────────────────────────────
 
@@ -71,20 +83,30 @@ impl LlmGuest for LlmGoogle {
 
     fn list_models() -> Vec<ModelDescriptor> {
         vec![
-            ModelDescriptor {
-                id: "gemini-3-flash-preview".into(),
-                name: "Gemini 3 Flash Preview".into(),
-                description: "Fast and efficient model".into(),
-                is_default: true,
-                settings: model_settings(),
-            },
-            ModelDescriptor {
-                id: "gemini-3-pro-preview".into(),
-                name: "Gemini 3 Pro Preview".into(),
-                description: "Most capable model".into(),
-                is_default: false,
-                settings: model_settings(),
-            },
+            model_descriptor(
+                GEMINI_3_FLASH_PREVIEW,
+                "Gemini 3 Flash Preview",
+                "Gemini 3 Flash preview with 1M context, 64k output, and Jan 2025 knowledge.",
+                true,
+                FLASH_THINKING_LEVELS,
+                "high",
+            ),
+            model_descriptor(
+                GEMINI_3_1_PRO_PREVIEW,
+                "Gemini 3.1 Pro Preview",
+                "Gemini 3.1 Pro preview with 1M context, 64k output, and Jan 2025 knowledge.",
+                false,
+                PRO_THINKING_LEVELS,
+                "high",
+            ),
+            model_descriptor(
+                GEMINI_3_1_FLASH_LITE_PREVIEW,
+                "Gemini 3.1 Flash-Lite Preview",
+                "Gemini 3.1 Flash-Lite preview with 1M context, 64k output, and Jan 2025 knowledge.",
+                false,
+                FLASH_LITE_THINKING_LEVELS,
+                "minimal",
+            ),
         ]
     }
 
@@ -377,24 +399,27 @@ fn build_request_body(
 
     // Generation config from settings.
     let mut gen_config = serde_json::Map::new();
+    let mut thinking_config = serde_json::Map::new();
     for s in settings {
         match s.key.as_str() {
-            "temperature" => {
-                if let ur::extension::types::SettingValue::Integer(v) = &s.value {
-                    // Temperature is an int 0–200 representing 0.0–2.0.
-                    if let Ok(basis_points) = u16::try_from(*v) {
-                        let temp = f64::from(basis_points) / 100.0;
-                        gen_config.insert("temperature".into(), serde_json::json!(temp));
-                    }
-                }
-            }
             "max_output_tokens" => {
                 if let ur::extension::types::SettingValue::Integer(v) = &s.value {
                     gen_config.insert("maxOutputTokens".into(), serde_json::json!(v));
                 }
             }
+            "thinking_level" => {
+                if let ur::extension::types::SettingValue::Enumeration(level) = &s.value {
+                    thinking_config.insert("thinkingLevel".into(), serde_json::json!(level));
+                }
+            }
             _ => {}
         }
+    }
+    if !thinking_config.is_empty() {
+        gen_config.insert(
+            "thinkingConfig".into(),
+            serde_json::Value::Object(thinking_config),
+        );
     }
     if !gen_config.is_empty() {
         body.insert(
@@ -661,26 +686,48 @@ fn http_post_streaming(
 
 // ── Settings helpers ────────────────────────────────────────────────
 
-fn model_settings() -> Vec<SettingDescriptor> {
+fn model_descriptor(
+    id: &str,
+    name: &str,
+    description: &str,
+    is_default: bool,
+    thinking_levels: &[&str],
+    default_thinking_level: &str,
+) -> ModelDescriptor {
+    ModelDescriptor {
+        id: id.into(),
+        name: name.into(),
+        description: description.into(),
+        is_default,
+        settings: model_settings(thinking_levels, default_thinking_level),
+    }
+}
+
+fn model_settings(
+    thinking_levels: &[&str],
+    default_thinking_level: &str,
+) -> Vec<SettingDescriptor> {
     vec![
-        SettingDescriptor {
-            key: "temperature".into(),
-            name: "Temperature".into(),
-            description: "Sampling temperature (0-200, represents 0.0-2.0)".into(),
-            schema: SettingSchema::Integer(SettingInteger {
-                min: 0,
-                max: 200,
-                default_val: 100,
-            }),
-        },
         SettingDescriptor {
             key: "max_output_tokens".into(),
             name: "Max Output Tokens".into(),
             description: "Maximum number of tokens to generate".into(),
             schema: SettingSchema::Integer(SettingInteger {
                 min: 1,
-                max: 65536,
-                default_val: 8192,
+                max: GOOGLE_MAX_OUTPUT_TOKENS,
+                default_val: GOOGLE_DEFAULT_MAX_OUTPUT_TOKENS,
+            }),
+        },
+        SettingDescriptor {
+            key: "thinking_level".into(),
+            name: "Thinking Level".into(),
+            description: "Relative reasoning depth for Gemini 3.1 models".into(),
+            schema: SettingSchema::Enumeration(SettingEnum {
+                allowed: thinking_levels
+                    .iter()
+                    .map(|level| (*level).to_owned())
+                    .collect(),
+                default_val: default_thinking_level.into(),
             }),
         },
     ]
@@ -691,6 +738,20 @@ export!(LlmGoogle);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn model_by_id<'a>(models: &'a [ModelDescriptor], id: &str) -> &'a ModelDescriptor {
+        models
+            .iter()
+            .find(|model| model.id == id)
+            .expect("model descriptor")
+    }
+
+    fn setting_by_key<'a>(settings: &'a [SettingDescriptor], key: &str) -> &'a SettingDescriptor {
+        settings
+            .iter()
+            .find(|setting| setting.key == key)
+            .expect("setting descriptor")
+    }
 
     fn text_chunk_json(text: &str) -> String {
         serde_json::json!({
@@ -770,6 +831,75 @@ mod tests {
     }
 
     #[test]
+    fn list_models_advertises_current_gemini_3_text_models() {
+        let models = LlmGoogle::list_models();
+        let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
+
+        assert_eq!(
+            ids,
+            vec![
+                "gemini-3-flash-preview",
+                "gemini-3.1-pro-preview",
+                "gemini-3.1-flash-lite-preview",
+            ]
+        );
+        assert_eq!(
+            models
+                .iter()
+                .find(|model| model.is_default)
+                .map(|model| model.id.as_str()),
+            Some("gemini-3-flash-preview")
+        );
+    }
+
+    #[test]
+    fn list_models_exposes_model_specific_thinking_levels() {
+        let models = LlmGoogle::list_models();
+
+        let flash = model_by_id(&models, "gemini-3-flash-preview");
+        let pro = model_by_id(&models, "gemini-3.1-pro-preview");
+        let flash_lite = model_by_id(&models, "gemini-3.1-flash-lite-preview");
+
+        for model in [&flash, &pro, &flash_lite] {
+            assert!(
+                model
+                    .settings
+                    .iter()
+                    .any(|setting| setting.key == "max_output_tokens")
+            );
+            assert!(
+                !model
+                    .settings
+                    .iter()
+                    .any(|setting| setting.key == "temperature")
+            );
+        }
+
+        let flash_thinking = setting_by_key(&flash.settings, "thinking_level");
+        let pro_thinking = setting_by_key(&pro.settings, "thinking_level");
+        let flash_lite_thinking = setting_by_key(&flash_lite.settings, "thinking_level");
+
+        assert!(matches!(
+            &flash_thinking.schema,
+            SettingSchema::Enumeration(schema)
+                if schema.allowed == vec!["minimal", "low", "medium", "high"]
+                    && schema.default_val == "high"
+        ));
+        assert!(matches!(
+            &pro_thinking.schema,
+            SettingSchema::Enumeration(schema)
+                if schema.allowed == vec!["low", "medium", "high"]
+                    && schema.default_val == "high"
+        ));
+        assert!(matches!(
+            &flash_lite_thinking.schema,
+            SettingSchema::Enumeration(schema)
+                if schema.allowed == vec!["minimal", "low", "medium", "high"]
+                    && schema.default_val == "minimal"
+        ));
+    }
+
+    #[test]
     fn message_to_gemini_includes_function_response_name_and_id() {
         let message = Message {
             role: "tool".into(),
@@ -829,5 +959,37 @@ mod tests {
             json["contents"][2]["parts"][0]["functionResponse"]["id"],
             "call-dallas"
         );
+    }
+
+    #[test]
+    fn build_request_body_encodes_thinking_level_and_ignores_temperature() {
+        let messages = vec![Message {
+            role: "user".into(),
+            parts: vec![MessagePart::Text("Hello".into())],
+        }];
+        let settings = vec![
+            ConfigSetting {
+                key: "thinking_level".into(),
+                value: ur::extension::types::SettingValue::Enumeration("low".into()),
+            },
+            ConfigSetting {
+                key: "max_output_tokens".into(),
+                value: ur::extension::types::SettingValue::Integer(1024),
+            },
+            ConfigSetting {
+                key: "temperature".into(),
+                value: ur::extension::types::SettingValue::Integer(150),
+            },
+        ];
+
+        let body = build_request_body(&messages, &settings, &[]);
+        let json: serde_json::Value = serde_json::from_str(&body).expect("request body JSON");
+
+        assert_eq!(json["generationConfig"]["maxOutputTokens"], 1024);
+        assert_eq!(
+            json["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "low"
+        );
+        assert!(json["generationConfig"].get("temperature").is_none());
     }
 }

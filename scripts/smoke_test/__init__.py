@@ -3,7 +3,7 @@
 from . import (
     test_agent_turn,
     test_extensions,
-    test_integration,
+    test_google_provider,
     test_model_roles,
     test_model_settings,
 )
@@ -11,7 +11,7 @@ from . import (
 __all__ = [
     "test_agent_turn",
     "test_extensions",
-    "test_integration",
+    "test_google_provider",
     "test_model_roles",
     "test_model_settings",
 ]
