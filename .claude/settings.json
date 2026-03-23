@@ -1,23 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cargo check:*)",
-      "Bash(find /home/kyle/src/ur -not -path */target/* -not -path */.claude/* -not -path */.agents/* -type f)",
+      "Bash(make*)",
       "Bash(bash scripts/smoke-test.sh)",
+      "Bash(cargo check:*)",
       "Bash(cargo build:*)",
       "Bash(cargo fmt:*)",
-      "Bash(find /home/kyle/src/ur/target/debug -name ur-* -type d)",
-      "Bash(bash /home/kyle/src/ur/scripts/smoke-test.sh)",
-      "Bash(cargo add:*)",
-      "Bash(find ~/.cargo/registry/src -path */wasmtime-wasi-http-43.0.0/wit -type d)",
-      "Bash(find ~/.cargo/registry/src -path */wasmtime-wasi-http-43* -maxdepth 3)",
-      "Bash(git -C /home/kyle/src/ur show HEAD:extensions/workspace/test-extension/extension.toml)",
-      "Bash(git -C /home/kyle/src/ur show HEAD:extensions/system/llm-openai/extension.toml)",
-      "Bash(git -C /home/kyle/src/ur show --stat a5bd550)",
-      "Bash(git -C /home/kyle/src/ur show a5bd550:src/manifest.rs)"
-    ],
-    "additionalDirectories": [
-      "/home/kyle/.skills/kestell-plan"
+      "Bash(cargo doc:*)"
     ]
   }
 }

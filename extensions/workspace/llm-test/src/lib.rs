@@ -149,7 +149,7 @@ fn deterministic_response(messages: &[Message], tools: &[ToolDescriptor]) -> Mes
             parts: vec![MessagePart::ToolCall(ToolCall {
                 id: "call-1".into(),
                 name: tool.name.clone(),
-                arguments_json: r#"{"name":"world"}"#.into(),
+                arguments_json: r#"{"location":"Paris"}"#.into(),
                 provider_metadata_json: String::new(),
             })],
         };

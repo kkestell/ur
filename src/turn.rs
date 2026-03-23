@@ -15,6 +15,9 @@ use crate::extension_host::{ExtensionInstance, wit_types};
 use crate::manifest::{self, ManifestEntry, WorkspaceManifest};
 use crate::model;
 
+const DEFAULT_RUN_USER_MESSAGE: &str = "Hello, please greet the world";
+const RUN_USER_MESSAGE_ENV_VAR: &str = "UR_RUN_USER_MESSAGE";
+
 /// Extracts concatenated text from a message's parts.
 fn extract_text(msg: &wit_types::Message) -> String {
     msg.parts
@@ -92,6 +95,21 @@ fn stream_completion(
     })
 }
 
+fn resolve_run_user_message(env_value: Option<String>) -> String {
+    match env_value {
+        Some(value) if !value.trim().is_empty() => value,
+        _ => DEFAULT_RUN_USER_MESSAGE.into(),
+    }
+}
+
+fn run_user_message() -> wit_types::Message {
+    let content = resolve_run_user_message(std::env::var(RUN_USER_MESSAGE_ENV_VAR).ok());
+    wit_types::Message {
+        role: "user".into(),
+        parts: vec![wit_types::MessagePart::Text(content)],
+    }
+}
+
 /// Runs a single hardcoded agent turn, printing debug output at each step.
 #[expect(
     clippy::too_many_lines,
@@ -130,12 +148,7 @@ pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
     );
 
     // ── 2. Add user message ──────────────────────────────────────────
-    let user_msg = wit_types::Message {
-        role: "user".into(),
-        parts: vec![wit_types::MessagePart::Text(
-            "Hello, please greet the world".into(),
-        )],
-    };
+    let user_msg = run_user_message();
     println!("[turn] adding user message: {:?}", extract_text(&user_msg));
     messages.push(user_msg);
 
@@ -433,5 +446,23 @@ mod tests {
         ));
         assert_eq!(appends[3].role, "assistant");
         assert_eq!(extract_text(&appends[3]), "It is 72F in Austin.");
+    }
+
+    #[test]
+    fn resolve_run_user_message_uses_default_when_env_is_absent() {
+        assert_eq!(
+            resolve_run_user_message(None),
+            "Hello, please greet the world"
+        );
+    }
+
+    #[test]
+    fn resolve_run_user_message_prefers_env_override() {
+        assert_eq!(
+            resolve_run_user_message(Some(
+                "What is the weather in Paris, and should I wear a coat?".into(),
+            )),
+            "What is the weather in Paris, and should I wear a coat?"
+        );
     }
 }

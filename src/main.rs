@@ -31,7 +31,12 @@ fn main() -> Result<()> {
 
     let workspace = std::fs::canonicalize(&workspace)?;
 
-    let engine = Engine::default();
+    let engine = {
+        let cache = wasmtime::Cache::new(wasmtime::CacheConfig::new())?;
+        let mut config = wasmtime::Config::new();
+        config.cache(Some(cache));
+        Engine::new(&config)?
+    };
 
     match args.command {
         Command::Extensions { action } => match action {

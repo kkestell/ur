@@ -78,21 +78,33 @@ class SmokeHarness:
             self._tempdir.cleanup()
             self._tempdir = None
 
-    def run(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def run(
+        self,
+        *args: str,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         """Print and execute: ur <args>. Raises on non-zero exit."""
-        return self._run_ur(args, check=True)
+        return self._run_ur(args, check=True, env_overrides=env)
 
-    def run_err(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def run_err(
+        self,
+        *args: str,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         """Print and execute: ur <args>. Continues only on non-zero exit."""
-        result = self._run_ur(args, check=False)
+        result = self._run_ur(args, check=False, env_overrides=env)
         if result.returncode == 0:
             joined = shlex.join(("ur", *args))
             raise RuntimeError(f"expected non-zero exit from: {joined}")
         return result
 
-    def run_allow_error(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def run_allow_error(
+        self,
+        *args: str,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         """Print and execute: ur <args>. Never raises for exit status."""
-        return self._run_ur(args, check=False)
+        return self._run_ur(args, check=False, env_overrides=env)
 
     def cat(self, path: Path) -> None:
         """Print file contents."""
@@ -180,12 +192,15 @@ class SmokeHarness:
         args: Iterable[str],
         *,
         check: bool,
+        env_overrides: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         workspace = self._require_workspace()
         ur_root = self._require_ur_root()
         display_command = ("ur", *args)
         command = (str(self.ur), "-w", str(workspace), *args)
         env = self._env | {"UR_ROOT": str(ur_root)}
+        if env_overrides is not None:
+            env |= env_overrides
         return self._run(display_command, command, env=env, check=check)
 
     def _run(
