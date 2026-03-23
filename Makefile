@@ -9,7 +9,8 @@ HOST_MANIFEST := Cargo.toml
 BUILTIN_EXTENSION_MANIFESTS := \
 	extensions/system/session-jsonl/Cargo.toml \
 	extensions/system/compaction-llm/Cargo.toml \
-	extensions/system/llm-google/Cargo.toml
+	extensions/system/llm-google/Cargo.toml \
+	extensions/system/llm-openrouter/Cargo.toml
 
 # Repo-local checks also cover the smoke-test workspace extension.
 REPO_EXTENSION_MANIFESTS := \

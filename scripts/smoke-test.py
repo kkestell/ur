@@ -11,6 +11,7 @@ from smoke_test import (
     test_google_provider,
     test_model_roles,
     test_model_settings,
+    test_openrouter_provider,
 )
 
 
@@ -24,6 +25,7 @@ def main() -> None:
             test_model_settings,
             test_agent_turn,
             test_google_provider,
+            test_openrouter_provider,
         ):
             print()
             print(f"═══ {module.__name__.split('.')[-1]} ═══")

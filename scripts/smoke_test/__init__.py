@@ -6,6 +6,7 @@ from . import (
     test_google_provider,
     test_model_roles,
     test_model_settings,
+    test_openrouter_provider,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "test_google_provider",
     "test_model_roles",
     "test_model_settings",
+    "test_openrouter_provider",
 ]

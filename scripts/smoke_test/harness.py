@@ -40,6 +40,12 @@ EXTENSION_ARTIFACTS: tuple[BuildArtifact, ...] = (
         install_dir="extensions/system/llm-google",
     ),
     BuildArtifact(
+        manifest_path="extensions/system/llm-openrouter/Cargo.toml",
+        build_args=("--target", "wasm32-wasip2", "--release"),
+        artifact_path="extensions/system/llm-openrouter/target/wasm32-wasip2/release/llm_openrouter.wasm",
+        install_dir="extensions/system/llm-openrouter",
+    ),
+    BuildArtifact(
         manifest_path="extensions/workspace/test-extension/Cargo.toml",
         build_args=("--target", "wasm32-wasip2", "--release"),
         artifact_path="extensions/workspace/test-extension/target/wasm32-wasip2/release/test_extension.wasm",
