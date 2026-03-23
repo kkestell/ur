@@ -103,11 +103,14 @@ impl UserConfig {
 }
 
 /// Parses a `"provider/model"` reference into its two parts.
+///
+/// Splits on the first slash only, so `openrouter/openai/gpt-4o-mini`
+/// yields `("openrouter", "openai/gpt-4o-mini")`.
 pub fn parse_model_ref(s: &str) -> Option<(&str, &str)> {
     let slash = s.find('/')?;
     let provider = &s[..slash];
     let model = &s[slash + 1..];
-    if provider.is_empty() || model.is_empty() || model.contains('/') {
+    if provider.is_empty() || model.is_empty() {
         return None;
     }
     Some((provider, model))
@@ -249,7 +252,18 @@ mod tests {
 
     #[test]
     fn parse_model_ref_multiple_slashes() {
-        assert_eq!(parse_model_ref("a/b/c"), None);
+        assert_eq!(
+            parse_model_ref("openrouter/openai/gpt-4o-mini"),
+            Some(("openrouter", "openai/gpt-4o-mini"))
+        );
+    }
+
+    #[test]
+    fn parse_model_ref_openrouter_google_model() {
+        assert_eq!(
+            parse_model_ref("openrouter/google/gemini-2.5-flash"),
+            Some(("openrouter", "google/gemini-2.5-flash"))
+        );
     }
 
     // --- resolve_role tests ---
@@ -265,6 +279,42 @@ mod tests {
     fn resolve_role_returns_none_for_unconfigured() {
         let config = UserConfig::default();
         assert_eq!(config.resolve_role("missing"), None);
+    }
+
+    // --- config round-trip tests for slash-containing model IDs ---
+
+    #[test]
+    fn config_round_trip_slash_model_id_in_role() {
+        let mut config = UserConfig::default();
+        config
+            .roles
+            .insert("default".into(), "openrouter/openai/gpt-4o-mini".into());
+
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        let loaded: UserConfig = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(
+            loaded.resolve_role("default"),
+            Some(("openrouter", "openai/gpt-4o-mini"))
+        );
+    }
+
+    #[test]
+    fn config_round_trip_slash_model_id_in_provider_settings() {
+        let mut config = UserConfig::default();
+        config
+            .providers
+            .entry("openrouter".into())
+            .or_default()
+            .entry("openai/gpt-4o-mini".into())
+            .or_default()
+            .insert("temperature".into(), toml::Value::Float(0.7));
+
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        let loaded: UserConfig = toml::from_str(&toml_str).unwrap();
+
+        let val = loaded.providers["openrouter"]["openai/gpt-4o-mini"]["temperature"].clone();
+        assert_eq!(val, toml::Value::Float(0.7));
     }
 
     // --- validate_integer tests ---
