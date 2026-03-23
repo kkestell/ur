@@ -47,11 +47,12 @@ This eliminates manual serialization and ensures type safety across the WASM bou
 
 ### WASI Preview 2
 
-[WASI Preview 2] (also known as "p2" or the Component Model version) provides standardized interfaces for system capabilities. ur uses WASI p2 to give extensions controlled access to:
+[WASI Preview 2] (also known as "p2" or the Component Model version) provides standardized interfaces for system capabilities. In the current host, ur wires up WASI p2 for:
 
 - Standard I/O (inherited from the host process)
 - Clocks and random number generation
-- File system access (when configured)
+
+The current host does not preopen filesystem directories for extensions.
 
 WASI Preview 2 is a significant evolution from Preview 1, built around the Component Model and WIT-based interface definitions.
 
@@ -177,6 +178,7 @@ interface extension {
     call-tool: func(name: string, args-json: string) -> result<string, string>;
     id: func() -> string;
     name: func() -> string;
+    list-tools: func() -> list<tool-descriptor>;
 }
 ```
 
@@ -186,10 +188,13 @@ Slot-specific interfaces add additional exports. For example, `llm-provider` ext
 interface llm-provider {
     provider-id: func() -> string;
     list-models: func() -> list<model-descriptor>;
-    complete: func(messages: list<message>, model: string, settings: list<config-setting>) 
+    complete: func(messages: list<message>, model: string, settings: list<config-setting>,
+        tools: list<tool-descriptor>)
         -> result<completion, string>;
 }
 ```
+
+The LLM worlds also export `llm-streaming-provider` for streamed completions.
 
 ## Networked Extensions
 

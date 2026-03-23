@@ -29,8 +29,22 @@ pub enum Command {
         #[command(subcommand)]
         action: ModelAction,
     },
+    /// Manage configuration.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
     /// Run a single agent turn (tracer bullet).
     Run,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ConfigAction {
+    /// Set the API key for an LLM provider.
+    SetKey {
+        /// Provider ID (e.g. "google", "anthropic").
+        provider: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

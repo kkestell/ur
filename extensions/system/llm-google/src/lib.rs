@@ -25,9 +25,9 @@ thread_local! {
 
 fn get_api_key() -> Result<String, String> {
     API_KEY.with(|k| {
-        k.borrow()
-            .clone()
-            .ok_or_else(|| "GOOGLE_API_KEY not configured".into())
+        k.borrow().clone().ok_or_else(|| {
+            "No API key for provider 'google'. Set one with: ur config set-key google".into()
+        })
     })
 }
 

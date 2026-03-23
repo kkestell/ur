@@ -4,12 +4,12 @@ ur discovers and loads extensions automatically from three tiers of directories.
 
 ## Discovery Tiers
 
-ur scans for extensions in three locations, in order:
+ur scans for extensions in three locations, in order. The system and user tiers live under `UR_ROOT`, which defaults to `~/.ur` when the environment variable is unset.
 
 | Tier | Location | Purpose |
 |------|----------|---------|
-| **System** | `~/.ur/extensions/system/` | Bundled extensions shipped with ur |
-| **User** | `~/.ur/extensions/user/` | Extensions you install for all workspaces |
+| **System** | `$UR_ROOT/extensions/system/` | Bundled extensions shipped with ur |
+| **User** | `$UR_ROOT/extensions/user/` | Extensions you install for all workspaces |
 | **Workspace** | `.ur/extensions/` | Extensions specific to a single project |
 
 Each extension is a subdirectory containing a `.wasm` file. When you run ur, it:
@@ -28,7 +28,7 @@ An extension directory contains either:
 
 ## The Workspace Manifest
 
-ur stores workspace state in a manifest file at `~/.ur/workspaces/<workspace-path>/manifest.json`, where `<workspace-path>` is the workspace directory path with slashes replaced by underscores. For example, a workspace at `/home/user/projects/myapp` would have its manifest at `~/.ur/workspaces/home_user_projects_myapp/manifest.json`.
+ur stores workspace state in a manifest file at `$UR_ROOT/workspaces/<workspace-path>/manifest.json`, where `<workspace-path>` is the workspace directory path with slashes replaced by underscores. For example, with the default `UR_ROOT` and a workspace at `/home/user/projects/myapp`, the manifest path would be `~/.ur/workspaces/home_user_projects_myapp/manifest.json`.
 
 The manifest tracks:
 
@@ -92,7 +92,7 @@ Extensions fill *slots* — named capability points in ur's architecture. A slot
 
 Cardinality determines how many extensions can fill a slot simultaneously:
 
-**At least one** — Multiple providers can coexist. ur selects among them based on context (e.g., model name prefix). Example: `llm-provider` allows both `llm-anthropic` and `llm-google` to be enabled.
+**At least one** — Multiple providers can coexist. ur resolves a role to a configured `provider/model` pair and selects the matching provider. Example: multiple `llm-provider` extensions can stay enabled at once, while role resolution chooses which one handles a given request.
 
 **Exactly one** — Only one provider active at a time. Enabling a new provider automatically disables the current one (switch behavior). Example: `session-provider` ensures a single source of truth for conversation history.
 

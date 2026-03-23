@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod discovery;
 mod extension_host;
+mod keyring;
 mod manifest;
 mod model;
 mod slot;
@@ -15,7 +16,7 @@ use clap::Parser;
 use mimalloc::MiMalloc;
 use wasmtime::Engine;
 
-use cli::{Cli, Command, ExtensionAction, ModelAction};
+use cli::{Cli, Command, ConfigAction, ExtensionAction, ModelAction};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -24,6 +25,11 @@ fn main() -> Result<()> {
     let args = Cli::parse();
 
     let ur_root = env::var("UR_ROOT").map_or_else(|_| dirs_home().join(".ur"), PathBuf::from);
+
+    // Config commands don't need the engine or workspace.
+    if let Command::Config { action } = args.command {
+        return handle_config(action);
+    }
 
     let workspace = args
         .workspace
@@ -39,6 +45,7 @@ fn main() -> Result<()> {
     };
 
     match args.command {
+        Command::Config { .. } => unreachable!(),
         Command::Extensions { action } => match action {
             ExtensionAction::List => {
                 let m = manifest::scan_and_load(&engine, &ur_root, &workspace)?;
@@ -92,6 +99,20 @@ fn main() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn handle_config(action: ConfigAction) -> Result<()> {
+    match action {
+        ConfigAction::SetKey { provider } => {
+            eprint!("API key for {provider}: ");
+            let key = rpassword::read_password()?;
+            let key = key.trim();
+            anyhow::ensure!(!key.is_empty(), "API key cannot be empty");
+            keyring::set_api_key(&provider, key)?;
+            println!("API key stored for {provider}.");
+        }
+    }
     Ok(())
 }
 
