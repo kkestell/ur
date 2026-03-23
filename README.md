@@ -1,10 +1,9 @@
 # Ur
 
-Ur is an agentic coding assistant with a tiny core and a rich extension system.
+Ur is an agentic coding assistant with a tiny Rust core and a rich extension system. 
 
-The core is written in Rust for safety and performance. It handles the agent loop and extension hosting. Everything else — LLM providers, file and shell tools, session storage, context management — is an extension.
+The core handles the agent loop and extension hosting. Everything else — LLM providers, tools, session storage, context — is an extension.
 
-Extensions are WebAssembly components running inside [wasmtime](https://wasmtime.dev/). They execute in a sandbox with a deny-by-default permission model: no ambient filesystem or network access. Extensions must explicitly declare every path they read, every path they write, and every network host they contact. Undeclared access is denied at runtime.
+Extensions are WebAssembly components running in wasmtime. They're sandboxed with deny-by-default permissions: no filesystem or network access unless explicitly declared. 
 
-Any language that compiles to the WASM Component Model can be used to write extensions. The extension API is defined in [WIT](https://component-model.bytecodealliance.org/design/wit.html), so extension authors work with generated, typed bindings rather than raw WASM imports.
-
+Extensions can be written in any language that compiles to the WASM Component Model, using typed bindings generated from a WIT API.
