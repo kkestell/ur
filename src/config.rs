@@ -156,11 +156,7 @@ pub(crate) fn validate_enum(s: &str, schema: &wit_types::SettingEnum, key: &str)
 /// # Errors
 ///
 /// Returns an error if `n` is outside `[schema.min, schema.max]`.
-pub(crate) fn validate_number(
-    n: f64,
-    schema: &wit_types::SettingNumber,
-    key: &str,
-) -> Result<()> {
+pub(crate) fn validate_number(n: f64, schema: &wit_types::SettingNumber, key: &str) -> Result<()> {
     if n < schema.min || n > schema.max {
         bail!(
             "setting '{key}': {n} is outside range {}..{}",
@@ -199,6 +195,10 @@ fn convert_toml_value(
             Ok(wit_types::SettingValue::Boolean(b))
         }
         wit_types::SettingSchema::Number(num_schema) => {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "TOML integers used for float settings lose no practical precision"
+            )]
             let n = val
                 .as_float()
                 .or_else(|| val.as_integer().map(|i| i as f64))
@@ -521,9 +521,7 @@ mod tests {
     fn settings_for_number_returns_default() {
         let config = UserConfig::default();
         let desc = make_descriptor(vec![num_setting("temperature", 0.0, 2.0, 1.0)]);
-        let settings = config
-            .settings_for("provider", "model", &desc)
-            .unwrap();
+        let settings = config.settings_for("provider", "model", &desc).unwrap();
         assert_eq!(settings[0].key, "temperature");
         assert!(matches!(
             settings[0].value,
@@ -543,9 +541,7 @@ mod tests {
             .insert("temperature".into(), toml::Value::Float(0.7));
 
         let desc = make_descriptor(vec![num_setting("temperature", 0.0, 2.0, 1.0)]);
-        let settings = config
-            .settings_for("provider", "model", &desc)
-            .unwrap();
+        let settings = config.settings_for("provider", "model", &desc).unwrap();
         assert!(matches!(
             settings[0].value,
             wit_types::SettingValue::Number(v) if (v - 0.7).abs() < f64::EPSILON
@@ -564,9 +560,7 @@ mod tests {
             .insert("temperature".into(), toml::Value::Integer(1));
 
         let desc = make_descriptor(vec![num_setting("temperature", 0.0, 2.0, 1.0)]);
-        let settings = config
-            .settings_for("provider", "model", &desc)
-            .unwrap();
+        let settings = config.settings_for("provider", "model", &desc).unwrap();
         assert!(matches!(
             settings[0].value,
             wit_types::SettingValue::Number(v) if (v - 1.0).abs() < f64::EPSILON
@@ -585,8 +579,6 @@ mod tests {
             .insert("temperature".into(), toml::Value::Float(5.0));
 
         let desc = make_descriptor(vec![num_setting("temperature", 0.0, 2.0, 1.0)]);
-        config
-            .settings_for("provider", "model", &desc)
-            .unwrap_err();
+        config.settings_for("provider", "model", &desc).unwrap_err();
     }
 }

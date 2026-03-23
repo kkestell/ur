@@ -83,10 +83,8 @@ impl LlmGuest for LlmOpenRouter {
             }
         };
 
-        let mut descriptors: Vec<ModelDescriptor> = catalog
-            .iter()
-            .map(catalog_model_to_descriptor)
-            .collect();
+        let mut descriptors: Vec<ModelDescriptor> =
+            catalog.iter().map(catalog_model_to_descriptor).collect();
 
         // Mark exactly one model as default.
         let default_idx = pick_default_index(&descriptors);
@@ -337,19 +335,22 @@ fn parse_sse_chunk(
     let mut delta_parts = Vec::new();
 
     // Text content.
-    if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-        if !content.is_empty() {
-            delta_parts.push(MessagePart::Text(content.to_string()));
-        }
+    if let Some(content) = delta.get("content").and_then(|c| c.as_str())
+        && !content.is_empty()
+    {
+        delta_parts.push(MessagePart::Text(content.to_string()));
     }
 
     // Tool call deltas — accumulate across chunks.
     if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
         for tc_delta in tool_calls {
-            let index = tc_delta
-                .get("index")
-                .and_then(|i| i.as_u64())
-                .unwrap_or(0) as u32;
+            let index = u32::try_from(
+                tc_delta
+                    .get("index")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+            )
+            .unwrap_or(0);
 
             // Find or create the pending tool call for this index.
             let pending = if let Some(p) = pending_tool_calls.iter_mut().find(|p| p.index == index)
@@ -411,7 +412,7 @@ fn parse_sse_chunk(
 
 // ── Catalog fetch ───────────────────────────────────────────────────
 
-/// Raw model entry from OpenRouter's GET /api/v1/models response.
+/// Raw model entry from the `OpenRouter` `GET /api/v1/models` response.
 #[derive(serde::Deserialize, Clone)]
 struct CatalogModel {
     id: String,
@@ -467,11 +468,8 @@ fn fetch_catalog() -> Result<Vec<CatalogModel>, String> {
     let response: CatalogResponse =
         serde_json::from_str(&body).map_err(|e| format!("failed to parse catalog: {e}"))?;
 
-    let mut filtered: Vec<CatalogModel> = response
-        .data
-        .into_iter()
-        .filter(|m| is_usable_model(m))
-        .collect();
+    let mut filtered: Vec<CatalogModel> =
+        response.data.into_iter().filter(is_usable_model).collect();
 
     filtered.sort_by(|a, b| a.id.cmp(&b.id));
 
@@ -545,38 +543,37 @@ fn catalog_model_to_descriptor(m: &CatalogModel) -> ModelDescriptor {
     }
 }
 
-/// Convert OpenRouter pricing (dollars per token as decimal strings) to
+/// Convert pricing (dollars per token as decimal strings) to
 /// millidollars per million tokens.
 fn convert_pricing(m: &CatalogModel) -> (u32, u32) {
-    let pricing = match &m.pricing {
-        Some(p) => p,
-        None => return (0, 0),
+    let Some(pricing) = &m.pricing else {
+        return (0, 0);
     };
 
     let cost_in = pricing
         .prompt
         .as_deref()
         .and_then(|s| s.parse::<f64>().ok())
-        .map(dollars_per_token_to_millidollars_per_million)
-        .unwrap_or(0);
+        .map_or(0, dollars_per_token_to_millidollars_per_million);
 
     let cost_out = pricing
         .completion
         .as_deref()
         .and_then(|s| s.parse::<f64>().ok())
-        .map(dollars_per_token_to_millidollars_per_million)
-        .unwrap_or(0);
+        .map_or(0, dollars_per_token_to_millidollars_per_million);
 
     (cost_in, cost_out)
 }
 
-/// Convert dollars-per-token to millidollars-per-million-tokens.
+/// Converts dollars-per-token to millidollars-per-million-tokens.
 ///
 /// `ur` stores costs as `u32` millidollars per million tokens.
-/// OpenRouter returns dollars per token as a decimal string.
-///
-///   millidollars_per_million = dollars_per_token * 1_000_000 * 1_000
-///                            = dollars_per_token * 1e9
+/// The catalog returns dollars per token as a decimal string.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Value is bounds-checked before cast"
+)]
 fn dollars_per_token_to_millidollars_per_million(dollars_per_token: f64) -> u32 {
     let millidollars = dollars_per_token * 1e9;
     if millidollars < 0.0 {
@@ -808,14 +805,14 @@ fn message_to_openai(msg: &Message) -> serde_json::Value {
     };
 
     // Tool result messages.
-    if role == "tool" {
-        if let Some(MessagePart::ToolResult(tr)) = msg.parts.first() {
-            return serde_json::json!({
-                "role": "tool",
-                "tool_call_id": tr.tool_call_id,
-                "content": tr.content,
-            });
-        }
+    if role == "tool"
+        && let Some(MessagePart::ToolResult(tr)) = msg.parts.first()
+    {
+        return serde_json::json!({
+            "role": "tool",
+            "tool_call_id": tr.tool_call_id,
+            "content": tr.content,
+        });
     }
 
     // Assistant messages with tool calls.
@@ -898,10 +895,10 @@ fn parse_chat_response(body: &str) -> Result<Completion, String> {
 
     let mut parts = Vec::new();
 
-    if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
-        if !content.is_empty() {
-            parts.push(MessagePart::Text(content.to_string()));
-        }
+    if let Some(content) = message.get("content").and_then(|c| c.as_str())
+        && !content.is_empty()
+    {
+        parts.push(MessagePart::Text(content.to_string()));
     }
 
     if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
@@ -944,7 +941,10 @@ fn parse_usage(usage: &serde_json::Value) -> Option<Usage> {
 
 fn http_get(api_key: &str, path: &str) -> Result<Vec<u8>, String> {
     let headers = Fields::from_list(&[
-        ("authorization".into(), format!("Bearer {api_key}").into_bytes()),
+        (
+            "authorization".into(),
+            format!("Bearer {api_key}").into_bytes(),
+        ),
         ("content-type".into(), b"application/json".to_vec()),
     ])
     .map_err(|error| format!("failed to create headers: {error:?}"))?;
@@ -1054,7 +1054,10 @@ fn http_post_streaming(
     body: &str,
 ) -> Result<(IncomingBody, wasi::io::streams::InputStream), String> {
     let headers = Fields::from_list(&[
-        ("authorization".into(), format!("Bearer {api_key}").into_bytes()),
+        (
+            "authorization".into(),
+            format!("Bearer {api_key}").into_bytes(),
+        ),
         ("content-type".into(), b"application/json".to_vec()),
     ])
     .map_err(|error| format!("failed to create headers: {error:?}"))?;
@@ -1138,7 +1141,10 @@ mod tests {
     fn pricing_conversion_typical_values() {
         // OpenRouter returns "0.00000015" for $0.15/1M tokens.
         // millidollars_per_million = 0.00000015 * 1e9 = 150
-        assert_eq!(dollars_per_token_to_millidollars_per_million(0.000_000_15), 150);
+        assert_eq!(
+            dollars_per_token_to_millidollars_per_million(0.000_000_15),
+            150
+        );
     }
 
     #[test]

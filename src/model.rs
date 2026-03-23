@@ -71,9 +71,8 @@ pub fn collect_provider_models(
         if probe_init.is_err() {
             continue;
         }
-        let provider_id = match probe.provider_id() {
-            Ok(Ok(id)) => id,
-            _ => continue,
+        let Ok(Ok(provider_id)) = probe.provider_id() else {
+            continue;
         };
         drop(probe);
 
@@ -212,10 +211,7 @@ pub fn cmd_config(config: &UserConfig, provider_models: &ProviderModels, role: &
                 format!("boolean  (default: {})", s.default_val)
             }
             wit_types::SettingSchema::Number(s) => {
-                format!(
-                    "number  {}..{}  (default: {})",
-                    s.min, s.max, s.default_val
-                )
+                format!("number  {}..{}  (default: {})", s.min, s.max, s.default_val)
             }
         };
         println!("  {:<20}{type_info}", setting.key);
