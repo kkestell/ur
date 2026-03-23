@@ -170,7 +170,7 @@ pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
 
     // ── 4. First LLM completion (streaming) ──────────────────────────
     println!("[turn] resolving role \"default\" → {provider_id}/{model_id}");
-    let init_config = llm_init_config(&provider_id);
+    let init_config = crate::provider::init_config(&provider_id);
     let mut llm = load_llm_provider(engine, &manifest, &provider_id, &init_config)?;
 
     println!(
@@ -249,23 +249,6 @@ pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
 
     println!("[turn] done");
     Ok(())
-}
-
-/// Resolves the API key for a provider: env var > keyring > empty.
-fn llm_init_config(provider_id: &str) -> Vec<(String, String)> {
-    let env_key = format!("{}_API_KEY", provider_id.to_uppercase());
-
-    if let Ok(val) = std::env::var(&env_key) {
-        return vec![("api_key".into(), val)];
-    }
-
-    match crate::keyring::get_api_key(provider_id) {
-        Ok(Some(val)) => return vec![("api_key".into(), val)],
-        Ok(None) => {}
-        Err(e) => eprintln!("warning: keyring lookup failed for {provider_id}: {e}"),
-    }
-
-    vec![]
 }
 
 fn pending_session_appends(

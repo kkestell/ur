@@ -5,6 +5,7 @@ mod extension_host;
 mod keyring;
 mod manifest;
 mod model;
+mod provider;
 mod slot;
 mod turn;
 

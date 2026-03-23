@@ -61,10 +61,27 @@ pub fn collect_provider_models(
             continue;
         }
         let path = Path::new(&entry.wasm_path);
+        // Probe with empty init to discover provider ID, then re-load
+        // with real credentials so list_models() can make authenticated calls.
+        let mut probe = extension_host::ExtensionInstance::load(engine, path)
+            .map_err(|e| anyhow::anyhow!("loading {}: {e}", entry.id))?;
+        let probe_init = probe
+            .init(&[])
+            .map_err(|e| anyhow::anyhow!("init {}: {e}", entry.id))?;
+        if probe_init.is_err() {
+            continue;
+        }
+        let provider_id = match probe.provider_id() {
+            Ok(Ok(id)) => id,
+            _ => continue,
+        };
+        drop(probe);
+
+        let init_config = crate::provider::init_config(&provider_id);
         let mut instance = extension_host::ExtensionInstance::load(engine, path)
             .map_err(|e| anyhow::anyhow!("loading {}: {e}", entry.id))?;
         let init_result = instance
-            .init(&[])
+            .init(&init_config)
             .map_err(|e| anyhow::anyhow!("init {}: {e}", entry.id))?;
         if let Err(e) = init_result {
             eprintln!("warning: {}: init failed: {e}", entry.id);
