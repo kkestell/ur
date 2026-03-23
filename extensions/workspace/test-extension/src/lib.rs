@@ -4,7 +4,7 @@ wit_bindgen::generate!({
 });
 
 use exports::ur::extension::extension::Guest as ExtGuest;
-use ur::extension::types::{ConfigEntry, ToolDescriptor};
+use ur::extension::types::{ConfigEntry, SettingDescriptor, ToolDescriptor};
 
 struct TestExtension;
 
@@ -30,6 +30,10 @@ impl ExtGuest for TestExtension {
 
     fn name() -> String {
         "Test Extension".into()
+    }
+
+    fn list_settings() -> Vec<SettingDescriptor> {
+        vec![]
     }
 
     fn list_tools() -> Vec<ToolDescriptor> {

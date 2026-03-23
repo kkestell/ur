@@ -1,4 +1,4 @@
-//! User configuration for role-to-model mappings and provider settings.
+//! User configuration for role-to-model mappings and extension settings.
 //!
 //! Config lives at `{ur_root}/config.toml` and is optional — the system
 //! works with zero config via provider-declared defaults.
@@ -15,11 +15,11 @@ use crate::extension_host::wit_types;
 ///
 /// ```toml
 /// [roles]
-/// default = "anthropic/claude-sonnet-4-6"
-/// fast = "openai/gpt-5.4"
+/// default = "google/gemini-3-flash-preview"
+/// fast = "google/gemini-3.1-pro-preview"
 ///
-/// [providers.anthropic.claude-sonnet-4-6]
-/// thinking_budget = 8000
+/// [extensions.google]
+/// "gemini-3-flash-preview.thinking_level" = "high"
 /// ```
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct UserConfig {
@@ -27,9 +27,9 @@ pub struct UserConfig {
     #[serde(default)]
     pub roles: BTreeMap<String, String>,
 
-    /// Provider → model → setting key → value.
+    /// Extension ID → dotted-key settings.
     #[serde(default)]
-    pub providers: BTreeMap<String, BTreeMap<String, BTreeMap<String, toml::Value>>>,
+    pub extensions: BTreeMap<String, BTreeMap<String, toml::Value>>,
 }
 
 impl UserConfig {
@@ -74,27 +74,30 @@ impl UserConfig {
 
     /// Returns provider-specific settings for a model as typed `ConfigSetting` values.
     ///
-    /// Settings are validated against the provided model descriptor's schema.
-    /// Unknown keys are ignored; missing keys use defaults from the schema.
+    /// Filters `descriptors` (from `list-settings()`) to mutable, non-secret
+    /// settings prefixed with `<model_id>.`, reads values from config, and
+    /// returns `ConfigSetting` entries with short keys (prefix stripped).
     pub fn settings_for(
         &self,
-        provider: &str,
-        model: &str,
-        descriptor: &wit_types::ModelDescriptor,
+        extension_id: &str,
+        model_id: &str,
+        descriptors: &[wit_types::SettingDescriptor],
     ) -> Result<Vec<wit_types::ConfigSetting>> {
-        let overrides = self
-            .providers
-            .get(provider)
-            .and_then(|models| models.get(model));
+        let overrides = self.extensions.get(extension_id);
+        let prefix = format!("{model_id}.");
 
         let mut settings = Vec::new();
-        for desc in &descriptor.settings {
+        for desc in descriptors {
+            if desc.secret || desc.readonly || !desc.key.starts_with(&prefix) {
+                continue;
+            }
+            let short_key = &desc.key[prefix.len()..];
             let value = match overrides.and_then(|o| o.get(&desc.key)) {
                 Some(toml_val) => convert_toml_value(toml_val, &desc.schema, &desc.key)?,
                 None => default_value(&desc.schema),
             };
             settings.push(wit_types::ConfigSetting {
-                key: desc.key.clone(),
+                key: short_key.to_owned(),
                 value,
             });
         }
@@ -167,8 +170,43 @@ pub(crate) fn validate_number(n: f64, schema: &wit_types::SettingNumber, key: &s
     Ok(())
 }
 
+/// Parses a CLI string value into a TOML value according to the setting's schema.
+pub fn parse_setting_value(
+    raw: &str,
+    schema: &wit_types::SettingSchema,
+    key: &str,
+) -> Result<toml::Value> {
+    match schema {
+        wit_types::SettingSchema::Integer(int_schema) => {
+            let n: i64 = raw
+                .parse()
+                .map_err(|_err| anyhow::anyhow!("setting '{key}': '{raw}' is not an integer"))?;
+            validate_integer(n, int_schema, key)?;
+            Ok(toml::Value::Integer(n))
+        }
+        wit_types::SettingSchema::Enumeration(enum_schema) => {
+            validate_enum(raw, enum_schema, key)?;
+            Ok(toml::Value::String(raw.to_owned()))
+        }
+        wit_types::SettingSchema::Boolean(_) => {
+            let b: bool = raw
+                .parse()
+                .map_err(|_err| anyhow::anyhow!("setting '{key}': '{raw}' is not a boolean"))?;
+            Ok(toml::Value::Boolean(b))
+        }
+        wit_types::SettingSchema::Number(num_schema) => {
+            let n: f64 = raw
+                .parse()
+                .map_err(|_err| anyhow::anyhow!("setting '{key}': '{raw}' is not a number"))?;
+            validate_number(n, num_schema, key)?;
+            Ok(toml::Value::Float(n))
+        }
+        wit_types::SettingSchema::String(_) => Ok(toml::Value::String(raw.to_owned())),
+    }
+}
+
 /// Converts a TOML value to a typed `SettingValue` according to the schema.
-fn convert_toml_value(
+pub(crate) fn convert_toml_value(
     val: &toml::Value,
     schema: &wit_types::SettingSchema,
     key: &str,
@@ -206,11 +244,17 @@ fn convert_toml_value(
             validate_number(n, num_schema, key)?;
             Ok(wit_types::SettingValue::Number(n))
         }
+        wit_types::SettingSchema::String(_) => {
+            let s = val
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("setting '{key}': expected string"))?;
+            Ok(wit_types::SettingValue::String(s.to_owned()))
+        }
     }
 }
 
 /// Returns the default `SettingValue` for a schema.
-fn default_value(schema: &wit_types::SettingSchema) -> wit_types::SettingValue {
+pub(crate) fn default_value(schema: &wit_types::SettingSchema) -> wit_types::SettingValue {
     match schema {
         wit_types::SettingSchema::Integer(s) => wit_types::SettingValue::Integer(s.default_val),
         wit_types::SettingSchema::Enumeration(s) => {
@@ -218,6 +262,20 @@ fn default_value(schema: &wit_types::SettingSchema) -> wit_types::SettingValue {
         }
         wit_types::SettingSchema::Boolean(s) => wit_types::SettingValue::Boolean(s.default_val),
         wit_types::SettingSchema::Number(s) => wit_types::SettingValue::Number(s.default_val),
+        wit_types::SettingSchema::String(s) => {
+            wit_types::SettingValue::String(s.default_val.clone())
+        }
+    }
+}
+
+/// Returns the type name for a setting schema.
+pub fn schema_type_name(schema: &wit_types::SettingSchema) -> &'static str {
+    match schema {
+        wit_types::SettingSchema::Integer(_) => "integer",
+        wit_types::SettingSchema::Enumeration(_) => "enum",
+        wit_types::SettingSchema::Boolean(_) => "boolean",
+        wit_types::SettingSchema::Number(_) => "number",
+        wit_types::SettingSchema::String(_) => "string",
     }
 }
 
@@ -281,7 +339,7 @@ mod tests {
         assert_eq!(config.resolve_role("missing"), None);
     }
 
-    // --- config round-trip tests for slash-containing model IDs ---
+    // --- config round-trip tests ---
 
     #[test]
     fn config_round_trip_slash_model_id_in_role() {
@@ -300,21 +358,22 @@ mod tests {
     }
 
     #[test]
-    fn config_round_trip_slash_model_id_in_provider_settings() {
+    fn config_round_trip_dotted_key_settings() {
         let mut config = UserConfig::default();
         config
-            .providers
-            .entry("openrouter".into())
+            .extensions
+            .entry("google".into())
             .or_default()
-            .entry("openai/gpt-4o-mini".into())
-            .or_default()
-            .insert("temperature".into(), toml::Value::Float(0.7));
+            .insert(
+                "gemini-flash.thinking_level".into(),
+                toml::Value::String("high".into()),
+            );
 
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let loaded: UserConfig = toml::from_str(&toml_str).unwrap();
 
-        let val = loaded.providers["openrouter"]["openai/gpt-4o-mini"]["temperature"].clone();
-        assert_eq!(val, toml::Value::Float(0.7));
+        let val = &loaded.extensions["google"]["gemini-flash.thinking_level"];
+        assert_eq!(val, &toml::Value::String("high".into()));
     }
 
     // --- validate_integer tests ---
@@ -382,22 +441,7 @@ mod tests {
 
     // --- settings_for tests ---
 
-    fn make_descriptor(settings: Vec<wit_types::SettingDescriptor>) -> wit_types::ModelDescriptor {
-        wit_types::ModelDescriptor {
-            id: "test-model".into(),
-            name: "Test Model".into(),
-            description: String::new(),
-            is_default: false,
-            settings,
-            context_window_in: 1_000_000,
-            context_window_out: 8_192,
-            knowledge_cutoff: "2025-01".into(),
-            cost_in: 0,
-            cost_out: 0,
-        }
-    }
-
-    fn int_setting(key: &str, min: i64, max: i64, default: i64) -> wit_types::SettingDescriptor {
+    fn int_descriptor(key: &str, min: i64, max: i64, default: i64) -> wit_types::SettingDescriptor {
         wit_types::SettingDescriptor {
             key: key.into(),
             name: key.into(),
@@ -407,14 +451,18 @@ mod tests {
                 max,
                 default_val: default,
             }),
+            secret: false,
+            readonly: false,
         }
     }
 
     #[test]
     fn settings_for_returns_defaults_when_no_overrides() {
         let config = UserConfig::default();
-        let desc = make_descriptor(vec![int_setting("budget", 0, 10000, 4000)]);
-        let settings = config.settings_for("anthropic", "claude", &desc).unwrap();
+        let descriptors = vec![int_descriptor("model.budget", 0, 10000, 4000)];
+        let settings = config
+            .settings_for("provider", "model", &descriptors)
+            .unwrap();
         assert_eq!(settings.len(), 1);
         assert_eq!(settings[0].key, "budget");
         assert!(matches!(
@@ -427,15 +475,15 @@ mod tests {
     fn settings_for_returns_overridden_values() {
         let mut config = UserConfig::default();
         config
-            .providers
-            .entry("anthropic".into())
+            .extensions
+            .entry("provider".into())
             .or_default()
-            .entry("claude".into())
-            .or_default()
-            .insert("budget".into(), toml::Value::Integer(8000));
+            .insert("model.budget".into(), toml::Value::Integer(8000));
 
-        let desc = make_descriptor(vec![int_setting("budget", 0, 10000, 4000)]);
-        let settings = config.settings_for("anthropic", "claude", &desc).unwrap();
+        let descriptors = vec![int_descriptor("model.budget", 0, 10000, 4000)];
+        let settings = config
+            .settings_for("provider", "model", &descriptors)
+            .unwrap();
         assert!(matches!(
             settings[0].value,
             wit_types::SettingValue::Integer(8000)
@@ -443,19 +491,52 @@ mod tests {
     }
 
     #[test]
+    fn settings_for_skips_secret_and_readonly() {
+        let config = UserConfig::default();
+        let descriptors = vec![
+            wit_types::SettingDescriptor {
+                key: "api_key".into(),
+                name: "API Key".into(),
+                description: String::new(),
+                schema: wit_types::SettingSchema::String(wit_types::SettingString {
+                    default_val: String::new(),
+                }),
+                secret: true,
+                readonly: false,
+            },
+            wit_types::SettingDescriptor {
+                key: "model.context_window_in".into(),
+                name: "Context".into(),
+                description: String::new(),
+                schema: wit_types::SettingSchema::Integer(wit_types::SettingInteger {
+                    min: 0,
+                    max: 1_000_000,
+                    default_val: 1_000_000,
+                }),
+                secret: false,
+                readonly: true,
+            },
+            int_descriptor("model.budget", 0, 10000, 4000),
+        ];
+        let settings = config
+            .settings_for("provider", "model", &descriptors)
+            .unwrap();
+        assert_eq!(settings.len(), 1);
+        assert_eq!(settings[0].key, "budget");
+    }
+
+    #[test]
     fn settings_for_rejects_invalid_override() {
         let mut config = UserConfig::default();
         config
-            .providers
-            .entry("anthropic".into())
+            .extensions
+            .entry("provider".into())
             .or_default()
-            .entry("claude".into())
-            .or_default()
-            .insert("budget".into(), toml::Value::Integer(99999));
+            .insert("model.budget".into(), toml::Value::Integer(99999));
 
-        let desc = make_descriptor(vec![int_setting("budget", 0, 10000, 4000)]);
+        let descriptors = vec![int_descriptor("model.budget", 0, 10000, 4000)];
         config
-            .settings_for("anthropic", "claude", &desc)
+            .settings_for("provider", "model", &descriptors)
             .unwrap_err();
     }
 
@@ -504,7 +585,7 @@ mod tests {
 
     // --- number settings_for tests ---
 
-    fn num_setting(key: &str, min: f64, max: f64, default: f64) -> wit_types::SettingDescriptor {
+    fn num_descriptor(key: &str, min: f64, max: f64, default: f64) -> wit_types::SettingDescriptor {
         wit_types::SettingDescriptor {
             key: key.into(),
             name: key.into(),
@@ -514,14 +595,18 @@ mod tests {
                 max,
                 default_val: default,
             }),
+            secret: false,
+            readonly: false,
         }
     }
 
     #[test]
     fn settings_for_number_returns_default() {
         let config = UserConfig::default();
-        let desc = make_descriptor(vec![num_setting("temperature", 0.0, 2.0, 1.0)]);
-        let settings = config.settings_for("provider", "model", &desc).unwrap();
+        let descriptors = vec![num_descriptor("model.temperature", 0.0, 2.0, 1.0)];
+        let settings = config
+            .settings_for("provider", "model", &descriptors)
+            .unwrap();
         assert_eq!(settings[0].key, "temperature");
         assert!(matches!(
             settings[0].value,
@@ -533,52 +618,84 @@ mod tests {
     fn settings_for_number_override_from_float() {
         let mut config = UserConfig::default();
         config
-            .providers
+            .extensions
             .entry("provider".into())
             .or_default()
-            .entry("model".into())
-            .or_default()
-            .insert("temperature".into(), toml::Value::Float(0.7));
+            .insert("model.temperature".into(), toml::Value::Float(0.7));
 
-        let desc = make_descriptor(vec![num_setting("temperature", 0.0, 2.0, 1.0)]);
-        let settings = config.settings_for("provider", "model", &desc).unwrap();
+        let descriptors = vec![num_descriptor("model.temperature", 0.0, 2.0, 1.0)];
+        let settings = config
+            .settings_for("provider", "model", &descriptors)
+            .unwrap();
         assert!(matches!(
             settings[0].value,
             wit_types::SettingValue::Number(v) if (v - 0.7).abs() < f64::EPSILON
         ));
     }
 
-    #[test]
-    fn settings_for_number_override_from_integer() {
-        let mut config = UserConfig::default();
-        config
-            .providers
-            .entry("provider".into())
-            .or_default()
-            .entry("model".into())
-            .or_default()
-            .insert("temperature".into(), toml::Value::Integer(1));
+    // --- parse_setting_value tests ---
 
-        let desc = make_descriptor(vec![num_setting("temperature", 0.0, 2.0, 1.0)]);
-        let settings = config.settings_for("provider", "model", &desc).unwrap();
-        assert!(matches!(
-            settings[0].value,
-            wit_types::SettingValue::Number(v) if (v - 1.0).abs() < f64::EPSILON
-        ));
+    fn int_schema(min: i64, max: i64) -> wit_types::SettingSchema {
+        wit_types::SettingSchema::Integer(wit_types::SettingInteger {
+            min,
+            max,
+            default_val: min,
+        })
+    }
+
+    fn enum_schema(allowed: &[&str]) -> wit_types::SettingSchema {
+        wit_types::SettingSchema::Enumeration(wit_types::SettingEnum {
+            allowed: allowed
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+            default_val: allowed[0].to_string(),
+        })
+    }
+
+    fn bool_schema() -> wit_types::SettingSchema {
+        wit_types::SettingSchema::Boolean(wit_types::SettingBoolean { default_val: false })
+    }
+
+    fn num_schema(min: f64, max: f64) -> wit_types::SettingSchema {
+        wit_types::SettingSchema::Number(wit_types::SettingNumber {
+            min,
+            max,
+            default_val: min,
+        })
     }
 
     #[test]
-    fn settings_for_number_rejects_out_of_range() {
-        let mut config = UserConfig::default();
-        config
-            .providers
-            .entry("provider".into())
-            .or_default()
-            .entry("model".into())
-            .or_default()
-            .insert("temperature".into(), toml::Value::Float(5.0));
+    fn parse_setting_value_integer_valid() {
+        let v = parse_setting_value("50", &int_schema(0, 100), "k").unwrap();
+        assert_eq!(v, toml::Value::Integer(50));
+    }
 
-        let desc = make_descriptor(vec![num_setting("temperature", 0.0, 2.0, 1.0)]);
-        config.settings_for("provider", "model", &desc).unwrap_err();
+    #[test]
+    fn parse_setting_value_integer_out_of_bounds() {
+        parse_setting_value("200", &int_schema(0, 100), "k").unwrap_err();
+    }
+
+    #[test]
+    fn parse_setting_value_enum_valid() {
+        let v = parse_setting_value("high", &enum_schema(&["low", "high"]), "k").unwrap();
+        assert_eq!(v, toml::Value::String("high".into()));
+    }
+
+    #[test]
+    fn parse_setting_value_enum_invalid() {
+        parse_setting_value("nope", &enum_schema(&["low", "high"]), "k").unwrap_err();
+    }
+
+    #[test]
+    fn parse_setting_value_boolean() {
+        let v = parse_setting_value("true", &bool_schema(), "k").unwrap();
+        assert_eq!(v, toml::Value::Boolean(true));
+    }
+
+    #[test]
+    fn parse_setting_value_number_valid() {
+        let v = parse_setting_value("0.7", &num_schema(0.0, 2.0), "k").unwrap();
+        assert_eq!(v, toml::Value::Float(0.7));
     }
 }

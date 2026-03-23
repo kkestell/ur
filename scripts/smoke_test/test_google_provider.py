@@ -21,6 +21,9 @@ def run_case(
     thinking_level: str,
     max_output_tokens: str,
 ) -> None:
+    # Extract model ID from "google/model-id"
+    model_id = model_ref.split("/", 1)[1]
+
     print()
     print(
         "Running Google smoke case:",
@@ -28,18 +31,18 @@ def run_case(
         f"(model={model_ref}, thinking_level={thinking_level}, max_output_tokens={max_output_tokens})",
     )
 
-    set_model = h.run("model", "set", "default", model_ref)
+    set_model = h.run("role", "set", "default", model_ref)
     assert model_ref in set_model.stdout
 
-    set_thinking = h.run("model", "setting", "default", "thinking_level", thinking_level)
+    set_thinking = h.run(
+        "extension", "config", "llm-google", "set",
+        f"{model_id}.thinking_level", thinking_level,
+    )
     assert f"thinking_level = {thinking_level}" in set_thinking.stdout
 
     set_max_tokens = h.run(
-        "model",
-        "setting",
-        "default",
-        "max_output_tokens",
-        max_output_tokens,
+        "extension", "config", "llm-google", "set",
+        f"{model_id}.max_output_tokens", max_output_tokens,
     )
     assert f"max_output_tokens = {max_output_tokens}" in set_max_tokens.stdout
 
@@ -60,10 +63,10 @@ def run(h: SmokeHarness) -> None:
         print("Skipping Google provider smoke test: GOOGLE_API_KEY is not set.")
         return
 
-    h.run("extensions", "enable", "test-extension")
+    h.run("extension", "enable", "test-extension")
 
     try:
         for case in GOOGLE_CASES:
             run_case(h, *case)
     finally:
-        h.run("extensions", "disable", "test-extension")
+        h.run("extension", "disable", "test-extension")

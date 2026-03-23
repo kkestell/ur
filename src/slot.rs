@@ -49,10 +49,10 @@ pub fn find_slot(name: &str) -> Option<&'static SlotDefinition> {
 /// We check for the slot-specific interface export to determine which slot
 /// a component fills. General extensions export only `extension`.
 const SLOT_EXPORTS: &[(&str, &str)] = &[
-    ("ur:extension/llm-provider@0.2.0", "llm-provider"),
-    ("ur:extension/session-provider@0.2.0", "session-provider"),
+    ("ur:extension/llm-provider@0.3.0", "llm-provider"),
+    ("ur:extension/session-provider@0.3.0", "session-provider"),
     (
-        "ur:extension/compaction-provider@0.2.0",
+        "ur:extension/compaction-provider@0.3.0",
         "compaction-provider",
     ),
 ];

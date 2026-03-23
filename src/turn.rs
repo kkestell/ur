@@ -122,9 +122,17 @@ pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
     // Resolve "default" role to a provider/model pair.
     let providers = model::collect_provider_models(engine, &manifest)?;
     let (provider_id, model_id) = model::resolve_role(&config, "default", &providers)?;
-    let descriptor = model::find_descriptor(&providers, &provider_id, &model_id)
-        .ok_or_else(|| anyhow::anyhow!("model descriptor not found"))?;
-    let settings = config.settings_for(&provider_id, &model_id, descriptor)?;
+
+    // Load the LLM extension and get settings from list-settings().
+    let init_config = crate::provider::init_config(&provider_id);
+    let (mut settings_probe, extension_id) =
+        load_llm_provider(engine, &manifest, &provider_id, &init_config)?;
+    // Populate dynamic catalog (needed for OpenRouter).
+    let _ = settings_probe.list_models();
+    let descriptors = settings_probe.list_settings()?;
+    drop(settings_probe);
+
+    let settings = config.settings_for(&extension_id, &model_id, &descriptors)?;
 
     // ── 1. Load session ──────────────────────────────────────────────
     let session_id = "demo";
@@ -171,7 +179,7 @@ pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
     // ── 4. First LLM completion (streaming) ──────────────────────────
     println!("[turn] resolving role \"default\" → {provider_id}/{model_id}");
     let init_config = crate::provider::init_config(&provider_id);
-    let mut llm = load_llm_provider(engine, &manifest, &provider_id, &init_config)?;
+    let (mut llm, _) = load_llm_provider(engine, &manifest, &provider_id, &init_config)?;
 
     println!(
         "[turn] calling LLM streaming ({} message{})...",
@@ -307,12 +315,14 @@ fn load_slot(
 }
 
 /// Loads the LLM provider extension matching a specific provider ID.
+///
+/// Returns the instance and its manifest extension ID.
 fn load_llm_provider(
     engine: &Engine,
     manifest: &WorkspaceManifest,
     provider_id: &str,
     init_config: &[(String, String)],
-) -> Result<ExtensionInstance> {
+) -> Result<(ExtensionInstance, String)> {
     for entry in &manifest.extensions {
         if !entry.enabled || entry.slot.as_deref() != Some("llm-provider") {
             continue;
@@ -324,7 +334,7 @@ fn load_llm_provider(
         if let Ok(Ok(id)) = instance.provider_id()
             && id == provider_id
         {
-            return Ok(instance);
+            return Ok((instance, entry.id.clone()));
         }
     }
     bail!("no enabled LLM provider with id \"{provider_id}\"")

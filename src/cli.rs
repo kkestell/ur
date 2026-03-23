@@ -20,31 +20,17 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Manage extensions.
-    Extensions {
+    Extension {
         #[command(subcommand)]
         action: ExtensionAction,
     },
     /// Manage model role mappings.
-    Model {
+    Role {
         #[command(subcommand)]
-        action: ModelAction,
-    },
-    /// Manage configuration.
-    Config {
-        #[command(subcommand)]
-        action: ConfigAction,
+        action: RoleAction,
     },
     /// Run a single agent turn (tracer bullet).
     Run,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum ConfigAction {
-    /// Set the API key for an LLM provider.
-    SetKey {
-        /// Provider ID (e.g. "google", "anthropic").
-        provider: String,
-    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -57,10 +43,38 @@ pub enum ExtensionAction {
     Disable { id: String },
     /// Show details for an extension.
     Inspect { id: String },
+    /// Manage extension configuration.
+    Config {
+        /// Extension ID (e.g. "llm-google").
+        id: String,
+        #[command(subcommand)]
+        action: ExtConfigAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
-pub enum ModelAction {
+pub enum ExtConfigAction {
+    /// List settings (optionally filtered by glob pattern).
+    List {
+        /// Glob pattern to filter keys (e.g. "gemini-flash.*").
+        pattern: Option<String>,
+    },
+    /// Get a setting value.
+    Get {
+        /// Setting key (e.g. "gemini-flash.thinking_level").
+        key: String,
+    },
+    /// Set a setting value.
+    Set {
+        /// Setting key (e.g. "gemini-flash.thinking_level").
+        key: String,
+        /// Setting value. Omit to be prompted for secrets.
+        value: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RoleAction {
     /// Show all role mappings.
     List,
     /// Show what a role resolves to.
@@ -72,30 +86,8 @@ pub enum ModelAction {
     Set {
         /// Role name (e.g. "default", "fast").
         role: String,
-        /// Provider/model reference (e.g. "anthropic/claude-sonnet-4-6").
-        model_ref: String,
-    },
-    /// Show available settings for a role's resolved model.
-    Config {
-        /// Role name to inspect.
-        role: String,
-    },
-    /// Set a provider setting for a role's resolved model.
-    Setting {
-        /// Role name whose model to configure.
-        role: String,
-        /// Setting key (e.g. `thinking_budget`).
-        key: String,
-        /// Setting value (e.g. "8000", "high", "true").
-        value: String,
-    },
-    /// Query a model property.
-    Info {
         /// Provider/model reference (e.g. "google/gemini-3-flash-preview").
         model_ref: String,
-        /// Property name (`context_window_in`, `context_window_out`,
-        /// `knowledge_cutoff`, `cost_in`, `cost_out`).
-        property: String,
     },
 }
 

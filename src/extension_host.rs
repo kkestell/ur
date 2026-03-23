@@ -29,8 +29,8 @@ mod worlds {
             path: "wit",
             world: "llm-extension",
             with: {
-                "ur:extension/types@0.2.0": super::general::ur::extension::types,
-                "ur:extension/host@0.2.0": super::general::ur::extension::host,
+                "ur:extension/types@0.3.0": super::general::ur::extension::types,
+                "ur:extension/host@0.3.0": super::general::ur::extension::host,
             },
         });
     }
@@ -40,8 +40,8 @@ mod worlds {
             path: "wit",
             world: "session-extension",
             with: {
-                "ur:extension/types@0.2.0": super::general::ur::extension::types,
-                "ur:extension/host@0.2.0": super::general::ur::extension::host,
+                "ur:extension/types@0.3.0": super::general::ur::extension::types,
+                "ur:extension/host@0.3.0": super::general::ur::extension::host,
             },
         });
     }
@@ -51,8 +51,8 @@ mod worlds {
             path: "wit",
             world: "compaction-extension",
             with: {
-                "ur:extension/types@0.2.0": super::general::ur::extension::types,
-                "ur:extension/host@0.2.0": super::general::ur::extension::host,
+                "ur:extension/types@0.3.0": super::general::ur::extension::types,
+                "ur:extension/host@0.3.0": super::general::ur::extension::host,
             },
         });
     }
@@ -334,6 +334,28 @@ impl ExtensionInstance {
             }
             Self::General { store, bindings } => {
                 bindings.ur_extension_extension().call_list_tools(store)
+            }
+        }
+    }
+
+    /// Lists the configurable settings declared by this extension.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the guest call traps.
+    pub fn list_settings(&mut self) -> wasmtime::Result<Vec<wit_types::SettingDescriptor>> {
+        match self {
+            Self::Llm { store, bindings } => {
+                bindings.ur_extension_extension().call_list_settings(store)
+            }
+            Self::Session { store, bindings } => {
+                bindings.ur_extension_extension().call_list_settings(store)
+            }
+            Self::Compaction { store, bindings } => {
+                bindings.ur_extension_extension().call_list_settings(store)
+            }
+            Self::General { store, bindings } => {
+                bindings.ur_extension_extension().call_list_settings(store)
             }
         }
     }

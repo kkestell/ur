@@ -1,4 +1,4 @@
-package ur:extension@0.2.0;
+package ur:extension@0.3.0;
 
 /// Shared types used across all interfaces.
 interface types {
@@ -80,20 +80,28 @@ interface types {
         default-val: f64,
     }
 
+    /// Schema for an opaque string setting (API keys, dates, etc.).
+    record setting-string {
+        default-val: string,
+    }
+
     /// Typed schema describing what values a setting accepts.
     variant setting-schema {
         integer(setting-integer),
         enumeration(setting-enum),
         boolean(setting-boolean),
         number(setting-number),
+        %string(setting-string),
     }
 
-    /// Describes a single configurable setting for a model.
+    /// Describes a single configurable setting.
     record setting-descriptor {
         key: string,
         name: string,
         description: string,
         schema: setting-schema,
+        secret: bool,
+        readonly: bool,
     }
 
     /// Describes a model offered by an LLM provider.
@@ -102,12 +110,6 @@ interface types {
         name: string,
         description: string,
         is-default: bool,
-        settings: list<setting-descriptor>,
-        context-window-in: u32,
-        context-window-out: u32,
-        knowledge-cutoff: string,
-        cost-in: u32,
-        cost-out: u32,
     }
 
     /// A typed setting value.
@@ -116,6 +118,7 @@ interface types {
         enumeration(string),
         boolean(bool),
         number(f64),
+        %string(string),
     }
 
     /// A key-value pair with a typed value, for passing settings to providers.
@@ -170,7 +173,7 @@ interface host {
 
 /// Common extension lifecycle and generic tool support.
 interface extension {
-    use types.{config-entry, tool-descriptor};
+    use types.{config-entry, setting-descriptor, tool-descriptor};
 
     /// Initialize the extension with configuration.
     init: func(config: list<config-entry>) -> result<_, string>;
@@ -186,6 +189,12 @@ interface extension {
 
     /// Declare the tools this extension can handle.
     list-tools: func() -> list<tool-descriptor>;
+
+    /// Declare configurable settings for this extension.
+    ///
+    /// Called after `init()`. LLM extensions return per-model settings
+    /// using dotted keys (e.g. "gemini-flash.thinking_level").
+    list-settings: func() -> list<setting-descriptor>;
 }
 
 /// Exported by extensions filling the `llm-provider` slot.

@@ -5,7 +5,7 @@ wit_bindgen::generate!({
 
 use exports::ur::extension::compaction_provider::Guest as CompactionGuest;
 use exports::ur::extension::extension::Guest as ExtGuest;
-use ur::extension::types::{ConfigEntry, Message, ToolDescriptor};
+use ur::extension::types::{ConfigEntry, Message, SettingDescriptor, ToolDescriptor};
 
 struct CompactionLlm;
 
@@ -27,6 +27,10 @@ impl ExtGuest for CompactionLlm {
     }
 
     fn list_tools() -> Vec<ToolDescriptor> {
+        vec![]
+    }
+
+    fn list_settings() -> Vec<SettingDescriptor> {
         vec![]
     }
 }

@@ -13,7 +13,8 @@ use exports::ur::extension::llm_streaming_provider::{
 };
 use ur::extension::types::{
     Completion, CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
-    SettingDescriptor, SettingEnum, SettingInteger, SettingSchema, ToolCall, ToolDescriptor, Usage,
+    SettingDescriptor, SettingEnum, SettingInteger, SettingSchema, SettingString, ToolCall,
+    ToolDescriptor, Usage,
 };
 use wasi::http::outgoing_handler;
 use wasi::http::types::{Fields, IncomingBody, Method, OutgoingBody, OutgoingRequest, Scheme};
@@ -45,6 +46,49 @@ const FLASH_THINKING_LEVELS: &[&str] = &["minimal", "low", "medium", "high"];
 const PRO_THINKING_LEVELS: &[&str] = &["low", "medium", "high"];
 const FLASH_LITE_THINKING_LEVELS: &[&str] = &["minimal", "low", "medium", "high"];
 
+const GOOGLE_MODELS: &[ModelMeta] = &[
+    ModelMeta {
+        id: GEMINI_3_FLASH_PREVIEW,
+        name: "Gemini 3 Flash Preview",
+        description: "Gemini 3 Flash preview with 1M context, 64k output, and Jan 2025 knowledge.",
+        is_default: true,
+        thinking_levels: FLASH_THINKING_LEVELS,
+        default_thinking_level: "high",
+        context_window_in: 1_048_576,
+        context_window_out: 65_536,
+        knowledge_cutoff: "2025-01",
+        cost_in: 500,
+        cost_out: 3000,
+    },
+    ModelMeta {
+        id: GEMINI_3_1_PRO_PREVIEW,
+        name: "Gemini 3.1 Pro Preview",
+        description: "Gemini 3.1 Pro preview with 1M context, 64k output, and Jan 2025 knowledge.",
+        is_default: false,
+        thinking_levels: PRO_THINKING_LEVELS,
+        default_thinking_level: "high",
+        context_window_in: 1_048_576,
+        context_window_out: 65_536,
+        knowledge_cutoff: "2025-01",
+        cost_in: 2000,
+        cost_out: 12000,
+    },
+    ModelMeta {
+        id: GEMINI_3_1_FLASH_LITE_PREVIEW,
+        name: "Gemini 3.1 Flash-Lite Preview",
+        description:
+            "Gemini 3.1 Flash-Lite preview with 1M context, 64k output, and Jan 2025 knowledge.",
+        is_default: false,
+        thinking_levels: FLASH_LITE_THINKING_LEVELS,
+        default_thinking_level: "minimal",
+        context_window_in: 1_048_576,
+        context_window_out: 65_536,
+        knowledge_cutoff: "2025-01",
+        cost_in: 250,
+        cost_out: 1500,
+    },
+];
+
 // ── Extension lifecycle ──────────────────────────────────────────────
 
 impl ExtGuest for LlmGoogle {
@@ -72,6 +116,25 @@ impl ExtGuest for LlmGoogle {
     fn list_tools() -> Vec<ToolDescriptor> {
         vec![]
     }
+
+    fn list_settings() -> Vec<SettingDescriptor> {
+        let mut settings = vec![SettingDescriptor {
+            key: "api_key".into(),
+            name: "API Key".into(),
+            description: "Google AI API key".into(),
+            schema: SettingSchema::String(SettingString {
+                default_val: String::new(),
+            }),
+            secret: true,
+            readonly: false,
+        }];
+
+        for meta in GOOGLE_MODELS {
+            settings.extend(model_settings_descriptors(meta));
+        }
+
+        settings
+    }
 }
 
 // ── LLM provider ────────────────────────────────────────────────────
@@ -82,49 +145,7 @@ impl LlmGuest for LlmGoogle {
     }
 
     fn list_models() -> Vec<ModelDescriptor> {
-        const MODELS: &[ModelMeta] = &[
-            ModelMeta {
-                id: GEMINI_3_FLASH_PREVIEW,
-                name: "Gemini 3 Flash Preview",
-                description: "Gemini 3 Flash preview with 1M context, 64k output, and Jan 2025 knowledge.",
-                is_default: true,
-                thinking_levels: FLASH_THINKING_LEVELS,
-                default_thinking_level: "high",
-                context_window_in: 1_048_576,
-                context_window_out: 65_536,
-                knowledge_cutoff: "2025-01",
-                cost_in: 500,
-                cost_out: 3000,
-            },
-            ModelMeta {
-                id: GEMINI_3_1_PRO_PREVIEW,
-                name: "Gemini 3.1 Pro Preview",
-                description: "Gemini 3.1 Pro preview with 1M context, 64k output, and Jan 2025 knowledge.",
-                is_default: false,
-                thinking_levels: PRO_THINKING_LEVELS,
-                default_thinking_level: "high",
-                context_window_in: 1_048_576,
-                context_window_out: 65_536,
-                knowledge_cutoff: "2025-01",
-                cost_in: 2000,
-                cost_out: 12000,
-            },
-            ModelMeta {
-                id: GEMINI_3_1_FLASH_LITE_PREVIEW,
-                name: "Gemini 3.1 Flash-Lite Preview",
-                description: "Gemini 3.1 Flash-Lite preview with 1M context, 64k output, and Jan 2025 knowledge.",
-                is_default: false,
-                thinking_levels: FLASH_LITE_THINKING_LEVELS,
-                default_thinking_level: "minimal",
-                context_window_in: 1_048_576,
-                context_window_out: 65_536,
-                knowledge_cutoff: "2025-01",
-                cost_in: 250,
-                cost_out: 1500,
-            },
-        ];
-
-        MODELS.iter().map(model_descriptor).collect()
+        GOOGLE_MODELS.iter().map(model_descriptor).collect()
     }
 
     fn complete(
@@ -723,22 +744,15 @@ fn model_descriptor(meta: &ModelMeta) -> ModelDescriptor {
         name: meta.name.into(),
         description: meta.description.into(),
         is_default: meta.is_default,
-        settings: model_settings(meta.thinking_levels, meta.default_thinking_level),
-        context_window_in: meta.context_window_in,
-        context_window_out: meta.context_window_out,
-        knowledge_cutoff: meta.knowledge_cutoff.into(),
-        cost_in: meta.cost_in,
-        cost_out: meta.cost_out,
     }
 }
 
-fn model_settings(
-    thinking_levels: &[&str],
-    default_thinking_level: &str,
-) -> Vec<SettingDescriptor> {
+/// Builds the full dotted-key settings namespace for a model.
+fn model_settings_descriptors(meta: &ModelMeta) -> Vec<SettingDescriptor> {
+    let id = meta.id;
     vec![
         SettingDescriptor {
-            key: "max_output_tokens".into(),
+            key: format!("{id}.max_output_tokens"),
             name: "Max Output Tokens".into(),
             description: "Maximum number of tokens to generate".into(),
             schema: SettingSchema::Integer(SettingInteger {
@@ -746,18 +760,81 @@ fn model_settings(
                 max: GOOGLE_MAX_OUTPUT_TOKENS,
                 default_val: GOOGLE_DEFAULT_MAX_OUTPUT_TOKENS,
             }),
+            secret: false,
+            readonly: false,
         },
         SettingDescriptor {
-            key: "thinking_level".into(),
+            key: format!("{id}.thinking_level"),
             name: "Thinking Level".into(),
-            description: "Relative reasoning depth for Gemini 3.1 models".into(),
+            description: "Relative reasoning depth".into(),
             schema: SettingSchema::Enumeration(SettingEnum {
-                allowed: thinking_levels
+                allowed: meta
+                    .thinking_levels
                     .iter()
                     .map(|level| (*level).to_owned())
                     .collect(),
-                default_val: default_thinking_level.into(),
+                default_val: meta.default_thinking_level.into(),
             }),
+            secret: false,
+            readonly: false,
+        },
+        SettingDescriptor {
+            key: format!("{id}.context_window_in"),
+            name: "Context Window (input)".into(),
+            description: "Maximum input tokens".into(),
+            schema: SettingSchema::Integer(SettingInteger {
+                min: 0,
+                max: i64::from(meta.context_window_in),
+                default_val: i64::from(meta.context_window_in),
+            }),
+            secret: false,
+            readonly: true,
+        },
+        SettingDescriptor {
+            key: format!("{id}.context_window_out"),
+            name: "Context Window (output)".into(),
+            description: "Maximum output tokens".into(),
+            schema: SettingSchema::Integer(SettingInteger {
+                min: 0,
+                max: i64::from(meta.context_window_out),
+                default_val: i64::from(meta.context_window_out),
+            }),
+            secret: false,
+            readonly: true,
+        },
+        SettingDescriptor {
+            key: format!("{id}.knowledge_cutoff"),
+            name: "Knowledge Cutoff".into(),
+            description: "Training data cutoff date".into(),
+            schema: SettingSchema::String(SettingString {
+                default_val: meta.knowledge_cutoff.into(),
+            }),
+            secret: false,
+            readonly: true,
+        },
+        SettingDescriptor {
+            key: format!("{id}.cost_in"),
+            name: "Input Cost".into(),
+            description: "Millidollars per million input tokens".into(),
+            schema: SettingSchema::Integer(SettingInteger {
+                min: 0,
+                max: i64::from(meta.cost_in),
+                default_val: i64::from(meta.cost_in),
+            }),
+            secret: false,
+            readonly: true,
+        },
+        SettingDescriptor {
+            key: format!("{id}.cost_out"),
+            name: "Output Cost".into(),
+            description: "Millidollars per million output tokens".into(),
+            schema: SettingSchema::Integer(SettingInteger {
+                min: 0,
+                max: i64::from(meta.cost_out),
+                default_val: i64::from(meta.cost_out),
+            }),
+            secret: false,
+            readonly: true,
         },
     ]
 }
@@ -882,31 +959,18 @@ mod tests {
     }
 
     #[test]
-    fn list_models_exposes_model_specific_thinking_levels() {
-        let models = LlmGoogle::list_models();
+    fn list_settings_exposes_model_specific_thinking_levels() {
+        let settings = LlmGoogle::list_settings();
 
-        let flash = model_by_id(&models, "gemini-3-flash-preview");
-        let pro = model_by_id(&models, "gemini-3.1-pro-preview");
-        let flash_lite = model_by_id(&models, "gemini-3.1-flash-lite-preview");
+        // api_key is first, then per-model settings
+        assert!(settings.iter().any(|s| s.key == "api_key" && s.secret));
 
-        for model in [&flash, &pro, &flash_lite] {
-            assert!(
-                model
-                    .settings
-                    .iter()
-                    .any(|setting| setting.key == "max_output_tokens")
-            );
-            assert!(
-                !model
-                    .settings
-                    .iter()
-                    .any(|setting| setting.key == "temperature")
-            );
-        }
-
-        let flash_thinking = setting_by_key(&flash.settings, "thinking_level");
-        let pro_thinking = setting_by_key(&pro.settings, "thinking_level");
-        let flash_lite_thinking = setting_by_key(&flash_lite.settings, "thinking_level");
+        let flash_thinking =
+            setting_by_key(&settings, "gemini-3-flash-preview.thinking_level");
+        let pro_thinking =
+            setting_by_key(&settings, "gemini-3.1-pro-preview.thinking_level");
+        let flash_lite_thinking =
+            setting_by_key(&settings, "gemini-3.1-flash-lite-preview.thinking_level");
 
         assert!(matches!(
             &flash_thinking.schema,
@@ -926,6 +990,11 @@ mod tests {
                 if schema.allowed == vec!["minimal", "low", "medium", "high"]
                     && schema.default_val == "minimal"
         ));
+
+        // Readonly metadata
+        let flash_ctx =
+            setting_by_key(&settings, "gemini-3-flash-preview.context_window_in");
+        assert!(flash_ctx.readonly);
     }
 
     #[test]

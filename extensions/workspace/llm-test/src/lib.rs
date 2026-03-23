@@ -12,7 +12,7 @@ use exports::ur::extension::llm_streaming_provider::{
 };
 use ur::extension::types::{
     Completion, CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart,
-    ModelDescriptor, ToolCall, ToolDescriptor, Usage,
+    ModelDescriptor, SettingDescriptor, ToolCall, ToolDescriptor, Usage,
 };
 
 struct LlmTest;
@@ -39,6 +39,10 @@ impl ExtGuest for LlmTest {
     fn list_tools() -> Vec<ToolDescriptor> {
         vec![]
     }
+
+    fn list_settings() -> Vec<SettingDescriptor> {
+        vec![]
+    }
 }
 
 // ── LLM provider ────────────────────────────────────────────────────
@@ -54,12 +58,6 @@ impl LlmGuest for LlmTest {
             name: "Echo".into(),
             description: "Deterministic test model".into(),
             is_default: true,
-            settings: vec![],
-            context_window_in: 1_000_000,
-            context_window_out: 8_192,
-            knowledge_cutoff: "2025-01".into(),
-            cost_in: 0,
-            cost_out: 0,
         }]
     }
 

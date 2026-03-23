@@ -13,8 +13,8 @@ use exports::ur::extension::llm_streaming_provider::{
 };
 use ur::extension::types::{
     Completion, CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
-    SettingBoolean, SettingDescriptor, SettingInteger, SettingNumber, SettingSchema, SettingValue,
-    ToolCall, ToolDescriptor, Usage,
+    SettingBoolean, SettingDescriptor, SettingInteger, SettingNumber, SettingSchema, SettingString,
+    SettingValue, ToolCall, ToolDescriptor, Usage,
 };
 use wasi::http::outgoing_handler;
 use wasi::http::types::{Fields, IncomingBody, Method, OutgoingBody, OutgoingRequest, Scheme};
@@ -64,6 +64,30 @@ impl ExtGuest for LlmOpenRouter {
 
     fn list_tools() -> Vec<ToolDescriptor> {
         vec![]
+    }
+
+    fn list_settings() -> Vec<SettingDescriptor> {
+        let mut settings = vec![SettingDescriptor {
+            key: "api_key".into(),
+            name: "API Key".into(),
+            description: "OpenRouter API key".into(),
+            schema: SettingSchema::String(SettingString {
+                default_val: String::new(),
+            }),
+            secret: true,
+            readonly: false,
+        }];
+
+        // Use cached catalog if available (populated by list_models).
+        CACHED_CATALOG.with(|c| {
+            if let Some(catalog) = c.borrow().as_ref() {
+                for m in catalog {
+                    settings.extend(catalog_model_settings(m));
+                }
+            }
+        });
+
+        settings
     }
 }
 
@@ -518,29 +542,78 @@ fn is_usable_model(m: &CatalogModel) -> bool {
 // ── Catalog → ModelDescriptor mapping ───────────────────────────────
 
 fn catalog_model_to_descriptor(m: &CatalogModel) -> ModelDescriptor {
+    ModelDescriptor {
+        id: m.id.clone(),
+        name: m.name.clone(),
+        description: m.description.clone(),
+        is_default: false,
+    }
+}
+
+/// Builds the full dotted-key settings namespace for a catalog model.
+fn catalog_model_settings(m: &CatalogModel) -> Vec<SettingDescriptor> {
     let context_in = u32::try_from(m.context_length.unwrap_or(0)).unwrap_or(u32::MAX);
     let context_out = m
         .top_provider
         .as_ref()
         .and_then(|tp| tp.max_completion_tokens)
         .map_or(4096, |v| u32::try_from(v).unwrap_or(u32::MAX));
-
     let (cost_in, cost_out) = convert_pricing(m);
 
-    let settings = build_model_settings(m, context_out);
+    let id = &m.id;
+    let mut settings = build_model_settings(m, context_out, id);
 
-    ModelDescriptor {
-        id: m.id.clone(),
-        name: m.name.clone(),
-        description: m.description.clone(),
-        is_default: false,
-        settings,
-        context_window_in: context_in,
-        context_window_out: context_out,
-        knowledge_cutoff: "unknown".into(),
-        cost_in,
-        cost_out,
-    }
+    // Readonly metadata.
+    settings.push(SettingDescriptor {
+        key: format!("{id}.context_window_in"),
+        name: "Context Window (input)".into(),
+        description: "Maximum input tokens".into(),
+        schema: SettingSchema::Integer(SettingInteger {
+            min: 0,
+            max: i64::from(context_in),
+            default_val: i64::from(context_in),
+        }),
+        secret: false,
+        readonly: true,
+    });
+    settings.push(SettingDescriptor {
+        key: format!("{id}.context_window_out"),
+        name: "Context Window (output)".into(),
+        description: "Maximum output tokens".into(),
+        schema: SettingSchema::Integer(SettingInteger {
+            min: 0,
+            max: i64::from(context_out),
+            default_val: i64::from(context_out),
+        }),
+        secret: false,
+        readonly: true,
+    });
+    settings.push(SettingDescriptor {
+        key: format!("{id}.cost_in"),
+        name: "Input Cost".into(),
+        description: "Millidollars per million input tokens".into(),
+        schema: SettingSchema::Integer(SettingInteger {
+            min: 0,
+            max: i64::from(cost_in),
+            default_val: i64::from(cost_in),
+        }),
+        secret: false,
+        readonly: true,
+    });
+    settings.push(SettingDescriptor {
+        key: format!("{id}.cost_out"),
+        name: "Output Cost".into(),
+        description: "Millidollars per million output tokens".into(),
+        schema: SettingSchema::Integer(SettingInteger {
+            min: 0,
+            max: i64::from(cost_out),
+            default_val: i64::from(cost_out),
+        }),
+        secret: false,
+        readonly: true,
+    });
+
+    settings
 }
 
 /// Convert pricing (dollars per token as decimal strings) to
@@ -585,13 +658,13 @@ fn dollars_per_token_to_millidollars_per_million(dollars_per_token: f64) -> u32 
     }
 }
 
-fn build_model_settings(m: &CatalogModel, max_output: u32) -> Vec<SettingDescriptor> {
+fn build_model_settings(m: &CatalogModel, max_output: u32, id: &str) -> Vec<SettingDescriptor> {
     let supported = m.supported_parameters.as_deref().unwrap_or(&[]);
     let mut settings = Vec::new();
 
     if has_param(supported, "max_tokens") || has_param(supported, "max_completion_tokens") {
         settings.push(SettingDescriptor {
-            key: "max_output_tokens".into(),
+            key: format!("{id}.max_output_tokens"),
             name: "Max Output Tokens".into(),
             description: "Maximum number of tokens to generate".into(),
             schema: SettingSchema::Integer(SettingInteger {
@@ -599,12 +672,14 @@ fn build_model_settings(m: &CatalogModel, max_output: u32) -> Vec<SettingDescrip
                 max: i64::from(max_output),
                 default_val: i64::from(max_output.min(4096)),
             }),
+            secret: false,
+            readonly: false,
         });
     }
 
     if has_param(supported, "temperature") {
         settings.push(SettingDescriptor {
-            key: "temperature".into(),
+            key: format!("{id}.temperature"),
             name: "Temperature".into(),
             description: "Sampling temperature (0.0 = deterministic, 2.0 = creative)".into(),
             schema: SettingSchema::Number(SettingNumber {
@@ -612,12 +687,14 @@ fn build_model_settings(m: &CatalogModel, max_output: u32) -> Vec<SettingDescrip
                 max: 2.0,
                 default_val: 1.0,
             }),
+            secret: false,
+            readonly: false,
         });
     }
 
     if has_param(supported, "top_p") {
         settings.push(SettingDescriptor {
-            key: "top_p".into(),
+            key: format!("{id}.top_p"),
             name: "Top P".into(),
             description: "Nucleus sampling threshold".into(),
             schema: SettingSchema::Number(SettingNumber {
@@ -625,12 +702,14 @@ fn build_model_settings(m: &CatalogModel, max_output: u32) -> Vec<SettingDescrip
                 max: 1.0,
                 default_val: 1.0,
             }),
+            secret: false,
+            readonly: false,
         });
     }
 
     if has_param(supported, "frequency_penalty") {
         settings.push(SettingDescriptor {
-            key: "frequency_penalty".into(),
+            key: format!("{id}.frequency_penalty"),
             name: "Frequency Penalty".into(),
             description: "Penalizes token frequency in output".into(),
             schema: SettingSchema::Number(SettingNumber {
@@ -638,12 +717,14 @@ fn build_model_settings(m: &CatalogModel, max_output: u32) -> Vec<SettingDescrip
                 max: 2.0,
                 default_val: 0.0,
             }),
+            secret: false,
+            readonly: false,
         });
     }
 
     if has_param(supported, "presence_penalty") {
         settings.push(SettingDescriptor {
-            key: "presence_penalty".into(),
+            key: format!("{id}.presence_penalty"),
             name: "Presence Penalty".into(),
             description: "Penalizes token presence in output".into(),
             schema: SettingSchema::Number(SettingNumber {
@@ -651,12 +732,14 @@ fn build_model_settings(m: &CatalogModel, max_output: u32) -> Vec<SettingDescrip
                 max: 2.0,
                 default_val: 0.0,
             }),
+            secret: false,
+            readonly: false,
         });
     }
 
     if has_param(supported, "seed") {
         settings.push(SettingDescriptor {
-            key: "seed".into(),
+            key: format!("{id}.seed"),
             name: "Seed".into(),
             description: "Random seed for deterministic generation".into(),
             schema: SettingSchema::Integer(SettingInteger {
@@ -664,15 +747,19 @@ fn build_model_settings(m: &CatalogModel, max_output: u32) -> Vec<SettingDescrip
                 max: i64::from(i32::MAX),
                 default_val: 0,
             }),
+            secret: false,
+            readonly: false,
         });
     }
 
     if has_param(supported, "parallel_tool_calls") {
         settings.push(SettingDescriptor {
-            key: "parallel_tool_calls".into(),
+            key: format!("{id}.parallel_tool_calls"),
             name: "Parallel Tool Calls".into(),
             description: "Allow the model to make multiple tool calls in parallel".into(),
             schema: SettingSchema::Boolean(SettingBoolean { default_val: true }),
+            secret: false,
+            readonly: false,
         });
     }
 

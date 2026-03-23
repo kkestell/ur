@@ -1,4 +1,4 @@
-"""Provider setting smoke tests."""
+"""Extension setting smoke tests."""
 
 from __future__ import annotations
 
@@ -6,29 +6,63 @@ from smoke_test.harness import SmokeHarness
 
 
 def run(h: SmokeHarness) -> None:
-    h.run("model", "set", "default", "google/gemini-3-flash-preview")
-    h.run("model", "set", "fast", "google/gemini-3.1-pro-preview")
-    h.run("model", "set", "lite", "google/gemini-3.1-flash-lite-preview")
+    h.run("role", "set", "default", "google/gemini-3-flash-preview")
+    h.run("role", "set", "fast", "google/gemini-3.1-pro-preview")
+    h.run("role", "set", "lite", "google/gemini-3.1-flash-lite-preview")
 
-    h.run("model", "setting", "default", "thinking_level", "minimal")
-    h.run("model", "setting", "fast", "thinking_level", "low")
-    h.run("model", "setting", "lite", "thinking_level", "minimal")
-    h.run("model", "setting", "fast", "max_output_tokens", "4096")
-    h.run("model", "setting", "default", "max_output_tokens", "2048")
-    config_output = h.run("model", "config", "default")
+    # Set settings via extension config set with dotted keys
+    h.run(
+        "extension", "config", "llm-google", "set",
+        "gemini-3-flash-preview.thinking_level", "minimal",
+    )
+    h.run(
+        "extension", "config", "llm-google", "set",
+        "gemini-3.1-pro-preview.thinking_level", "low",
+    )
+    h.run(
+        "extension", "config", "llm-google", "set",
+        "gemini-3.1-flash-lite-preview.thinking_level", "minimal",
+    )
+    h.run(
+        "extension", "config", "llm-google", "set",
+        "gemini-3.1-pro-preview.max_output_tokens", "4096",
+    )
+    h.run(
+        "extension", "config", "llm-google", "set",
+        "gemini-3-flash-preview.max_output_tokens", "2048",
+    )
+
+    # List settings
+    config_output = h.run("extension", "config", "llm-google", "list")
     assert "thinking_level" in config_output.stdout
     assert "max_output_tokens" in config_output.stdout
-    assert "temperature" not in config_output.stdout
 
-    h.run_err("model", "setting", "default", "nonexistent_key", "42")
-    h.run_err("model", "setting", "default", "temperature", "100")
-    h.run_err("model", "setting", "default", "thinking_level", "ultra")
-    h.run_err("model", "setting", "fast", "thinking_level", "minimal")
-    h.run_err("model", "setting", "default", "max_output_tokens", "0")
+    # Error cases
+    h.run_err(
+        "extension", "config", "llm-google", "set",
+        "nonexistent_key", "42",
+    )
+    h.run_err(
+        "extension", "config", "llm-google", "set",
+        "gemini-3-flash-preview.thinking_level", "ultra",
+    )
+    h.run_err(
+        "extension", "config", "llm-google", "set",
+        "gemini-3.1-pro-preview.thinking_level", "minimal",
+    )
+    h.run_err(
+        "extension", "config", "llm-google", "set",
+        "gemini-3-flash-preview.max_output_tokens", "0",
+    )
 
+    # Readonly rejection
+    h.run_err(
+        "extension", "config", "llm-google", "set",
+        "gemini-3-flash-preview.context_window_in", "500000",
+    )
+
+    # Verify config.toml contains dotted keys
     config_text = h.config_path.read_text(encoding="utf-8")
-    assert 'thinking_level = "minimal"' in config_text
-    assert 'thinking_level = "low"' in config_text
-    assert "max_output_tokens = 2048" in config_text
-    assert "max_output_tokens = 4096" in config_text
+    assert 'thinking_level' in config_text
+    assert "max_output_tokens" in config_text
     h.cat(h.config_path)

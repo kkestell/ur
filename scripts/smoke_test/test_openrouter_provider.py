@@ -12,21 +12,21 @@ def run(h: SmokeHarness) -> None:
         print("Skipping OpenRouter provider smoke test: OPENROUTER_API_KEY is not set.")
         return
 
-    h.run("extensions", "enable", "test-extension")
-    h.run("extensions", "disable", "llm-google")
+    h.run("extension", "enable", "test-extension")
+    h.run("extension", "disable", "llm-google")
 
     try:
         # Set a specific model for deterministic testing.
-        h.run("model", "set", "default", "openrouter/qwen/qwen3.5-9b")
+        h.run("role", "set", "default", "openrouter/qwen/qwen3.5-9b")
 
         # Verify it resolves correctly.
-        get_result = h.run("model", "get", "default")
+        get_result = h.run("role", "get", "default")
         assert "openrouter/qwen/qwen3.5-9b" in get_result.stdout, (
             f"expected openrouter/qwen/qwen3.5-9b, got: {get_result.stdout}"
         )
 
         # Show dynamic settings surface.
-        h.run("model", "config", "default")
+        h.run("extension", "config", "llm-openrouter", "list")
 
         # Run the tool-calling flow.
         result = h.run(
@@ -43,5 +43,5 @@ def run(h: SmokeHarness) -> None:
         assert "paris" in stdout_lower
         assert "coat" in stdout_lower
     finally:
-        h.run("extensions", "enable", "llm-google")
-        h.run("extensions", "disable", "test-extension")
+        h.run("extension", "enable", "llm-google")
+        h.run("extension", "disable", "test-extension")
