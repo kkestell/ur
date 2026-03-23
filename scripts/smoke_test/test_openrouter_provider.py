@@ -16,10 +16,13 @@ def run(h: SmokeHarness) -> None:
     h.run("extensions", "disable", "llm-google")
 
     try:
-        # Verify default model resolves to openrouter.
+        # Set a specific model for deterministic testing.
+        h.run("model", "set", "default", "openrouter/qwen/qwen3.5-9b")
+
+        # Verify it resolves correctly.
         get_result = h.run("model", "get", "default")
-        assert "openrouter/" in get_result.stdout, (
-            f"expected openrouter default model, got: {get_result.stdout}"
+        assert "openrouter/qwen/qwen3.5-9b" in get_result.stdout, (
+            f"expected openrouter/qwen/qwen3.5-9b, got: {get_result.stdout}"
         )
 
         # Show dynamic settings surface.

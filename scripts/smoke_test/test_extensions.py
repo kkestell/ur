@@ -12,7 +12,13 @@ def run(h: SmokeHarness) -> None:
     h.run("extensions", "inspect", "compaction-llm")
     h.run_err("extensions", "inspect", "nonexistent")
 
-    h.run_err("extensions", "disable", "llm-google")
+    # llm-provider is AtLeastOne, so disable one of the two enabled providers.
+    h.run("extensions", "disable", "llm-google")
+    # Now only llm-openrouter remains — disabling it should fail.
+    h.run_err("extensions", "disable", "llm-openrouter")
+    # Re-enable google for the rest of the suite.
+    h.run("extensions", "enable", "llm-google")
+
     h.run_err("extensions", "disable", "compaction-llm")
     h.run_err("extensions", "disable", "session-jsonl")
     h.run_err("extensions", "enable", "nonexistent")
