@@ -381,18 +381,18 @@ This proves:
 
 ## Acceptance Criteria
 
-- [ ] New built-in crate `extensions/system/llm-openrouter` builds for `wasm32-wasip2` and exports `extension`, `llm-provider`, and `llm-streaming-provider`
-- [ ] `ur model` commands initialize `openrouter` with `OPENROUTER_API_KEY` and can call live `list_models()`
-- [ ] `parse_model_ref()` accepts `openrouter/<author>/<slug>` model refs and config round-trips them correctly
-- [ ] WIT/host config/model CLI support number settings in addition to integer, enum, and boolean
-- [ ] `list_models()` fetches `GET /api/v1/models` dynamically, filters to tool-capable text models, and returns deterministic descriptors
-- [ ] OpenRouter raw `supported_parameters` are captured internally and drive the per-model `settings` descriptors exposed to the CLI
-- [ ] OpenRouter metadata populates `context_window_in`, `context_window_out`, `cost_in`, and `cost_out` with tested conversions
-- [ ] Requests use `provider.require_parameters = true` so configured settings/tool use are not silently ignored by routing
-- [ ] Non-streaming and streaming completions both translate `ur` messages/tools to OpenRouter format and parse assistant tool calls back into `MessagePart::ToolCall`
-- [ ] Streaming parser ignores SSE comments and handles mid-stream error events cleanly
-- [ ] Live smoke test skips without `OPENROUTER_API_KEY`, otherwise demonstrates streaming + tool calling end-to-end against OpenRouter
-- [ ] `make check`, `make test`, `make clippy`, and `make smoke-test` pass
+- [x] New built-in crate `extensions/system/llm-openrouter` builds for `wasm32-wasip2` and exports `extension`, `llm-provider`, and `llm-streaming-provider`
+- [x] `ur model` commands initialize `openrouter` with `OPENROUTER_API_KEY` and can call live `list_models()`
+- [x] `parse_model_ref()` accepts `openrouter/<author>/<slug>` model refs and config round-trips them correctly
+- [x] WIT/host config/model CLI support number settings in addition to integer, enum, and boolean
+- [x] `list_models()` fetches `GET /api/v1/models` dynamically, filters to tool-capable text models, and returns deterministic descriptors
+- [x] OpenRouter raw `supported_parameters` are captured internally and drive the per-model `settings` descriptors exposed to the CLI
+- [x] OpenRouter metadata populates `context_window_in`, `context_window_out`, `cost_in`, and `cost_out` with tested conversions
+- [x] Requests use `provider.require_parameters = true` so configured settings/tool use are not silently ignored by routing
+- [x] Non-streaming and streaming completions both translate `ur` messages/tools to OpenRouter format and parse assistant tool calls back into `MessagePart::ToolCall`
+- [x] Streaming parser ignores SSE comments and handles mid-stream error events cleanly
+- [x] Live smoke test skips without `OPENROUTER_API_KEY`, otherwise demonstrates streaming + tool calling end-to-end against OpenRouter
+- [x] `make check`, `make test`, `make clippy`, and `make smoke-test` pass
 
 ## Implementation Order
 
