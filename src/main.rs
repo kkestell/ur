@@ -82,6 +82,12 @@ fn main() -> Result<()> {
                 ModelAction::Setting { role, key, value } => {
                     model::cmd_setting(&ur_root, &mut config, &providers, &role, &key, &value)?;
                 }
+                ModelAction::Info {
+                    model_ref,
+                    property,
+                } => {
+                    model::cmd_info(&providers, &model_ref, &property)?;
+                }
             }
         }
     }

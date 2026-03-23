@@ -46,3 +46,23 @@ def run(h: SmokeHarness) -> None:
     h.run_err("model", "set", "default", "fake/nonexistent")
     h.run_err("model", "set", "default", "invalid-no-slash")
     h.run_err("model", "set", "default", "google/nonexistent-model")
+
+    # --- model info ---
+
+    result = h.run("model", "info", "google/gemini-3-flash-preview", "cost_in")
+    assert "0.50" in result.stdout
+
+    result = h.run("model", "info", "google/gemini-3-flash-preview", "context_window_in")
+    assert "1048576" in result.stdout
+
+    result = h.run("model", "info", "google/gemini-3-flash-preview", "knowledge_cutoff")
+    assert "2025-01" in result.stdout
+
+    result = h.run("model", "info", "google/gemini-3-flash-preview", "context_window_out")
+    assert "65536" in result.stdout
+
+    result = h.run("model", "info", "google/gemini-3-flash-preview", "cost_out")
+    assert "3.00" in result.stdout
+
+    h.run_err("model", "info", "google/gemini-3-flash-preview", "nonexistent")
+    h.run_err("model", "info", "google/nonexistent", "cost_in")

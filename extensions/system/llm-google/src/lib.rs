@@ -82,32 +82,49 @@ impl LlmGuest for LlmGoogle {
     }
 
     fn list_models() -> Vec<ModelDescriptor> {
-        vec![
-            model_descriptor(
-                GEMINI_3_FLASH_PREVIEW,
-                "Gemini 3 Flash Preview",
-                "Gemini 3 Flash preview with 1M context, 64k output, and Jan 2025 knowledge.",
-                true,
-                FLASH_THINKING_LEVELS,
-                "high",
-            ),
-            model_descriptor(
-                GEMINI_3_1_PRO_PREVIEW,
-                "Gemini 3.1 Pro Preview",
-                "Gemini 3.1 Pro preview with 1M context, 64k output, and Jan 2025 knowledge.",
-                false,
-                PRO_THINKING_LEVELS,
-                "high",
-            ),
-            model_descriptor(
-                GEMINI_3_1_FLASH_LITE_PREVIEW,
-                "Gemini 3.1 Flash-Lite Preview",
-                "Gemini 3.1 Flash-Lite preview with 1M context, 64k output, and Jan 2025 knowledge.",
-                false,
-                FLASH_LITE_THINKING_LEVELS,
-                "minimal",
-            ),
-        ]
+        const MODELS: &[ModelMeta] = &[
+            ModelMeta {
+                id: GEMINI_3_FLASH_PREVIEW,
+                name: "Gemini 3 Flash Preview",
+                description: "Gemini 3 Flash preview with 1M context, 64k output, and Jan 2025 knowledge.",
+                is_default: true,
+                thinking_levels: FLASH_THINKING_LEVELS,
+                default_thinking_level: "high",
+                context_window_in: 1_048_576,
+                context_window_out: 65_536,
+                knowledge_cutoff: "2025-01",
+                cost_in: 500,
+                cost_out: 3000,
+            },
+            ModelMeta {
+                id: GEMINI_3_1_PRO_PREVIEW,
+                name: "Gemini 3.1 Pro Preview",
+                description: "Gemini 3.1 Pro preview with 1M context, 64k output, and Jan 2025 knowledge.",
+                is_default: false,
+                thinking_levels: PRO_THINKING_LEVELS,
+                default_thinking_level: "high",
+                context_window_in: 1_048_576,
+                context_window_out: 65_536,
+                knowledge_cutoff: "2025-01",
+                cost_in: 2000,
+                cost_out: 12000,
+            },
+            ModelMeta {
+                id: GEMINI_3_1_FLASH_LITE_PREVIEW,
+                name: "Gemini 3.1 Flash-Lite Preview",
+                description: "Gemini 3.1 Flash-Lite preview with 1M context, 64k output, and Jan 2025 knowledge.",
+                is_default: false,
+                thinking_levels: FLASH_LITE_THINKING_LEVELS,
+                default_thinking_level: "minimal",
+                context_window_in: 1_048_576,
+                context_window_out: 65_536,
+                knowledge_cutoff: "2025-01",
+                cost_in: 250,
+                cost_out: 1500,
+            },
+        ];
+
+        MODELS.iter().map(model_descriptor).collect()
     }
 
     fn complete(
@@ -686,20 +703,32 @@ fn http_post_streaming(
 
 // ── Settings helpers ────────────────────────────────────────────────
 
-fn model_descriptor(
-    id: &str,
-    name: &str,
-    description: &str,
+struct ModelMeta {
+    id: &'static str,
+    name: &'static str,
+    description: &'static str,
     is_default: bool,
-    thinking_levels: &[&str],
-    default_thinking_level: &str,
-) -> ModelDescriptor {
+    thinking_levels: &'static [&'static str],
+    default_thinking_level: &'static str,
+    context_window_in: u32,
+    context_window_out: u32,
+    knowledge_cutoff: &'static str,
+    cost_in: u32,
+    cost_out: u32,
+}
+
+fn model_descriptor(meta: &ModelMeta) -> ModelDescriptor {
     ModelDescriptor {
-        id: id.into(),
-        name: name.into(),
-        description: description.into(),
-        is_default,
-        settings: model_settings(thinking_levels, default_thinking_level),
+        id: meta.id.into(),
+        name: meta.name.into(),
+        description: meta.description.into(),
+        is_default: meta.is_default,
+        settings: model_settings(meta.thinking_levels, meta.default_thinking_level),
+        context_window_in: meta.context_window_in,
+        context_window_out: meta.context_window_out,
+        knowledge_cutoff: meta.knowledge_cutoff.into(),
+        cost_in: meta.cost_in,
+        cost_out: meta.cost_out,
     }
 }
 

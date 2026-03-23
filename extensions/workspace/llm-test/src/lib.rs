@@ -55,6 +55,11 @@ impl LlmGuest for LlmTest {
             description: "Deterministic test model".into(),
             is_default: true,
             settings: vec![],
+            context_window_in: 1_000_000,
+            context_window_out: 8_192,
+            knowledge_cutoff: "2025-01".into(),
+            cost_in: 0,
+            cost_out: 0,
         }]
     }
 

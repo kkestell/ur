@@ -12,12 +12,12 @@ individual properties.
 
 ## Acceptance Criteria
 
-- [ ] WIT `model-descriptor` includes five new required fields
-- [ ] Google provider populates all fields for all three models
-- [ ] Test/mock LLM providers populate all fields (can use placeholder values)
-- [ ] `ur model info <provider/model> <property>` prints a single value
-- [ ] Smoke test covers the new command
-- [ ] All existing tests pass (`make verify`)
+- [x] WIT `model-descriptor` includes five new required fields
+- [x] Google provider populates all fields for all three models
+- [x] Test/mock LLM providers populate all fields (can use placeholder values)
+- [x] `ur model info <provider/model> <property>` prints a single value
+- [x] Smoke test covers the new command
+- [x] All existing tests pass (`make verify`)
 
 ## WIT Changes
 
@@ -46,17 +46,17 @@ $12/Mtok = 12000. The CLI displays as dollars by dividing by 1000.
 
 ## Google Provider Data
 
-`extensions/system/llm-google/src/lib.rs` — update to 3.1 models and
-add flash-lite:
+`extensions/system/llm-google/src/lib.rs` — populate metadata for the
+three existing models:
 
 | Model | ctx_in | ctx_out | cutoff | cost_in | cost_out |
 |---|---|---|---|---|---|
-| gemini-3.1-flash-lite-preview | 1,048,576 | 65,536 | 2025-01 | 250 | 1500 |
-| gemini-3.1-flash-preview | 1,048,576 | 65,536 | 2025-01 | 500 | 3000 |
+| gemini-3-flash-preview | 1,048,576 | 65,536 | 2025-01 | 500 | 3000 |
 | gemini-3.1-pro-preview | 1,048,576 | 65,536 | 2025-01 | 2000 | 12000 |
+| gemini-3.1-flash-lite-preview | 1,048,576 | 65,536 | 2025-01 | 250 | 1500 |
 
-Flash-lite is $0.25/$1.50 (text input pricing). Pro uses the
-<200k token tier ($2/$12).
+Flash is $0.50/$3.00 (text input pricing). Pro uses the
+<200k token tier ($2/$12). Flash-lite is $0.25/$1.50.
 
 ## Test/Mock Providers
 
@@ -71,7 +71,7 @@ values (e.g. `context_window_in: 1_000_000`, `cost_in: 0`).
 ```rust
 /// Query a model property.
 Info {
-    /// Provider/model reference (e.g. "google/gemini-3.1-flash-preview").
+    /// Provider/model reference (e.g. "google/gemini-3-flash-preview").
     model_ref: String,
     /// Property name (context_window_in, context_window_out,
     /// knowledge_cutoff, cost_in, cost_out).
@@ -98,17 +98,17 @@ Info {
 
 ```python
 # Query each property for a known model
-result = h.run("model", "info", "google/gemini-3.1-flash-preview", "cost_in")
+result = h.run("model", "info", "google/gemini-3-flash-preview", "cost_in")
 assert "0.50" in result.stdout
 
-result = h.run("model", "info", "google/gemini-3.1-flash-preview", "context_window_in")
+result = h.run("model", "info", "google/gemini-3-flash-preview", "context_window_in")
 assert "1000000" in result.stdout
 
-result = h.run("model", "info", "google/gemini-3.1-flash-preview", "knowledge_cutoff")
+result = h.run("model", "info", "google/gemini-3-flash-preview", "knowledge_cutoff")
 assert "2025-01" in result.stdout
 
 # Error on unknown property
-h.run_err("model", "info", "google/gemini-3.1-flash-preview", "nonexistent")
+h.run_err("model", "info", "google/gemini-3-flash-preview", "nonexistent")
 
 # Error on unknown model
 h.run_err("model", "info", "google/nonexistent", "cost_in")

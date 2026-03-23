@@ -228,6 +228,29 @@ pub fn cmd_setting(
     Ok(())
 }
 
+pub fn cmd_info(provider_models: &ProviderModels, model_ref: &str, property: &str) -> Result<()> {
+    let (provider_id, model_id) = config::parse_model_ref(model_ref).ok_or_else(|| {
+        anyhow::anyhow!("invalid model reference '{model_ref}' (expected provider/model)")
+    })?;
+
+    let descriptor = find_descriptor(provider_models, provider_id, model_id)
+        .ok_or_else(|| anyhow::anyhow!("model '{model_ref}' not found in any enabled provider"))?;
+
+    println!("{}", format_property(descriptor, property)?);
+    Ok(())
+}
+
+fn format_property(descriptor: &wit_types::ModelDescriptor, property: &str) -> Result<String> {
+    match property {
+        "context_window_in" => Ok(descriptor.context_window_in.to_string()),
+        "context_window_out" => Ok(descriptor.context_window_out.to_string()),
+        "knowledge_cutoff" => Ok(descriptor.knowledge_cutoff.clone()),
+        "cost_in" => Ok(format!("{:.2}", f64::from(descriptor.cost_in) / 1000.0)),
+        "cost_out" => Ok(format!("{:.2}", f64::from(descriptor.cost_out) / 1000.0)),
+        _ => bail!("unknown property '{property}'"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,6 +262,11 @@ mod tests {
             description: String::new(),
             is_default,
             settings: vec![],
+            context_window_in: 1_000_000,
+            context_window_out: 8_192,
+            knowledge_cutoff: "2025-01".into(),
+            cost_in: 0,
+            cost_out: 0,
         }
     }
 
@@ -382,5 +410,90 @@ mod tests {
     #[test]
     fn parse_setting_value_boolean_invalid() {
         parse_setting_value("yes", &bool_schema(), "k").unwrap_err();
+    }
+
+    // --- format_property tests ---
+
+    fn descriptor_with_metadata() -> wit_types::ModelDescriptor {
+        wit_types::ModelDescriptor {
+            id: "flash".into(),
+            name: "Flash".into(),
+            description: String::new(),
+            is_default: true,
+            settings: vec![],
+            context_window_in: 1_048_576,
+            context_window_out: 65_536,
+            knowledge_cutoff: "2025-01".into(),
+            cost_in: 500,
+            cost_out: 3000,
+        }
+    }
+
+    #[test]
+    fn format_property_context_window_in() {
+        let d = descriptor_with_metadata();
+        assert_eq!(format_property(&d, "context_window_in").unwrap(), "1048576");
+    }
+
+    #[test]
+    fn format_property_context_window_out() {
+        let d = descriptor_with_metadata();
+        assert_eq!(format_property(&d, "context_window_out").unwrap(), "65536");
+    }
+
+    #[test]
+    fn format_property_knowledge_cutoff() {
+        let d = descriptor_with_metadata();
+        assert_eq!(format_property(&d, "knowledge_cutoff").unwrap(), "2025-01");
+    }
+
+    #[test]
+    fn format_property_cost_in_formats_as_dollars() {
+        let d = descriptor_with_metadata();
+        assert_eq!(format_property(&d, "cost_in").unwrap(), "0.50");
+    }
+
+    #[test]
+    fn format_property_cost_out_formats_as_dollars() {
+        let d = descriptor_with_metadata();
+        assert_eq!(format_property(&d, "cost_out").unwrap(), "3.00");
+    }
+
+    #[test]
+    fn format_property_unknown_errors() {
+        let d = descriptor_with_metadata();
+        format_property(&d, "nonexistent").unwrap_err();
+    }
+
+    // --- cmd_info tests ---
+
+    fn providers_with_metadata() -> ProviderModels {
+        let mut pm = BTreeMap::new();
+        pm.insert("google".into(), vec![descriptor_with_metadata()]);
+        pm
+    }
+
+    #[test]
+    fn cmd_info_invalid_model_ref() {
+        let pm = providers_with_metadata();
+        cmd_info(&pm, "no-slash", "cost_in").unwrap_err();
+    }
+
+    #[test]
+    fn cmd_info_unknown_model() {
+        let pm = providers_with_metadata();
+        cmd_info(&pm, "google/nonexistent", "cost_in").unwrap_err();
+    }
+
+    #[test]
+    fn cmd_info_unknown_property() {
+        let pm = providers_with_metadata();
+        cmd_info(&pm, "google/flash", "nonexistent").unwrap_err();
+    }
+
+    #[test]
+    fn cmd_info_valid() {
+        let pm = providers_with_metadata();
+        cmd_info(&pm, "google/flash", "cost_in").unwrap();
     }
 }

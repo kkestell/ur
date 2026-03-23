@@ -95,6 +95,11 @@ interface types {
         description: string,
         is-default: bool,
         settings: list<setting-descriptor>,
+        context-window-in: u32,
+        context-window-out: u32,
+        knowledge-cutoff: string,
+        cost-in: u32,
+        cost-out: u32,
     }
 
     /// A typed setting value.

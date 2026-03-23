@@ -75,6 +75,14 @@ pub enum ModelAction {
         /// Setting value (e.g. "8000", "high", "true").
         value: String,
     },
+    /// Query a model property.
+    Info {
+        /// Provider/model reference (e.g. "google/gemini-3-flash-preview").
+        model_ref: String,
+        /// Property name (`context_window_in`, `context_window_out`,
+        /// `knowledge_cutoff`, `cost_in`, `cost_out`).
+        property: String,
+    },
 }
 
 /// Prints extensions in a tabular format.
