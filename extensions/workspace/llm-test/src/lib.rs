@@ -1,6 +1,7 @@
 wit_bindgen::generate!({
     path: "../../../wit",
     world: "llm-extension",
+    generate_all,
 });
 
 use std::cell::RefCell;
@@ -10,8 +11,8 @@ use exports::ur::extension::llm_provider::{
     CompletionStream, Guest as LlmGuest, GuestCompletionStream,
 };
 use ur::extension::types::{
-    CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
-    SettingDescriptor, ToolCall, ToolChoice, ToolDescriptor, Usage,
+    CompletionChunk, ConfigEntry, ConfigSetting, ExtensionCapabilities, Message, MessagePart,
+    ModelDescriptor, SettingDescriptor, ToolCall, ToolChoice, ToolDescriptor, Usage,
 };
 
 struct LlmTest;
@@ -41,6 +42,10 @@ impl ExtGuest for LlmTest {
 
     fn list_settings() -> Vec<SettingDescriptor> {
         vec![]
+    }
+
+    fn declare_capabilities() -> ExtensionCapabilities {
+        ExtensionCapabilities::empty()
     }
 }
 

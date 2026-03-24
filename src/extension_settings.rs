@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::Result;
 use wasmtime::Engine;
 
-use crate::extension_host::{ExtensionInstance, wit_types};
+use crate::extension_host::{self, ExtensionInstance, LoadOptions, wit_types};
 use crate::manifest::{self, WorkspaceManifest};
 use crate::provider;
 
@@ -17,7 +17,12 @@ pub(crate) fn load_extension(
     id: &str,
 ) -> Result<(ExtensionInstance, Vec<wit_types::SettingDescriptor>)> {
     let entry = manifest::find_entry(manifest, id)?;
-    let mut instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path))?;
+    let caps = extension_host::strings_to_capabilities(&entry.capabilities);
+    let opts = LoadOptions {
+        capabilities: Some(&caps),
+        ..LoadOptions::default()
+    };
+    let mut instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
 
     // For LLM providers, resolve API key via provider ID.
     if entry.slot.as_deref() == Some("llm-provider")
@@ -27,7 +32,7 @@ pub(crate) fn load_extension(
         // Re-load with credentials.
         drop(instance);
         let config = provider::init_config(&provider_id);
-        instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path))?;
+        instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
         instance
             .init(&config)?
             .map_err(|e| anyhow::anyhow!("init {id}: {e}"))?;

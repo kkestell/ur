@@ -17,10 +17,31 @@ use crate::slot;
 /// share `types` and `host` interfaces via `with` to avoid
 /// duplicate type definitions.
 mod worlds {
+    // Every world imports WASI HTTP + filesystem. The `with` clauses
+    // map those to wasmtime-wasi / wasmtime-wasi-http so the bindgen
+    // re-uses existing Host traits instead of generating new ones.
+
+    // Shared WASI `with` mappings used in every world below:
+    //   "wasi:http/*"       → wasmtime_wasi_http::p2::bindings
+    //   "wasi:io/*"         → wasmtime_wasi::p2::bindings (sync where needed)
+    //   "wasi:filesystem/*" → wasmtime_wasi::p2::bindings (sync where needed)
+    //   "wasi:clocks/*"     → wasmtime_wasi::p2::bindings
+
     pub mod general {
         wasmtime::component::bindgen!({
             path: "wit",
             world: "general-extension",
+            require_store_data_send: true,
+            with: {
+                "wasi:http/types@0.2.6": wasmtime_wasi_http::p2::bindings::http::types,
+                "wasi:http/outgoing-handler@0.2.6": wasmtime_wasi_http::p2::bindings::http::outgoing_handler,
+                "wasi:io/error@0.2.6": wasmtime_wasi::p2::bindings::io::error,
+                "wasi:io/streams@0.2.6": wasmtime_wasi::p2::bindings::sync::io::streams,
+                "wasi:io/poll@0.2.6": wasmtime_wasi::p2::bindings::io::poll,
+                "wasi:filesystem/types@0.2.6": wasmtime_wasi::p2::bindings::sync::filesystem::types,
+                "wasi:filesystem/preopens@0.2.6": wasmtime_wasi::p2::bindings::filesystem::preopens,
+                "wasi:clocks/monotonic-clock@0.2.6": wasmtime_wasi::p2::bindings::clocks::monotonic_clock,
+            },
         });
     }
 
@@ -28,9 +49,18 @@ mod worlds {
         wasmtime::component::bindgen!({
             path: "wit",
             world: "llm-extension",
+            require_store_data_send: true,
             with: {
-                "ur:extension/types@0.3.0": super::general::ur::extension::types,
-                "ur:extension/host@0.3.0": super::general::ur::extension::host,
+                "ur:extension/types@0.4.0": super::general::ur::extension::types,
+                "ur:extension/host@0.4.0": super::general::ur::extension::host,
+                "wasi:http/types@0.2.6": wasmtime_wasi_http::p2::bindings::http::types,
+                "wasi:http/outgoing-handler@0.2.6": wasmtime_wasi_http::p2::bindings::http::outgoing_handler,
+                "wasi:io/error@0.2.6": wasmtime_wasi::p2::bindings::io::error,
+                "wasi:io/streams@0.2.6": wasmtime_wasi::p2::bindings::sync::io::streams,
+                "wasi:io/poll@0.2.6": wasmtime_wasi::p2::bindings::io::poll,
+                "wasi:filesystem/types@0.2.6": wasmtime_wasi::p2::bindings::sync::filesystem::types,
+                "wasi:filesystem/preopens@0.2.6": wasmtime_wasi::p2::bindings::filesystem::preopens,
+                "wasi:clocks/monotonic-clock@0.2.6": wasmtime_wasi::p2::bindings::clocks::monotonic_clock,
             },
         });
     }
@@ -39,9 +69,18 @@ mod worlds {
         wasmtime::component::bindgen!({
             path: "wit",
             world: "session-extension",
+            require_store_data_send: true,
             with: {
-                "ur:extension/types@0.3.0": super::general::ur::extension::types,
-                "ur:extension/host@0.3.0": super::general::ur::extension::host,
+                "ur:extension/types@0.4.0": super::general::ur::extension::types,
+                "ur:extension/host@0.4.0": super::general::ur::extension::host,
+                "wasi:http/types@0.2.6": wasmtime_wasi_http::p2::bindings::http::types,
+                "wasi:http/outgoing-handler@0.2.6": wasmtime_wasi_http::p2::bindings::http::outgoing_handler,
+                "wasi:io/error@0.2.6": wasmtime_wasi::p2::bindings::io::error,
+                "wasi:io/streams@0.2.6": wasmtime_wasi::p2::bindings::sync::io::streams,
+                "wasi:io/poll@0.2.6": wasmtime_wasi::p2::bindings::io::poll,
+                "wasi:filesystem/types@0.2.6": wasmtime_wasi::p2::bindings::sync::filesystem::types,
+                "wasi:filesystem/preopens@0.2.6": wasmtime_wasi::p2::bindings::filesystem::preopens,
+                "wasi:clocks/monotonic-clock@0.2.6": wasmtime_wasi::p2::bindings::clocks::monotonic_clock,
             },
         });
     }
@@ -50,9 +89,18 @@ mod worlds {
         wasmtime::component::bindgen!({
             path: "wit",
             world: "compaction-extension",
+            require_store_data_send: true,
             with: {
-                "ur:extension/types@0.3.0": super::general::ur::extension::types,
-                "ur:extension/host@0.3.0": super::general::ur::extension::host,
+                "ur:extension/types@0.4.0": super::general::ur::extension::types,
+                "ur:extension/host@0.4.0": super::general::ur::extension::host,
+                "wasi:http/types@0.2.6": wasmtime_wasi_http::p2::bindings::http::types,
+                "wasi:http/outgoing-handler@0.2.6": wasmtime_wasi_http::p2::bindings::http::outgoing_handler,
+                "wasi:io/error@0.2.6": wasmtime_wasi::p2::bindings::io::error,
+                "wasi:io/streams@0.2.6": wasmtime_wasi::p2::bindings::sync::io::streams,
+                "wasi:io/poll@0.2.6": wasmtime_wasi::p2::bindings::io::poll,
+                "wasi:filesystem/types@0.2.6": wasmtime_wasi::p2::bindings::sync::filesystem::types,
+                "wasi:filesystem/preopens@0.2.6": wasmtime_wasi::p2::bindings::filesystem::preopens,
+                "wasi:clocks/monotonic-clock@0.2.6": wasmtime_wasi::p2::bindings::clocks::monotonic_clock,
             },
         });
     }
@@ -115,11 +163,15 @@ impl wit_host::Host for HostState {
         Err("not yet routed".into())
     }
 
-    fn load_session(&mut self, _id: String) -> Result<Vec<wit_types::Message>, String> {
+    fn load_session(&mut self, _id: String) -> Result<Vec<wit_types::SessionEvent>, String> {
         Err("not yet routed".into())
     }
 
-    fn append_session(&mut self, _id: String, _msg: wit_types::Message) -> Result<(), String> {
+    fn append_session(
+        &mut self,
+        _id: String,
+        _event: wit_types::SessionEvent,
+    ) -> Result<(), String> {
         Err("not yet routed".into())
     }
 
@@ -168,74 +220,174 @@ impl fmt::Debug for ExtensionInstance {
 }
 
 /// Creates a fresh WASI host state with inherited stdio.
-fn build_host_state() -> HostState {
-    let wasi_ctx = WasiCtxBuilder::new().inherit_stdio().build();
+///
+/// When `capabilities` and `data_dir` are provided, preopens the data
+/// directory with the declared filesystem permissions.
+fn build_host_state(
+    capabilities: Option<&wit_types::ExtensionCapabilities>,
+    data_dir: Option<&Path>,
+) -> HostState {
+    let mut builder = WasiCtxBuilder::new();
+    builder.inherit_stdio();
+
+    if let (Some(caps), Some(dir)) = (capabilities, data_dir) {
+        let read = caps.contains(wit_types::ExtensionCapabilities::FILESYSTEM_READ);
+        let write = caps.contains(wit_types::ExtensionCapabilities::FILESYSTEM_WRITE);
+        if read || write {
+            let _ = std::fs::create_dir_all(dir);
+            let dir_perms = if write {
+                wasmtime_wasi::DirPerms::all()
+            } else {
+                wasmtime_wasi::DirPerms::READ
+            };
+            let file_perms = if write {
+                wasmtime_wasi::FilePerms::all()
+            } else {
+                wasmtime_wasi::FilePerms::READ
+            };
+            builder
+                .preopened_dir(dir, "/data", dir_perms, file_perms)
+                .expect("preopened_dir");
+        }
+    }
+
     HostState {
-        wasi_ctx,
+        wasi_ctx: builder.build(),
         http_ctx: WasiHttpCtx::new(),
         resource_table: ResourceTable::new(),
     }
+}
+
+/// Converts `ExtensionCapabilities` flags to a list of string tags.
+pub fn capabilities_to_strings(caps: wit_types::ExtensionCapabilities) -> Vec<String> {
+    let mut out = Vec::new();
+    if caps.contains(wit_types::ExtensionCapabilities::FILESYSTEM_READ) {
+        out.push("filesystem-read".into());
+    }
+    if caps.contains(wit_types::ExtensionCapabilities::FILESYSTEM_WRITE) {
+        out.push("filesystem-write".into());
+    }
+    if caps.contains(wit_types::ExtensionCapabilities::NETWORK) {
+        out.push("network".into());
+    }
+    out
+}
+
+/// Converts a list of string tags to `ExtensionCapabilities` flags.
+pub fn strings_to_capabilities(tags: &[String]) -> wit_types::ExtensionCapabilities {
+    let mut caps = wit_types::ExtensionCapabilities::empty();
+    for tag in tags {
+        match tag.as_str() {
+            "filesystem-read" => caps |= wit_types::ExtensionCapabilities::FILESYSTEM_READ,
+            "filesystem-write" => caps |= wit_types::ExtensionCapabilities::FILESYSTEM_WRITE,
+            "network" => caps |= wit_types::ExtensionCapabilities::NETWORK,
+            _ => {}
+        }
+    }
+    caps
+}
+
+/// Load-time options for capability enforcement and filesystem access.
+#[derive(Debug, Default)]
+pub struct LoadOptions<'a> {
+    /// Declared capabilities from the manifest. When `None` (discovery),
+    /// all WASI interfaces are linked.
+    pub capabilities: Option<&'a wit_types::ExtensionCapabilities>,
+    /// Host-side data directory preopened as `/data` inside the guest.
+    pub data_dir: Option<&'a Path>,
+}
+
+/// Validates that declared capabilities match the component's actual WASI imports.
+///
+/// Panics if the component imports a WASI capability it didn't declare.
+pub fn validate_capabilities(
+    engine: &Engine,
+    component: &Component,
+    capabilities: wit_types::ExtensionCapabilities,
+    ext_id: &str,
+) {
+    let ct = component.component_type();
+    let has_fs = ct
+        .imports(engine)
+        .any(|(name, _)| name.contains("wasi:filesystem"));
+    let has_http = ct
+        .imports(engine)
+        .any(|(name, _)| name.contains("wasi:http"));
+
+    let declares_fs = capabilities.contains(wit_types::ExtensionCapabilities::FILESYSTEM_READ)
+        || capabilities.contains(wit_types::ExtensionCapabilities::FILESYSTEM_WRITE);
+
+    assert!(
+        !has_fs || declares_fs,
+        "extension '{ext_id}' imports wasi:filesystem but did not declare \
+         filesystem-read or filesystem-write"
+    );
+    assert!(
+        !has_http || capabilities.contains(wit_types::ExtensionCapabilities::NETWORK),
+        "extension '{ext_id}' imports wasi:http but did not declare network"
+    );
 }
 
 impl ExtensionInstance {
     /// Compiles and instantiates an extension, auto-detecting its slot
     /// from the component's exports.
     ///
+    /// When `opts.capabilities` is `Some`, HTTP is only linked if
+    /// `network` is declared. When `None` (discovery), all interfaces
+    /// are linked so that `declare_capabilities()` can be called.
+    ///
     /// # Errors
     ///
     /// Returns an error if the component cannot be loaded, or if the
     /// WASM component does not satisfy the world's export requirements.
-    pub fn load(engine: &Engine, path: &Path) -> wasmtime::Result<Self> {
+    pub fn load(engine: &Engine, path: &Path, opts: &LoadOptions<'_>) -> wasmtime::Result<Self> {
         let component = Component::from_file(engine, path)?;
         let detected = slot::detect_slot(engine, &component);
 
+        let link_http = match opts.capabilities {
+            Some(caps) => caps.contains(wit_types::ExtensionCapabilities::NETWORK),
+            None => true, // discovery: link everything
+        };
+
+        // Build linker: WASI base + conditional HTTP + our custom host.
+        // We add imports individually instead of using the world's
+        // add_to_linker (which would require HostState to implement
+        // all WASI Host traits).
+        let mut linker = Linker::new(engine);
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
+        if link_http {
+            wasmtime_wasi_http::p2::add_only_http_to_linker_sync(&mut linker)?;
+        }
+        worlds::general::ur::extension::host::add_to_linker::<_, HasSelf<_>>(
+            &mut linker,
+            |state| state,
+        )?;
+
+        let host_state = build_host_state(opts.capabilities, opts.data_dir);
+
         match detected {
             Some("llm-provider") => {
-                let mut linker = Linker::new(engine);
-                wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
-                wasmtime_wasi_http::p2::add_only_http_to_linker_sync(&mut linker)?;
-                worlds::llm::LlmExtension::add_to_linker::<_, HasSelf<_>>(&mut linker, |state| {
-                    state
-                })?;
-                let mut store = Store::new(engine, build_host_state());
+                let mut store = Store::new(engine, host_state);
                 let bindings =
                     worlds::llm::LlmExtension::instantiate(&mut store, &component, &linker)?;
                 Ok(Self::Llm { store, bindings })
             }
             Some("session-provider") => {
-                let mut linker = Linker::new(engine);
-                wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
-                worlds::session::SessionExtension::add_to_linker::<_, HasSelf<_>>(
-                    &mut linker,
-                    |state| state,
-                )?;
-                let mut store = Store::new(engine, build_host_state());
+                let mut store = Store::new(engine, host_state);
                 let bindings = worlds::session::SessionExtension::instantiate(
                     &mut store, &component, &linker,
                 )?;
                 Ok(Self::Session { store, bindings })
             }
             Some("compaction-provider") => {
-                let mut linker = Linker::new(engine);
-                wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
-                worlds::compaction::CompactionExtension::add_to_linker::<_, HasSelf<_>>(
-                    &mut linker,
-                    |state| state,
-                )?;
-                let mut store = Store::new(engine, build_host_state());
+                let mut store = Store::new(engine, host_state);
                 let bindings = worlds::compaction::CompactionExtension::instantiate(
                     &mut store, &component, &linker,
                 )?;
                 Ok(Self::Compaction { store, bindings })
             }
             Some(_) | None => {
-                let mut linker = Linker::new(engine);
-                wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
-                worlds::general::GeneralExtension::add_to_linker::<_, HasSelf<_>>(
-                    &mut linker,
-                    |state| state,
-                )?;
-                let mut store = Store::new(engine, build_host_state());
+                let mut store = Store::new(engine, host_state);
                 let bindings = worlds::general::GeneralExtension::instantiate(
                     &mut store, &component, &linker,
                 )?;
@@ -267,6 +419,28 @@ impl ExtensionInstance {
                 bindings.ur_extension_extension().call_id(store)
             }
             Self::General { store, bindings } => bindings.ur_extension_extension().call_id(store),
+        }
+    }
+
+    /// Returns the extension's declared WASI capabilities.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the guest call traps.
+    pub fn declare_capabilities(&mut self) -> wasmtime::Result<wit_types::ExtensionCapabilities> {
+        match self {
+            Self::Llm { store, bindings } => bindings
+                .ur_extension_extension()
+                .call_declare_capabilities(store),
+            Self::Session { store, bindings } => bindings
+                .ur_extension_extension()
+                .call_declare_capabilities(store),
+            Self::Compaction { store, bindings } => bindings
+                .ur_extension_extension()
+                .call_declare_capabilities(store),
+            Self::General { store, bindings } => bindings
+                .ur_extension_extension()
+                .call_declare_capabilities(store),
         }
     }
 
@@ -469,7 +643,7 @@ impl ExtensionInstance {
         Ok(Ok(()))
     }
 
-    /// Loads session messages from a session provider extension.
+    /// Loads session events from a session provider extension.
     ///
     /// # Errors
     ///
@@ -478,7 +652,7 @@ impl ExtensionInstance {
     pub fn load_session(
         &mut self,
         id: &str,
-    ) -> wasmtime::Result<Result<Vec<wit_types::Message>, String>> {
+    ) -> wasmtime::Result<Result<Vec<wit_types::SessionEvent>, String>> {
         match self {
             Self::Session { store, bindings } => bindings
                 .ur_extension_session_provider()
@@ -487,7 +661,7 @@ impl ExtensionInstance {
         }
     }
 
-    /// Appends a message to a session via a session provider extension.
+    /// Appends an event to a session via a session provider extension.
     ///
     /// # Errors
     ///
@@ -496,12 +670,12 @@ impl ExtensionInstance {
     pub fn append_session(
         &mut self,
         id: &str,
-        msg: &wit_types::Message,
+        event: &wit_types::SessionEvent,
     ) -> wasmtime::Result<Result<(), String>> {
         match self {
             Self::Session { store, bindings } => bindings
                 .ur_extension_session_provider()
-                .call_append(store, id, msg),
+                .call_append(store, id, event),
             _ => Ok(Err("not a session-provider".into())),
         }
     }

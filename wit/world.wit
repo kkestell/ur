@@ -1,4 +1,4 @@
-package ur:extension@0.3.0;
+package ur:extension@0.4.0;
 
 /// Shared types used across all interfaces.
 interface types {
@@ -152,6 +152,46 @@ interface types {
         finish-reason: option<string>,
         usage: option<usage>,
     }
+
+    /// WASI capabilities an extension may declare.
+    flags extension-capabilities {
+        filesystem-read,
+        filesystem-write,
+        network,
+    }
+
+    /// Approval decision for tool calls.
+    variant approval-decision {
+        approve,
+        deny,
+    }
+
+    /// A persisted session event.
+    variant session-event {
+        turn-started(u32),
+        user-message(string),
+        llm-completion(message),
+        tool-result(message),
+        tool-approval-requested(tool-approval-request),
+        tool-approval-decided(tool-approval-decision-record),
+        turn-complete(u32),
+        turn-interrupted(turn-interruption),
+    }
+
+    record tool-approval-request {
+        id: string,
+        name: string,
+    }
+
+    record tool-approval-decision-record {
+        id: string,
+        decision: approval-decision,
+    }
+
+    record turn-interruption {
+        turn-index: u32,
+        reason: string,
+    }
 }
 
 /// Platform capabilities imported by all extensions.
@@ -159,7 +199,7 @@ interface types {
 /// Extensions call `host.*` for platform services. The host routes
 /// each call to the active provider for the corresponding slot.
 interface host {
-    use types.{message, completion, session-info, config-entry};
+    use types.{message, completion, session-info, session-event, config-entry};
 
     /// Emit a log message to the host.
     log: func(msg: string);
@@ -170,11 +210,11 @@ interface host {
     /// `None` resolves to the "default" role.
     complete: func(messages: list<message>, role: option<string>) -> result<completion, string>;
 
-    /// Load all messages for a session.
-    load-session: func(id: string) -> result<list<message>, string>;
+    /// Load all events for a session.
+    load-session: func(id: string) -> result<list<session-event>, string>;
 
-    /// Append a message to a session.
-    append-session: func(id: string, msg: message) -> result<_, string>;
+    /// Append an event to a session.
+    append-session: func(id: string, event: session-event) -> result<_, string>;
 
     /// List available sessions.
     list-sessions: func() -> result<list<session-info>, string>;
@@ -185,7 +225,7 @@ interface host {
 
 /// Common extension lifecycle and generic tool support.
 interface extension {
-    use types.{config-entry, setting-descriptor, tool-descriptor};
+    use types.{config-entry, setting-descriptor, tool-descriptor, extension-capabilities};
 
     /// Initialize the extension with configuration.
     init: func(config: list<config-entry>) -> result<_, string>;
@@ -207,6 +247,12 @@ interface extension {
     /// Called after `init()`. LLM extensions return per-model settings
     /// using dotted keys (e.g. "gemini-flash.thinking_level").
     list-settings: func() -> list<setting-descriptor>;
+
+    /// Declare the WASI capabilities this extension requires.
+    ///
+    /// The host validates these against the component's actual imports.
+    /// Using a capability without declaring it will panic at load time.
+    declare-capabilities: func() -> extension-capabilities;
 }
 
 /// Exported by extensions filling the `llm-provider` slot.
@@ -241,13 +287,13 @@ interface llm-provider {
 
 /// Exported by extensions filling the `session-provider` slot.
 interface session-provider {
-    use types.{message, session-info};
+    use types.{session-info, session-event};
 
-    /// Load all messages for a session.
-    load: func(id: string) -> result<list<message>, string>;
+    /// Load all events for a session.
+    load: func(id: string) -> result<list<session-event>, string>;
 
-    /// Append a message to a session.
-    append: func(id: string, msg: message) -> result<_, string>;
+    /// Append an event to a session.
+    append: func(id: string, event: session-event) -> result<_, string>;
 
     /// List available sessions.
     list-sessions: func() -> result<list<session-info>, string>;
@@ -262,18 +308,17 @@ interface compaction-provider {
 }
 
 // -- Worlds ---------------------------------------------------------------
+//
+// Every world imports the full WASI surface. The host controls actual
+// access via capability declarations: only declared capabilities are
+// linked / preopened at runtime.
 
-/// World for extensions that provide LLM completions (host-side bindings).
+/// World for extensions that provide LLM completions.
 world llm-extension {
     import host;
-    export extension;
-    export llm-provider;
-}
-
-/// World for LLM extensions that make outbound HTTP requests (guest-side).
-world llm-extension-http {
-    import host;
     import wasi:http/outgoing-handler@0.2.6;
+    import wasi:filesystem/types@0.2.6;
+    import wasi:filesystem/preopens@0.2.6;
     export extension;
     export llm-provider;
 }
@@ -281,6 +326,9 @@ world llm-extension-http {
 /// World for extensions that provide session persistence.
 world session-extension {
     import host;
+    import wasi:http/outgoing-handler@0.2.6;
+    import wasi:filesystem/types@0.2.6;
+    import wasi:filesystem/preopens@0.2.6;
     export extension;
     export session-provider;
 }
@@ -288,6 +336,9 @@ world session-extension {
 /// World for extensions that provide compaction.
 world compaction-extension {
     import host;
+    import wasi:http/outgoing-handler@0.2.6;
+    import wasi:filesystem/types@0.2.6;
+    import wasi:filesystem/preopens@0.2.6;
     export extension;
     export compaction-provider;
 }
@@ -295,5 +346,8 @@ world compaction-extension {
 /// World for general-purpose extensions with no slot.
 world general-extension {
     import host;
+    import wasi:http/outgoing-handler@0.2.6;
+    import wasi:filesystem/types@0.2.6;
+    import wasi:filesystem/preopens@0.2.6;
     export extension;
 }

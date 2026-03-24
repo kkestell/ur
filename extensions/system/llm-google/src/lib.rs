@@ -1,6 +1,6 @@
 wit_bindgen::generate!({
     path: "../../../wit",
-    world: "llm-extension-http",
+    world: "llm-extension",
     generate_all,
 });
 
@@ -11,9 +11,9 @@ use exports::ur::extension::llm_provider::{
     CompletionStream, Guest as LlmGuest, GuestCompletionStream,
 };
 use ur::extension::types::{
-    CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
-    SettingDescriptor, SettingEnum, SettingInteger, SettingSchema, SettingString, ToolCall,
-    ToolChoice, ToolDescriptor, Usage,
+    CompletionChunk, ConfigEntry, ConfigSetting, ExtensionCapabilities, Message, MessagePart,
+    ModelDescriptor, SettingDescriptor, SettingEnum, SettingInteger, SettingSchema, SettingString,
+    ToolCall, ToolChoice, ToolDescriptor, Usage,
 };
 use wasi::http::outgoing_handler;
 use wasi::http::types::{Fields, IncomingBody, Method, OutgoingBody, OutgoingRequest, Scheme};
@@ -132,6 +132,10 @@ impl ExtGuest for LlmGoogle {
         }
 
         settings
+    }
+
+    fn declare_capabilities() -> ExtensionCapabilities {
+        ExtensionCapabilities::NETWORK
     }
 }
 

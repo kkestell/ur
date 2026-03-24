@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 use wasmtime::Engine;
 
-use crate::extension_host::ExtensionInstance;
+use crate::extension_host::{self, ExtensionInstance, LoadOptions, wit_types};
 
 /// Which directory tier an extension was discovered in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +37,7 @@ pub struct DiscoveredExtension {
     pub source: SourceTier,
     pub wasm_path: PathBuf,
     pub checksum: String,
+    pub capabilities: wit_types::ExtensionCapabilities,
 }
 
 /// Computes a SHA-256 checksum of a file.
@@ -142,7 +143,8 @@ fn collect_wasm_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Compiles a WASM component, detects its slot, instantiates to query identity.
+/// Compiles a WASM component, detects its slot, instantiates to query identity
+/// and declared capabilities.
 fn load_discovered(
     engine: &Engine,
     wasm_path: &Path,
@@ -154,19 +156,31 @@ fn load_discovered(
     let abs_path = std::fs::canonicalize(wasm_path)
         .with_context(|| format!("canonicalizing {}", wasm_path.display()))?;
 
-    // Load and detect slot.
-    let mut instance = ExtensionInstance::load(engine, &abs_path)
+    // Load with all capabilities linked (discovery needs to call
+    // declare_capabilities before we know what to restrict).
+    let mut instance = ExtensionInstance::load(engine, &abs_path, &LoadOptions::default())
         .map_err(|e| anyhow::anyhow!("loading {}: {e}", wasm_path.display()))?;
 
     let detected_slot = instance.slot_name().map(str::to_owned);
 
-    // Query identity from the component.
+    // Query identity and capabilities from the component.
     let id = instance
         .id()
         .map_err(|e| anyhow::anyhow!("calling id() on {}: {e}", wasm_path.display()))?;
     let name = instance
         .name()
         .map_err(|e| anyhow::anyhow!("calling name() on {}: {e}", wasm_path.display()))?;
+    let capabilities = instance.declare_capabilities().map_err(|e| {
+        anyhow::anyhow!(
+            "calling declare_capabilities() on {}: {e}",
+            wasm_path.display()
+        )
+    })?;
+
+    // Validate declared capabilities match actual component imports.
+    let component = wasmtime::component::Component::from_file(engine, &abs_path)
+        .map_err(|e| anyhow::anyhow!("re-loading component {}: {e}", wasm_path.display()))?;
+    extension_host::validate_capabilities(engine, &component, capabilities, &id);
 
     Ok(DiscoveredExtension {
         id,
@@ -175,5 +189,6 @@ fn load_discovered(
         source,
         wasm_path: abs_path,
         checksum,
+        capabilities,
     })
 }

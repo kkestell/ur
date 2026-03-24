@@ -1,10 +1,11 @@
 wit_bindgen::generate!({
     path: "../../../wit",
     world: "general-extension",
+    generate_all,
 });
 
 use exports::ur::extension::extension::Guest as ExtGuest;
-use ur::extension::types::{ConfigEntry, SettingDescriptor, ToolDescriptor};
+use ur::extension::types::{ConfigEntry, ExtensionCapabilities, SettingDescriptor, ToolDescriptor};
 
 struct TestExtension;
 
@@ -42,6 +43,10 @@ impl ExtGuest for TestExtension {
             description: "Return a weather forecast for a location".into(),
             parameters_json_schema: r#"{"type":"object","properties":{"location":{"type":"string","description":"City or place to forecast"}},"required":["location"]}"#.into(),
         }]
+    }
+
+    fn declare_capabilities() -> ExtensionCapabilities {
+        ExtensionCapabilities::empty()
     }
 }
 

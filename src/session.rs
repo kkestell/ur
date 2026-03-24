@@ -4,14 +4,14 @@
 //! agent turn state machine. Clients subscribe to structured events
 //! via a callback rather than reading terminal output.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use tracing::{debug, info};
 use wasmtime::Engine;
 
 use crate::config::UserConfig;
-use crate::extension_host::{ExtensionInstance, wit_types};
+use crate::extension_host::{self, ExtensionInstance, LoadOptions, wit_types};
 use crate::manifest::{ManifestEntry, WorkspaceManifest};
 use crate::model;
 use crate::provider;
@@ -65,10 +65,6 @@ pub enum SessionEvent {
 
 /// Client response to an approval request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "API contract for client-side tool denial")
-)]
 pub enum ApprovalDecision {
     /// Approve the tool call.
     Approve,
@@ -78,70 +74,31 @@ pub enum ApprovalDecision {
 
 /// A persisted event in the session timeline.
 ///
-/// Captures enough structured history to restore the final visible
-/// client state from a single source of truth. Does not preserve
-/// every streamed token delta — only assembled messages and domain
-/// events.
+/// The single source of truth for session state. LLM messages are
+/// derived from events via `messages_for_llm()`, not stored separately.
+/// `LlmCompletion` and `ToolResult` embed full `Message` objects so
+/// reconstruction is lossless.
 #[derive(Debug, Clone)]
-#[expect(dead_code, reason = "phase 3 API — consumed by snapshot/replay")]
 pub enum PersistedEvent {
     /// A turn started.
-    TurnStarted {
-        /// Zero-based index of this turn.
-        turn_index: u32,
-    },
+    TurnStarted { turn_index: u32 },
     /// The user sent a message.
-    UserMessage {
-        /// The user message text.
-        text: String,
-    },
-    /// The assistant produced a complete text message.
-    AssistantMessage {
-        /// The assembled assistant text.
-        text: String,
-    },
-    /// The LLM requested a tool call.
-    ToolCallRequested {
-        /// Tool call identifier.
-        id: String,
-        /// Tool name.
-        name: String,
-        /// JSON-encoded arguments.
-        arguments_json: String,
-    },
+    UserMessage { text: String },
+    /// Full LLM completion message (text + tool calls + provider metadata).
+    LlmCompletion { message: wit_types::Message },
+    /// Full tool result message.
+    ToolResult { message: wit_types::Message },
     /// A tool approval was requested.
-    ToolApprovalRequested {
-        /// Tool call identifier.
-        id: String,
-        /// Tool name.
-        name: String,
-    },
+    ToolApprovalRequested { id: String, name: String },
     /// A tool approval decision was made.
     ToolApprovalDecided {
-        /// Tool call identifier.
         id: String,
-        /// The client's decision.
         decision: ApprovalDecision,
     },
-    /// A tool returned a result.
-    ToolResultReceived {
-        /// Matches the originating tool call ID.
-        tool_call_id: String,
-        /// Tool output content.
-        content: String,
-    },
     /// A turn completed successfully.
-    TurnComplete {
-        /// Zero-based index of the completed turn.
-        turn_index: u32,
-    },
+    TurnComplete { turn_index: u32 },
     /// A turn was interrupted before completion.
-    TurnInterrupted {
-        /// Zero-based index of the interrupted turn.
-        turn_index: u32,
-        /// Reason for the interruption.
-        reason: String,
-    },
+    TurnInterrupted { turn_index: u32, reason: String },
 }
 
 /// A snapshot of session state sufficient to restore client UI.
@@ -165,23 +122,26 @@ pub struct SessionSnapshot {
 
 /// Session-scoped coordinator for turn execution.
 ///
-/// Owns the loaded session messages and drives the agent turn loop.
-/// Clients interact with it via `run_turn()`, which emits structured
-/// `SessionEvent`s through a callback.
+/// The event log is the single source of truth. LLM messages are
+/// derived on demand via `messages_for_llm()`.
 #[derive(Debug)]
 pub struct UrSession {
     engine: Engine,
     manifest: WorkspaceManifest,
     config: UserConfig,
     session_id: String,
-    messages: Vec<wit_types::Message>,
-    loaded_message_count: usize,
+    sessions_dir: PathBuf,
     events: Vec<PersistedEvent>,
+    /// Number of events already persisted to the session provider.
+    persisted_event_count: usize,
     turn_count: u32,
 }
 
 impl UrSession {
     /// Creates a session by loading existing messages from the session provider.
+    ///
+    /// Loaded messages are converted to events so the event log is the
+    /// single source of truth from the start.
     ///
     /// # Errors
     ///
@@ -192,21 +152,25 @@ impl UrSession {
         manifest: WorkspaceManifest,
         config: UserConfig,
         session_id: &str,
+        sessions_dir: &Path,
     ) -> Result<Self> {
-        let mut session_ext = load_slot(&engine, &manifest, "session-provider")?;
+        let mut session_ext = load_session_slot(&engine, &manifest, sessions_dir)?;
         session_ext
             .init(&[])?
             .map_err(|e| anyhow::anyhow!("session init: {e}"))?;
 
-        let messages: Vec<wit_types::Message> = session_ext
+        let wit_events: Vec<wit_types::SessionEvent> = session_ext
             .load_session(session_id)?
             .map_err(|e| anyhow::anyhow!("load_session: {e}"))?;
 
-        let loaded_message_count = messages.len();
+        let events: Vec<PersistedEvent> =
+            wit_events.into_iter().map(wit_event_to_persisted).collect();
+
+        let persisted_event_count = events.len();
         info!(
             session_id,
-            count = loaded_message_count,
-            state = if messages.is_empty() {
+            count = persisted_event_count,
+            state = if events.is_empty() {
                 "fresh"
             } else {
                 "existing"
@@ -219,9 +183,9 @@ impl UrSession {
             manifest,
             config,
             session_id: session_id.to_owned(),
-            messages,
-            loaded_message_count,
-            events: Vec::new(),
+            sessions_dir: sessions_dir.to_owned(),
+            events,
+            persisted_event_count,
             turn_count: 0,
         })
     }
@@ -232,10 +196,23 @@ impl UrSession {
         &self.session_id
     }
 
-    /// Returns the current message history.
-    #[expect(dead_code, reason = "public API surface for future clients")]
-    pub fn messages(&self) -> &[wit_types::Message] {
-        &self.messages
+    /// Derives the LLM message history from the event log.
+    ///
+    /// Only `UserMessage`, `LlmCompletion`, and `ToolResult` events
+    /// produce messages; everything else is filtered out.
+    pub fn messages_for_llm(&self) -> Vec<wit_types::Message> {
+        self.events
+            .iter()
+            .filter_map(|e| match e {
+                PersistedEvent::UserMessage { text } => Some(wit_types::Message {
+                    role: "user".into(),
+                    parts: vec![wit_types::MessagePart::Text(text.clone())],
+                }),
+                PersistedEvent::LlmCompletion { message }
+                | PersistedEvent::ToolResult { message } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Runs a single agent turn with a user message.
@@ -258,12 +235,7 @@ impl UrSession {
         self.events.push(PersistedEvent::TurnStarted { turn_index });
 
         // ── 1. Add user message ──────────────────────────────────────
-        let user_msg = wit_types::Message {
-            role: "user".into(),
-            parts: vec![wit_types::MessagePart::Text(user_message.to_owned())],
-        };
         debug!(text = user_message, "adding user message");
-        self.messages.push(user_msg);
         self.events.push(PersistedEvent::UserMessage {
             text: user_message.to_owned(),
         });
@@ -272,10 +244,11 @@ impl UrSession {
         let (mut llm, settings, tools) = self.prepare_turn()?;
 
         // ── 3. First LLM completion (streaming) ─────────────────────
-        info!(messages = self.messages.len(), "calling LLM streaming");
+        let messages = self.messages_for_llm();
+        info!(messages = messages.len(), "calling LLM streaming");
         let completion = stream_completion(
             &mut llm,
-            &self.messages,
+            &messages,
             &settings.model_id,
             &settings.config_settings,
             &tools,
@@ -285,17 +258,10 @@ impl UrSession {
         let tool_calls = extract_tool_calls(&completion.message);
         if tool_calls.is_empty() {
             let text = extract_text(&completion.message);
-            self.events
-                .push(PersistedEvent::AssistantMessage { text: text.clone() });
             on_event(SessionEvent::AssistantMessage { text });
         } else {
             for tc in &tool_calls {
                 info!(tool = %tc.name, args = %tc.arguments_json, "LLM returned tool call");
-                self.events.push(PersistedEvent::ToolCallRequested {
-                    id: tc.id.clone(),
-                    name: tc.name.clone(),
-                    arguments_json: tc.arguments_json.clone(),
-                });
                 on_event(SessionEvent::ToolCall {
                     id: tc.id.clone(),
                     name: tc.name.clone(),
@@ -304,7 +270,9 @@ impl UrSession {
             }
         }
 
-        self.messages.push(completion.message.clone());
+        self.events.push(PersistedEvent::LlmCompletion {
+            message: completion.message.clone(),
+        });
 
         // ── 4. Tool dispatch ─────────────────────────────────────────
         if !tool_calls.is_empty() {
@@ -312,29 +280,29 @@ impl UrSession {
                 &tool_calls,
                 &self.engine,
                 &self.manifest,
-                &mut self.messages,
                 &mut self.events,
                 &mut on_event,
             )?;
 
             // ── 5. Second LLM completion (with tool results) ────────
+            let messages = self.messages_for_llm();
             info!(
-                messages = self.messages.len(),
+                messages = messages.len(),
                 "calling LLM streaming (with tool results)"
             );
             let completion2 = stream_completion(
                 &mut llm,
-                &self.messages,
+                &messages,
                 &settings.model_id,
                 &settings.config_settings,
                 &tools,
                 &mut on_event,
             )?;
             let text = extract_text(&completion2.message);
-            self.events
-                .push(PersistedEvent::AssistantMessage { text: text.clone() });
             on_event(SessionEvent::AssistantMessage { text });
-            self.messages.push(completion2.message);
+            self.events.push(PersistedEvent::LlmCompletion {
+                message: completion2.message,
+            });
         }
 
         self.persist_and_compact()?;
@@ -351,7 +319,7 @@ impl UrSession {
     pub fn snapshot(&self) -> SessionSnapshot {
         SessionSnapshot {
             session_id: self.session_id.clone(),
-            messages: self.messages.clone(),
+            messages: self.messages_for_llm(),
             events: self.events.clone(),
         }
     }
@@ -365,18 +333,34 @@ impl UrSession {
     pub fn replay(&self, mut on_event: impl FnMut(SessionEvent)) {
         for event in &self.events {
             let session_event = match event {
-                PersistedEvent::AssistantMessage { text } => {
-                    Some(SessionEvent::AssistantMessage { text: text.clone() })
+                PersistedEvent::LlmCompletion { message } => {
+                    let tool_calls = extract_tool_calls(message);
+                    if tool_calls.is_empty() {
+                        Some(SessionEvent::AssistantMessage {
+                            text: extract_text(message),
+                        })
+                    } else {
+                        for tc in &tool_calls {
+                            on_event(SessionEvent::ToolCall {
+                                id: tc.id.clone(),
+                                name: tc.name.clone(),
+                                arguments_json: tc.arguments_json.clone(),
+                            });
+                        }
+                        None // tool calls already emitted
+                    }
                 }
-                PersistedEvent::ToolCallRequested {
-                    id,
-                    name,
-                    arguments_json,
-                } => Some(SessionEvent::ToolCall {
-                    id: id.clone(),
-                    name: name.clone(),
-                    arguments_json: arguments_json.clone(),
-                }),
+                PersistedEvent::ToolResult { message } => {
+                    // Extract the first tool result from the message.
+                    message.parts.iter().find_map(|p| match p {
+                        wit_types::MessagePart::ToolResult(tr) => Some(SessionEvent::ToolResult {
+                            tool_call_id: tr.tool_call_id.clone(),
+                            tool_name: tr.tool_name.clone(),
+                            content: tr.content.clone(),
+                        }),
+                        _ => None,
+                    })
+                }
                 PersistedEvent::ToolApprovalRequested { id, name } => {
                     Some(SessionEvent::ApprovalRequired {
                         id: id.clone(),
@@ -384,14 +368,6 @@ impl UrSession {
                         arguments_json: String::new(),
                     })
                 }
-                PersistedEvent::ToolResultReceived {
-                    tool_call_id,
-                    content,
-                } => Some(SessionEvent::ToolResult {
-                    tool_call_id: tool_call_id.clone(),
-                    tool_name: String::new(),
-                    content: content.clone(),
-                }),
                 PersistedEvent::TurnComplete { .. } => Some(SessionEvent::TurnComplete),
                 PersistedEvent::TurnInterrupted { reason, .. } => {
                     Some(SessionEvent::TurnError(reason.clone()))
@@ -457,41 +433,41 @@ impl UrSession {
         ))
     }
 
-    /// Appends new messages to the session provider and runs compaction.
+    /// Appends new events to the session provider and runs compaction.
     fn persist_and_compact(&mut self) -> Result<()> {
-        // Append new messages to the session provider.
-        let mut session_ext = load_slot(&self.engine, &self.manifest, "session-provider")?;
+        let mut session_ext = load_session_slot(&self.engine, &self.manifest, &self.sessions_dir)?;
         session_ext
             .init(&[])?
             .map_err(|e| anyhow::anyhow!("session init: {e}"))?;
 
-        let session_appends = pending_session_appends(&self.messages, self.loaded_message_count);
+        let new_events = &self.events[self.persisted_event_count..];
         debug!(
-            count = session_appends.len(),
+            count = new_events.len(),
             session_id = self.session_id,
-            "appending messages to session"
+            "appending events to session"
         );
-        for message in session_appends {
+        for event in new_events {
+            let wit_event = persisted_to_wit_event(event);
             session_ext
-                .append_session(&self.session_id, message)?
+                .append_session(&self.session_id, &wit_event)?
                 .map_err(|e| anyhow::anyhow!("append_session: {e}"))?;
         }
 
-        // Update loaded count so subsequent turns don't re-append.
-        self.loaded_message_count = self.messages.len();
+        self.persisted_event_count = self.events.len();
 
-        // Compact messages.
-        info!(count = self.messages.len(), "compacting messages");
+        // Compact the full derived message history.
+        let messages = self.messages_for_llm();
+        info!(count = messages.len(), "compacting messages");
         let mut compaction = load_slot(&self.engine, &self.manifest, "compaction-provider")?;
         compaction
             .init(&[])?
             .map_err(|e| anyhow::anyhow!("compaction init: {e}"))?;
         let compacted = compaction
-            .compact(&self.messages)?
+            .compact(&messages)?
             .map_err(|e| anyhow::anyhow!("compact: {e}"))?;
         info!(
             count = compacted.len(),
-            result = if compacted.len() == self.messages.len() {
+            result = if compacted.len() == messages.len() {
                 "unchanged"
             } else {
                 "compacted"
@@ -580,12 +556,11 @@ fn stream_completion(
     })
 }
 
-/// Dispatches tool calls to general extensions in parallel, appending results.
+/// Dispatches tool calls to general extensions in parallel, appending results as events.
 fn dispatch_tool_calls(
     tool_calls: &[&wit_types::ToolCall],
     engine: &Engine,
     manifest: &WorkspaceManifest,
-    messages: &mut Vec<wit_types::Message>,
     events: &mut Vec<PersistedEvent>,
     on_event: &mut impl FnMut(SessionEvent) -> Option<ApprovalDecision>,
 ) -> Result<()> {
@@ -638,10 +613,6 @@ fn dispatch_tool_calls(
         let msg = result?;
         for part in &msg.parts {
             if let wit_types::MessagePart::ToolResult(tr) = part {
-                events.push(PersistedEvent::ToolResultReceived {
-                    tool_call_id: tr.tool_call_id.clone(),
-                    content: tr.content.clone(),
-                });
                 on_event(SessionEvent::ToolResult {
                     tool_call_id: tr.tool_call_id.clone(),
                     tool_name: tr.tool_name.clone(),
@@ -649,19 +620,83 @@ fn dispatch_tool_calls(
                 });
             }
         }
-        messages.push(msg);
+        events.push(PersistedEvent::ToolResult { message: msg });
     }
     Ok(())
 }
 
-fn pending_session_appends(
-    messages: &[wit_types::Message],
-    loaded_message_count: usize,
-) -> &[wit_types::Message] {
-    if loaded_message_count >= messages.len() {
-        return &[];
+/// Converts a WIT `SessionEvent` to an internal `PersistedEvent`.
+fn wit_event_to_persisted(e: wit_types::SessionEvent) -> PersistedEvent {
+    match e {
+        wit_types::SessionEvent::TurnStarted(turn_index) => {
+            PersistedEvent::TurnStarted { turn_index }
+        }
+        wit_types::SessionEvent::UserMessage(text) => PersistedEvent::UserMessage { text },
+        wit_types::SessionEvent::LlmCompletion(message) => {
+            PersistedEvent::LlmCompletion { message }
+        }
+        wit_types::SessionEvent::ToolResult(message) => PersistedEvent::ToolResult { message },
+        wit_types::SessionEvent::ToolApprovalRequested(req) => {
+            PersistedEvent::ToolApprovalRequested {
+                id: req.id,
+                name: req.name,
+            }
+        }
+        wit_types::SessionEvent::ToolApprovalDecided(rec) => PersistedEvent::ToolApprovalDecided {
+            id: rec.id,
+            decision: match rec.decision {
+                wit_types::ApprovalDecision::Approve => ApprovalDecision::Approve,
+                wit_types::ApprovalDecision::Deny => ApprovalDecision::Deny,
+            },
+        },
+        wit_types::SessionEvent::TurnComplete(turn_index) => {
+            PersistedEvent::TurnComplete { turn_index }
+        }
+        wit_types::SessionEvent::TurnInterrupted(ti) => PersistedEvent::TurnInterrupted {
+            turn_index: ti.turn_index,
+            reason: ti.reason,
+        },
     }
-    &messages[loaded_message_count..]
+}
+
+/// Converts an internal `PersistedEvent` to a WIT `SessionEvent`.
+fn persisted_to_wit_event(e: &PersistedEvent) -> wit_types::SessionEvent {
+    match e {
+        PersistedEvent::TurnStarted { turn_index } => {
+            wit_types::SessionEvent::TurnStarted(*turn_index)
+        }
+        PersistedEvent::UserMessage { text } => wit_types::SessionEvent::UserMessage(text.clone()),
+        PersistedEvent::LlmCompletion { message } => {
+            wit_types::SessionEvent::LlmCompletion(message.clone())
+        }
+        PersistedEvent::ToolResult { message } => {
+            wit_types::SessionEvent::ToolResult(message.clone())
+        }
+        PersistedEvent::ToolApprovalRequested { id, name } => {
+            wit_types::SessionEvent::ToolApprovalRequested(wit_types::ToolApprovalRequest {
+                id: id.clone(),
+                name: name.clone(),
+            })
+        }
+        PersistedEvent::ToolApprovalDecided { id, decision } => {
+            wit_types::SessionEvent::ToolApprovalDecided(wit_types::ToolApprovalDecisionRecord {
+                id: id.clone(),
+                decision: match decision {
+                    ApprovalDecision::Approve => wit_types::ApprovalDecision::Approve,
+                    ApprovalDecision::Deny => wit_types::ApprovalDecision::Deny,
+                },
+            })
+        }
+        PersistedEvent::TurnComplete { turn_index } => {
+            wit_types::SessionEvent::TurnComplete(*turn_index)
+        }
+        PersistedEvent::TurnInterrupted { turn_index, reason } => {
+            wit_types::SessionEvent::TurnInterrupted(wit_types::TurnInterruption {
+                turn_index: *turn_index,
+                reason: reason.clone(),
+            })
+        }
+    }
 }
 
 /// Finds the first enabled entry for a slot and loads it.
@@ -671,7 +706,28 @@ fn load_slot(
     slot: &str,
 ) -> Result<ExtensionInstance> {
     let entry = first_enabled(manifest, slot)?;
-    let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path))?;
+    let caps = extension_host::strings_to_capabilities(&entry.capabilities);
+    let opts = LoadOptions {
+        capabilities: Some(&caps),
+        ..LoadOptions::default()
+    };
+    let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
+    Ok(instance)
+}
+
+/// Loads the session provider with a preopened data directory.
+fn load_session_slot(
+    engine: &Engine,
+    manifest: &WorkspaceManifest,
+    sessions_dir: &Path,
+) -> Result<ExtensionInstance> {
+    let entry = first_enabled(manifest, "session-provider")?;
+    let caps = extension_host::strings_to_capabilities(&entry.capabilities);
+    let opts = LoadOptions {
+        capabilities: Some(&caps),
+        data_dir: Some(sessions_dir),
+    };
+    let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
     Ok(instance)
 }
 
@@ -686,7 +742,12 @@ fn load_llm_provider(
         if !entry.enabled || entry.slot.as_deref() != Some("llm-provider") {
             continue;
         }
-        let mut instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path))?;
+        let caps = extension_host::strings_to_capabilities(&entry.capabilities);
+        let opts = LoadOptions {
+            capabilities: Some(&caps),
+            ..LoadOptions::default()
+        };
+        let mut instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
         instance
             .init(init_config)?
             .map_err(|e| anyhow::anyhow!("LLM init: {e}"))?;
@@ -709,7 +770,12 @@ fn load_general_extensions(
         if !entry.enabled || entry.slot.is_some() {
             continue;
         }
-        let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path))?;
+        let caps = extension_host::strings_to_capabilities(&entry.capabilities);
+        let opts = LoadOptions {
+            capabilities: Some(&caps),
+            ..LoadOptions::default()
+        };
+        let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
         result.push(instance);
     }
     Ok(result)
@@ -723,8 +789,9 @@ fn load_general_extensions(
 pub(crate) fn load_session_provider(
     engine: &Engine,
     manifest: &WorkspaceManifest,
+    sessions_dir: &Path,
 ) -> Result<ExtensionInstance> {
-    let mut ext = load_slot(engine, manifest, "session-provider")?;
+    let mut ext = load_session_slot(engine, manifest, sessions_dir)?;
     ext.init(&[])?
         .map_err(|e| anyhow::anyhow!("session init: {e}"))?;
     Ok(ext)
@@ -774,49 +841,115 @@ mod tests {
     }
 
     #[test]
-    fn pending_session_appends_no_tool_turn_includes_user_and_reply() {
-        let messages = vec![
-            text_message("user", "Earlier question"),
-            text_message("assistant", "Earlier answer"),
-            text_message("user", "Hello"),
-            text_message("assistant", "Hi there"),
+    fn messages_for_llm_derives_from_events() {
+        let events = [
+            PersistedEvent::TurnStarted { turn_index: 0 },
+            PersistedEvent::UserMessage {
+                text: "Hello".into(),
+            },
+            PersistedEvent::LlmCompletion {
+                message: text_message("assistant", "Hi there"),
+            },
+            PersistedEvent::TurnComplete { turn_index: 0 },
         ];
 
-        let appends = pending_session_appends(&messages, 2);
+        let messages: Vec<wit_types::Message> = events
+            .iter()
+            .filter_map(|e| match e {
+                PersistedEvent::UserMessage { text } => Some(wit_types::Message {
+                    role: "user".into(),
+                    parts: vec![wit_types::MessagePart::Text(text.clone())],
+                }),
+                PersistedEvent::LlmCompletion { message }
+                | PersistedEvent::ToolResult { message } => Some(message.clone()),
+                _ => None,
+            })
+            .collect();
 
-        assert_eq!(appends.len(), 2);
-        assert_eq!(appends[0].role, "user");
-        assert_eq!(extract_text(&appends[0]), "Hello");
-        assert_eq!(appends[1].role, "assistant");
-        assert_eq!(extract_text(&appends[1]), "Hi there");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(extract_text(&messages[0]), "Hello");
+        assert_eq!(messages[1].role, "assistant");
+        assert_eq!(extract_text(&messages[1]), "Hi there");
     }
 
     #[test]
-    fn pending_session_appends_tool_turn_includes_full_turn_delta() {
-        let messages = vec![
-            text_message("assistant", "Existing context"),
-            text_message("user", "Weather?"),
-            tool_call_message("call-1", "get_weather"),
-            tool_result_message("call-1", "get_weather"),
-            text_message("assistant", "It is 72F in Austin."),
+    fn messages_for_llm_includes_tool_turn() {
+        let events = [
+            PersistedEvent::UserMessage {
+                text: "Weather?".into(),
+            },
+            PersistedEvent::LlmCompletion {
+                message: tool_call_message("call-1", "get_weather"),
+            },
+            PersistedEvent::ToolResult {
+                message: tool_result_message("call-1", "get_weather"),
+            },
+            PersistedEvent::LlmCompletion {
+                message: text_message("assistant", "It is 72F."),
+            },
         ];
 
-        let appends = pending_session_appends(&messages, 1);
+        let messages: Vec<wit_types::Message> = events
+            .iter()
+            .filter_map(|e| match e {
+                PersistedEvent::UserMessage { text } => Some(wit_types::Message {
+                    role: "user".into(),
+                    parts: vec![wit_types::MessagePart::Text(text.clone())],
+                }),
+                PersistedEvent::LlmCompletion { message }
+                | PersistedEvent::ToolResult { message } => Some(message.clone()),
+                _ => None,
+            })
+            .collect();
 
-        assert_eq!(appends.len(), 4);
-        assert_eq!(appends[0].role, "user");
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0].role, "user");
         assert!(matches!(
-            &appends[1].parts[0],
+            &messages[1].parts[0],
             wit_types::MessagePart::ToolCall(tc)
                 if tc.id == "call-1" && tc.name == "get_weather"
         ));
         assert!(matches!(
-            &appends[2].parts[0],
+            &messages[2].parts[0],
             wit_types::MessagePart::ToolResult(tr)
-                if tr.tool_call_id == "call-1" && tr.tool_name == "get_weather"
+                if tr.tool_call_id == "call-1"
         ));
-        assert_eq!(appends[3].role, "assistant");
-        assert_eq!(extract_text(&appends[3]), "It is 72F in Austin.");
+        assert_eq!(messages[3].role, "assistant");
+        assert_eq!(extract_text(&messages[3]), "It is 72F.");
+    }
+
+    #[test]
+    fn messages_for_llm_filters_non_message_events() {
+        let events = [
+            PersistedEvent::TurnStarted { turn_index: 0 },
+            PersistedEvent::UserMessage { text: "hi".into() },
+            PersistedEvent::ToolApprovalRequested {
+                id: "1".into(),
+                name: "test".into(),
+            },
+            PersistedEvent::ToolApprovalDecided {
+                id: "1".into(),
+                decision: ApprovalDecision::Approve,
+            },
+            PersistedEvent::TurnComplete { turn_index: 0 },
+        ];
+
+        let messages: Vec<wit_types::Message> = events
+            .iter()
+            .filter_map(|e| match e {
+                PersistedEvent::UserMessage { text } => Some(wit_types::Message {
+                    role: "user".into(),
+                    parts: vec![wit_types::MessagePart::Text(text.clone())],
+                }),
+                PersistedEvent::LlmCompletion { message }
+                | PersistedEvent::ToolResult { message } => Some(message.clone()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "user");
     }
 
     #[test]
@@ -862,13 +995,11 @@ mod tests {
             PersistedEvent::UserMessage {
                 text: "hello".into(),
             },
-            PersistedEvent::AssistantMessage {
-                text: "world".into(),
+            PersistedEvent::LlmCompletion {
+                message: text_message("assistant", "world"),
             },
-            PersistedEvent::ToolCallRequested {
-                id: "1".into(),
-                name: "test".into(),
-                arguments_json: "{}".into(),
+            PersistedEvent::ToolResult {
+                message: tool_result_message("1", "test"),
             },
             PersistedEvent::ToolApprovalRequested {
                 id: "1".into(),
@@ -878,17 +1009,13 @@ mod tests {
                 id: "1".into(),
                 decision: ApprovalDecision::Approve,
             },
-            PersistedEvent::ToolResultReceived {
-                tool_call_id: "1".into(),
-                content: "ok".into(),
-            },
             PersistedEvent::TurnComplete { turn_index: 0 },
             PersistedEvent::TurnInterrupted {
                 turn_index: 0,
                 reason: "cancelled".into(),
             },
         ];
-        assert_eq!(events.len(), 9);
+        assert_eq!(events.len(), 8);
     }
 
     #[test]
@@ -902,8 +1029,8 @@ mod tests {
             events: vec![
                 PersistedEvent::TurnStarted { turn_index: 0 },
                 PersistedEvent::UserMessage { text: "hi".into() },
-                PersistedEvent::AssistantMessage {
-                    text: "hello".into(),
+                PersistedEvent::LlmCompletion {
+                    message: text_message("assistant", "hello"),
                 },
                 PersistedEvent::TurnComplete { turn_index: 0 },
             ],
@@ -916,53 +1043,55 @@ mod tests {
 
     #[test]
     fn replay_emits_matching_session_events() {
-        let events = vec![
+        let events = [
             PersistedEvent::TurnStarted { turn_index: 0 },
             PersistedEvent::UserMessage { text: "hi".into() },
-            PersistedEvent::AssistantMessage {
-                text: "hello".into(),
+            PersistedEvent::LlmCompletion {
+                message: text_message("assistant", "hello"),
             },
-            PersistedEvent::ToolCallRequested {
-                id: "c1".into(),
-                name: "search".into(),
-                arguments_json: "{\"q\":\"rust\"}".into(),
+            PersistedEvent::LlmCompletion {
+                message: tool_call_message("c1", "search"),
             },
-            PersistedEvent::ToolResultReceived {
-                tool_call_id: "c1".into(),
-                content: "found".into(),
+            PersistedEvent::ToolResult {
+                message: tool_result_message("c1", "search"),
             },
             PersistedEvent::TurnComplete { turn_index: 0 },
         ];
 
-        // Build replayed events using the same logic as replay().
         let mut replayed = Vec::new();
         for event in &events {
-            let session_event = match event {
-                PersistedEvent::AssistantMessage { text } => {
-                    Some(SessionEvent::AssistantMessage { text: text.clone() })
+            match event {
+                PersistedEvent::LlmCompletion { message } => {
+                    let tcs = extract_tool_calls(message);
+                    if tcs.is_empty() {
+                        replayed.push(SessionEvent::AssistantMessage {
+                            text: extract_text(message),
+                        });
+                    } else {
+                        for tc in &tcs {
+                            replayed.push(SessionEvent::ToolCall {
+                                id: tc.id.clone(),
+                                name: tc.name.clone(),
+                                arguments_json: tc.arguments_json.clone(),
+                            });
+                        }
+                    }
                 }
-                PersistedEvent::ToolCallRequested {
-                    id,
-                    name,
-                    arguments_json,
-                } => Some(SessionEvent::ToolCall {
-                    id: id.clone(),
-                    name: name.clone(),
-                    arguments_json: arguments_json.clone(),
-                }),
-                PersistedEvent::ToolResultReceived {
-                    tool_call_id,
-                    content,
-                } => Some(SessionEvent::ToolResult {
-                    tool_call_id: tool_call_id.clone(),
-                    tool_name: String::new(),
-                    content: content.clone(),
-                }),
-                PersistedEvent::TurnComplete { .. } => Some(SessionEvent::TurnComplete),
-                _ => None,
-            };
-            if let Some(e) = session_event {
-                replayed.push(e);
+                PersistedEvent::ToolResult { message } => {
+                    for part in &message.parts {
+                        if let wit_types::MessagePart::ToolResult(tr) = part {
+                            replayed.push(SessionEvent::ToolResult {
+                                tool_call_id: tr.tool_call_id.clone(),
+                                tool_name: tr.tool_name.clone(),
+                                content: tr.content.clone(),
+                            });
+                        }
+                    }
+                }
+                PersistedEvent::TurnComplete { .. } => {
+                    replayed.push(SessionEvent::TurnComplete);
+                }
+                _ => {}
             }
         }
 
