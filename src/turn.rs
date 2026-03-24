@@ -8,6 +8,7 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Result, bail};
+use tracing::{debug, info};
 use wasmtime::Engine;
 
 use crate::config::UserConfig;
@@ -111,10 +112,6 @@ fn run_user_message() -> wit_types::Message {
 }
 
 /// Runs a single hardcoded agent turn, printing debug output at each step.
-#[expect(
-    clippy::too_many_lines,
-    reason = "The tracer-bullet flow stays linear so the end-to-end turn is easy to inspect"
-)]
 pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
     let manifest = manifest::scan_and_load(engine, ur_root, workspace)?;
     let config = UserConfig::load(ur_root)?;
@@ -136,7 +133,7 @@ pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
 
     // ── 1. Load session ──────────────────────────────────────────────
     let session_id = "demo";
-    println!("[turn] loading session \"{session_id}\"...");
+    info!(session_id, "loading session");
     let mut session = load_slot(engine, &manifest, "session-provider")?;
     session
         .init(&[])?
@@ -145,19 +142,19 @@ pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
         .load_session(session_id)?
         .map_err(|e| anyhow::anyhow!("load_session: {e}"))?;
     let loaded_message_count = messages.len();
-    println!(
-        "[turn] session loaded: {} messages ({})",
-        messages.len(),
-        if messages.is_empty() {
-            "fresh session"
+    info!(
+        count = messages.len(),
+        state = if messages.is_empty() {
+            "fresh"
         } else {
             "existing"
-        }
+        },
+        "session loaded"
     );
 
     // ── 2. Add user message ──────────────────────────────────────────
     let user_msg = run_user_message();
-    println!("[turn] adding user message: {:?}", extract_text(&user_msg));
+    debug!(text = %extract_text(&user_msg), "adding user message");
     messages.push(user_msg);
 
     // ── 3. Load general extensions and collect tools ────────────────
@@ -169,37 +166,23 @@ pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
         tools.extend(ext.list_tools()?);
     }
     if !tools.is_empty() {
-        println!(
-            "[turn] collected {} tool{}",
-            tools.len(),
-            if tools.len() == 1 { "" } else { "s" }
-        );
+        info!(count = tools.len(), "collected tools");
     }
 
     // ── 4. First LLM completion (streaming) ──────────────────────────
-    println!("[turn] resolving role \"default\" → {provider_id}/{model_id}");
+    info!(%provider_id, %model_id, "resolved role \"default\"");
     let init_config = crate::provider::init_config(&provider_id);
     let (mut llm, _) = load_llm_provider(engine, &manifest, &provider_id, &init_config)?;
 
-    println!(
-        "[turn] calling LLM streaming ({} message{})...",
-        messages.len(),
-        if messages.len() == 1 { "" } else { "s" }
-    );
+    info!(messages = messages.len(), "calling LLM streaming");
     let completion = stream_completion(&mut llm, &messages, &model_id, &settings, &tools)?;
 
     let tool_calls = extract_tool_calls(&completion.message);
     if tool_calls.is_empty() {
-        println!(
-            "[turn] LLM returned message: {:?}",
-            extract_text(&completion.message)
-        );
+        debug!(text = %extract_text(&completion.message), "LLM returned message");
     } else {
         for tc in &tool_calls {
-            println!(
-                "[turn] LLM returned tool call: {}({})",
-                tc.name, tc.arguments_json
-            );
+            info!(tool = %tc.name, args = %tc.arguments_json, "LLM returned tool call");
         }
     }
 
@@ -211,24 +194,20 @@ pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
         dispatch_tool_calls(&tool_calls, engine, &manifest, &mut messages)?;
 
         // ── 6. Second LLM completion (with tool results) ────────────
-        println!(
-            "[turn] calling LLM streaming ({} messages, includes tool result)...",
-            messages.len()
+        info!(
+            messages = messages.len(),
+            "calling LLM streaming (with tool results)"
         );
         let completion2 = stream_completion(&mut llm, &messages, &model_id, &settings, &tools)?;
-        println!(
-            "[turn] LLM returned message: {:?}",
-            extract_text(&completion2.message)
-        );
+        debug!(text = %extract_text(&completion2.message), "LLM returned message");
         messages.push(completion2.message);
     }
 
     // ── 7. Append to session ─────────────────────────────────────────
     let session_appends = pending_session_appends(&messages, loaded_message_count);
-    println!(
-        "[turn] appending {} message{} to session \"{session_id}\"",
-        session_appends.len(),
-        if session_appends.len() == 1 { "" } else { "s" }
+    debug!(
+        count = session_appends.len(),
+        session_id, "appending messages to session"
     );
     for message in session_appends {
         session
@@ -237,7 +216,7 @@ pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
     }
 
     // ── 8. Compact ───────────────────────────────────────────────────
-    println!("[turn] compacting {} messages...", messages.len());
+    info!(count = messages.len(), "compacting messages");
     let mut compaction = load_slot(engine, &manifest, "compaction-provider")?;
     compaction
         .init(&[])?
@@ -245,17 +224,17 @@ pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
     let compacted = compaction
         .compact(&messages)?
         .map_err(|e| anyhow::anyhow!("compact: {e}"))?;
-    println!(
-        "[turn] compaction result: {} messages ({})",
-        compacted.len(),
-        if compacted.len() == messages.len() {
+    info!(
+        count = compacted.len(),
+        result = if compacted.len() == messages.len() {
             "unchanged"
         } else {
             "compacted"
-        }
+        },
+        "compaction complete"
     );
 
-    println!("[turn] done");
+    info!("turn complete");
     Ok(())
 }
 
@@ -286,7 +265,7 @@ fn dispatch_tool_calls(
     }
 
     for tc in tool_calls {
-        println!("[turn] dispatching tool {:?} to extensions...", tc.name);
+        info!(tool = %tc.name, "dispatching tool");
     }
 
     let results: Vec<Result<wit_types::Message>> = std::thread::scope(|s| {
@@ -302,7 +281,7 @@ fn dispatch_tool_calls(
 
                     for ext in &mut generals {
                         if let Ok(result) = ext.call_tool(&tc.name, &tc.arguments_json)? {
-                            println!("[turn] tool result: {result:?}");
+                            debug!(tool = %tc.name, %result, "tool result");
                             return Ok(wit_types::Message {
                                 role: "tool".into(),
                                 parts: vec![wit_types::MessagePart::ToolResult(

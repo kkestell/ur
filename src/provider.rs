@@ -14,7 +14,7 @@ pub fn init_config(provider_id: &str) -> Vec<(String, String)> {
     match crate::keyring::get_api_key(provider_id) {
         Ok(Some(val)) => return vec![("api_key".into(), val)],
         Ok(None) => {}
-        Err(e) => eprintln!("warning: keyring lookup failed for {provider_id}: {e}"),
+        Err(e) => tracing::warn!(%provider_id, error = %e, "keyring lookup failed"),
     }
 
     vec![]
