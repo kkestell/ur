@@ -1,16 +1,4 @@
-mod app;
-mod cli;
-mod config;
-mod discovery;
-mod extension_host;
-mod extension_settings;
-mod keyring;
-mod manifest;
-mod model;
-mod provider;
-mod session;
-mod slot;
-mod workspace;
+// Rust guideline compliant 2026-02-21
 
 use std::env;
 use std::io::Write;
@@ -21,10 +9,10 @@ use clap::Parser;
 use mimalloc::MiMalloc;
 use tracing_subscriber::EnvFilter;
 
-use app::UrApp;
-use cli::{Cli, Command, ExtConfigAction, ExtensionAction, RoleAction};
-use session::SessionEvent;
-use workspace::{SettingGetResult, SettingSetResult, UrWorkspace};
+use ur::app::UrApp;
+use ur::cli::{self, Cli, Command, ExtConfigAction, ExtensionAction, RoleAction};
+use ur::session::{self, SessionEvent};
+use ur::workspace::{SettingGetResult, SettingSetResult, UrWorkspace};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
