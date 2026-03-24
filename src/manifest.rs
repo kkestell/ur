@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use wasmtime::Engine;
 
 use crate::discovery::{self, DiscoveredExtension, SourceTier};
+use crate::extension_host;
 use crate::slot::{Cardinality, find_slot, validate_required_slots};
 
 /// Persisted state for all extensions in a workspace.
@@ -27,6 +28,9 @@ pub struct ManifestEntry {
     pub wasm_path: String,
     pub checksum: String,
     pub enabled: bool,
+    /// Declared WASI capabilities as string tags for JSON portability.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 // --- Persistence ---
@@ -108,6 +112,7 @@ pub fn merge(
                 wasm_path: ext.wasm_path.to_string_lossy().into_owned(),
                 checksum: ext.checksum,
                 enabled,
+                capabilities: extension_host::capabilities_to_strings(&ext.capabilities),
             }
         })
         .collect();
@@ -239,10 +244,12 @@ mod tests {
             wasm_path: String::new(),
             checksum: String::new(),
             enabled,
+            capabilities: Vec::new(),
         }
     }
 
     fn discovered(id: &str, slot: Option<&str>, source: SourceTier) -> DiscoveredExtension {
+        use crate::extension_host::wit_types;
         DiscoveredExtension {
             id: id.to_owned(),
             name: id.to_owned(),
@@ -250,6 +257,7 @@ mod tests {
             source,
             wasm_path: PathBuf::new(),
             checksum: String::new(),
+            capabilities: wit_types::ExtensionCapabilities::empty(),
         }
     }
 

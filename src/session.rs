@@ -11,7 +11,7 @@ use tracing::{debug, info};
 use wasmtime::Engine;
 
 use crate::config::UserConfig;
-use crate::extension_host::{ExtensionInstance, wit_types};
+use crate::extension_host::{self, ExtensionInstance, LoadOptions, wit_types};
 use crate::manifest::{ManifestEntry, WorkspaceManifest};
 use crate::model;
 use crate::provider;
@@ -671,7 +671,12 @@ fn load_slot(
     slot: &str,
 ) -> Result<ExtensionInstance> {
     let entry = first_enabled(manifest, slot)?;
-    let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path))?;
+    let caps = extension_host::strings_to_capabilities(&entry.capabilities);
+    let opts = LoadOptions {
+        capabilities: Some(&caps),
+        ..LoadOptions::default()
+    };
+    let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
     Ok(instance)
 }
 
@@ -686,7 +691,12 @@ fn load_llm_provider(
         if !entry.enabled || entry.slot.as_deref() != Some("llm-provider") {
             continue;
         }
-        let mut instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path))?;
+        let caps = extension_host::strings_to_capabilities(&entry.capabilities);
+        let opts = LoadOptions {
+            capabilities: Some(&caps),
+            ..LoadOptions::default()
+        };
+        let mut instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
         instance
             .init(init_config)?
             .map_err(|e| anyhow::anyhow!("LLM init: {e}"))?;
@@ -709,7 +719,12 @@ fn load_general_extensions(
         if !entry.enabled || entry.slot.is_some() {
             continue;
         }
-        let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path))?;
+        let caps = extension_host::strings_to_capabilities(&entry.capabilities);
+        let opts = LoadOptions {
+            capabilities: Some(&caps),
+            ..LoadOptions::default()
+        };
+        let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
         result.push(instance);
     }
     Ok(result)
