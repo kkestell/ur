@@ -7,12 +7,11 @@ wit_bindgen::generate!({
 use std::cell::RefCell;
 
 use exports::ur::extension::extension::Guest as ExtGuest;
-use exports::ur::extension::llm_provider::Guest as LlmGuest;
-use exports::ur::extension::llm_streaming_provider::{
-    CompletionStream, Guest as LlmStreamingGuest, GuestCompletionStream,
+use exports::ur::extension::llm_provider::{
+    CompletionStream, Guest as LlmGuest, GuestCompletionStream,
 };
 use ur::extension::types::{
-    Completion, CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
+    CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
     SettingDescriptor, SettingEnum, SettingInteger, SettingSchema, SettingString, ToolCall,
     ToolDescriptor, Usage,
 };
@@ -76,8 +75,7 @@ const GOOGLE_MODELS: &[ModelMeta] = &[
     ModelMeta {
         id: GEMINI_3_1_FLASH_LITE_PREVIEW,
         name: "Gemini 3.1 Flash-Lite Preview",
-        description:
-            "Gemini 3.1 Flash-Lite preview with 1M context, 64k output, and Jan 2025 knowledge.",
+        description: "Gemini 3.1 Flash-Lite preview with 1M context, 64k output, and Jan 2025 knowledge.",
         is_default: false,
         thinking_levels: FLASH_LITE_THINKING_LEVELS,
         default_thinking_level: "minimal",
@@ -139,35 +137,6 @@ impl ExtGuest for LlmGoogle {
 
 // ── LLM provider ────────────────────────────────────────────────────
 
-impl LlmGuest for LlmGoogle {
-    fn provider_id() -> String {
-        "google".into()
-    }
-
-    fn list_models() -> Vec<ModelDescriptor> {
-        GOOGLE_MODELS.iter().map(model_descriptor).collect()
-    }
-
-    fn complete(
-        messages: Vec<Message>,
-        model: String,
-        settings: Vec<ConfigSetting>,
-        tools: Vec<ToolDescriptor>,
-    ) -> Result<Completion, String> {
-        let api_key = get_api_key()?;
-        let body = build_request_body(&messages, &settings, &tools);
-
-        let url = format!("/v1beta/models/{model}:generateContent");
-
-        let response_bytes = http_post(&api_key, &url, &body)?;
-        let response_str =
-            String::from_utf8(response_bytes).map_err(|e| format!("invalid UTF-8: {e}"))?;
-        parse_generate_content_response(&response_str)
-    }
-}
-
-// ── Streaming provider ──────────────────────────────────────────────
-
 struct GoogleStream {
     inner: RefCell<StreamState>,
 }
@@ -180,10 +149,18 @@ struct StreamState {
     _incoming_body: Option<IncomingBody>,
 }
 
-impl LlmStreamingGuest for LlmGoogle {
+impl LlmGuest for LlmGoogle {
     type CompletionStream = GoogleStream;
 
-    fn complete_streaming(
+    fn provider_id() -> String {
+        "google".into()
+    }
+
+    fn list_models() -> Vec<ModelDescriptor> {
+        GOOGLE_MODELS.iter().map(model_descriptor).collect()
+    }
+
+    fn complete(
         messages: Vec<Message>,
         model: String,
         settings: Vec<ConfigSetting>,
@@ -555,91 +532,7 @@ fn message_to_gemini(msg: &Message) -> serde_json::Value {
     serde_json::json!({ "role": role, "parts": parts })
 }
 
-// ── Response parsing ────────────────────────────────────────────────
-
-fn parse_generate_content_response(body: &str) -> Result<Completion, String> {
-    let response: serde_json::Value =
-        serde_json::from_str(body).map_err(|e| format!("failed to parse response: {e}"))?;
-
-    // Check for API-level errors.
-    if let Some(error) = response.get("error") {
-        let msg = error
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("unknown error");
-        return Err(format!("Gemini API error: {msg}"));
-    }
-
-    let candidates = response
-        .get("candidates")
-        .and_then(|c| c.as_array())
-        .ok_or("no candidates in response")?;
-
-    let candidate = candidates.first().ok_or("empty candidates array")?;
-    let content = candidate.get("content").ok_or("no content in candidate")?;
-    let parts = content
-        .get("parts")
-        .and_then(|p| p.as_array())
-        .ok_or("no parts in content")?;
-
-    let mut message_parts = Vec::new();
-
-    for part in parts {
-        if let Some(t) = part.get("text").and_then(|t| t.as_str()) {
-            message_parts.push(MessagePart::Text(t.to_string()));
-        }
-        if let Some(fc) = part.get("functionCall") {
-            let name = fc.get("name").and_then(|n| n.as_str()).unwrap_or("");
-            let id = fc.get("id").and_then(|i| i.as_str()).unwrap_or("");
-            let args = function_call_args_json(fc);
-            let metadata = build_provider_metadata(part);
-            message_parts.push(MessagePart::ToolCall(ToolCall {
-                id: id.into(),
-                name: name.into(),
-                arguments_json: args,
-                provider_metadata_json: metadata,
-            }));
-        }
-    }
-
-    let usage = response.get("usageMetadata").and_then(parse_usage_metadata);
-
-    Ok(Completion {
-        message: Message {
-            role: "assistant".into(),
-            parts: message_parts,
-        },
-        usage,
-    })
-}
-
 // ── WASI HTTP helpers ───────────────────────────────────────────────
-
-fn http_post(api_key: &str, path: &str, body: &str) -> Result<Vec<u8>, String> {
-    let (incoming_body, body_stream) = http_post_streaming(api_key, path, body)?;
-
-    // Read entire response body.
-    let mut result = Vec::new();
-    loop {
-        match body_stream.blocking_read(65536) {
-            Ok(bytes) => {
-                if bytes.is_empty() {
-                    break;
-                }
-                result.extend_from_slice(&bytes);
-            }
-            Err(StreamError::Closed) => break,
-            Err(StreamError::LastOperationFailed(e)) => {
-                return Err(format!("read error: {}", e.to_debug_string()));
-            }
-        }
-    }
-
-    drop(body_stream);
-    drop(incoming_body);
-
-    Ok(result)
-}
 
 fn http_post_streaming(
     api_key: &str,
@@ -965,10 +858,8 @@ mod tests {
         // api_key is first, then per-model settings
         assert!(settings.iter().any(|s| s.key == "api_key" && s.secret));
 
-        let flash_thinking =
-            setting_by_key(&settings, "gemini-3-flash-preview.thinking_level");
-        let pro_thinking =
-            setting_by_key(&settings, "gemini-3.1-pro-preview.thinking_level");
+        let flash_thinking = setting_by_key(&settings, "gemini-3-flash-preview.thinking_level");
+        let pro_thinking = setting_by_key(&settings, "gemini-3.1-pro-preview.thinking_level");
         let flash_lite_thinking =
             setting_by_key(&settings, "gemini-3.1-flash-lite-preview.thinking_level");
 
@@ -992,8 +883,7 @@ mod tests {
         ));
 
         // Readonly metadata
-        let flash_ctx =
-            setting_by_key(&settings, "gemini-3-flash-preview.context_window_in");
+        let flash_ctx = setting_by_key(&settings, "gemini-3-flash-preview.context_window_in");
         assert!(flash_ctx.readonly);
     }
 

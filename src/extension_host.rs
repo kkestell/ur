@@ -424,34 +424,9 @@ impl ExtensionInstance {
         }
     }
 
-    /// Calls `complete` on an LLM provider extension.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the guest call traps, or `Ok(Err(...))`
-    /// if this is not an LLM provider.
-    #[expect(
-        dead_code,
-        reason = "The non-streaming wrapper stays available while callers migrate"
-    )]
-    pub fn complete(
-        &mut self,
-        messages: &[wit_types::Message],
-        model: &str,
-        settings: &[wit_types::ConfigSetting],
-        tools: &[wit_types::ToolDescriptor],
-    ) -> wasmtime::Result<Result<wit_types::Completion, String>> {
-        match self {
-            Self::Llm { store, bindings } => bindings
-                .ur_extension_llm_provider()
-                .call_complete(store, messages, model, settings, tools),
-            _ => Ok(Err("not an llm-provider".into())),
-        }
-    }
-
     /// Begins a streaming completion and pulls chunks via a callback.
     ///
-    /// Calls `complete-streaming` on the LLM provider, then pulls
+    /// Calls `complete` on the LLM provider, then pulls
     /// `completion-chunk` values from the returned resource until
     /// exhausted. Each chunk is passed to `on_chunk`.
     ///
@@ -459,7 +434,7 @@ impl ExtensionInstance {
     ///
     /// Returns an error if the guest call traps, or `Ok(Err(...))`
     /// if this is not an LLM provider.
-    pub fn complete_streaming(
+    pub fn complete(
         &mut self,
         messages: &[wit_types::Message],
         model: &str,
@@ -471,17 +446,18 @@ impl ExtensionInstance {
             return Ok(Err("not an llm-provider".into()));
         };
 
-        let stream: ResourceAny = match bindings
-            .ur_extension_llm_streaming_provider()
-            .call_complete_streaming(&mut *store, messages, model, settings, tools)?
-        {
+        let stream: ResourceAny = match bindings.ur_extension_llm_provider().call_complete(
+            &mut *store,
+            messages,
+            model,
+            settings,
+            tools,
+        )? {
             Ok(s) => s,
             Err(e) => return Ok(Err(e)),
         };
 
-        let accessor = bindings
-            .ur_extension_llm_streaming_provider()
-            .completion_stream();
+        let accessor = bindings.ur_extension_llm_provider().completion_stream();
 
         while let Some(chunk) = accessor.call_next(&mut *store, stream)? {
             on_chunk(&chunk);

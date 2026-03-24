@@ -7,12 +7,11 @@ wit_bindgen::generate!({
 use std::cell::RefCell;
 
 use exports::ur::extension::extension::Guest as ExtGuest;
-use exports::ur::extension::llm_provider::Guest as LlmGuest;
-use exports::ur::extension::llm_streaming_provider::{
-    CompletionStream, Guest as LlmStreamingGuest, GuestCompletionStream,
+use exports::ur::extension::llm_provider::{
+    CompletionStream, Guest as LlmGuest, GuestCompletionStream,
 };
 use ur::extension::types::{
-    Completion, CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
+    CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
     SettingBoolean, SettingDescriptor, SettingInteger, SettingNumber, SettingSchema, SettingString,
     SettingValue, ToolCall, ToolDescriptor, Usage,
 };
@@ -93,7 +92,31 @@ impl ExtGuest for LlmOpenRouter {
 
 // ── LLM provider ────────────────────────────────────────────────────
 
+struct OpenRouterStream {
+    inner: RefCell<StreamState>,
+}
+
+struct StreamState {
+    buffer: String,
+    pos: usize,
+    done: bool,
+    body_stream: Option<wasi::io::streams::InputStream>,
+    _incoming_body: Option<IncomingBody>,
+    // Accumulate tool call deltas across chunks.
+    pending_tool_calls: Vec<PendingToolCall>,
+}
+
+#[derive(Clone)]
+struct PendingToolCall {
+    index: u32,
+    id: String,
+    name: String,
+    arguments: String,
+}
+
 impl LlmGuest for LlmOpenRouter {
+    type CompletionStream = OpenRouterStream;
+
     fn provider_id() -> String {
         "openrouter".into()
     }
@@ -126,51 +149,9 @@ impl LlmGuest for LlmOpenRouter {
         model: String,
         settings: Vec<ConfigSetting>,
         tools: Vec<ToolDescriptor>,
-    ) -> Result<Completion, String> {
-        let api_key = get_api_key()?;
-        let body = build_request_body(&model, &messages, &settings, &tools, false);
-        let response_bytes = http_post(&api_key, "/api/v1/chat/completions", &body)?;
-        let response_str =
-            String::from_utf8(response_bytes).map_err(|e| format!("invalid UTF-8: {e}"))?;
-        parse_chat_response(&response_str)
-    }
-}
-
-// ── Streaming provider ──────────────────────────────────────────────
-
-struct OpenRouterStream {
-    inner: RefCell<StreamState>,
-}
-
-struct StreamState {
-    buffer: String,
-    pos: usize,
-    done: bool,
-    body_stream: Option<wasi::io::streams::InputStream>,
-    _incoming_body: Option<IncomingBody>,
-    // Accumulate tool call deltas across chunks.
-    pending_tool_calls: Vec<PendingToolCall>,
-}
-
-#[derive(Clone)]
-struct PendingToolCall {
-    index: u32,
-    id: String,
-    name: String,
-    arguments: String,
-}
-
-impl LlmStreamingGuest for LlmOpenRouter {
-    type CompletionStream = OpenRouterStream;
-
-    fn complete_streaming(
-        messages: Vec<Message>,
-        model: String,
-        settings: Vec<ConfigSetting>,
-        tools: Vec<ToolDescriptor>,
     ) -> Result<CompletionStream, String> {
         let api_key = get_api_key()?;
-        let body = build_request_body(&model, &messages, &settings, &tools, true);
+        let body = build_request_body(&model, &messages, &settings, &tools);
 
         let (incoming_body, body_stream) =
             http_post_streaming(&api_key, "/api/v1/chat/completions", &body)?;
@@ -801,12 +782,11 @@ fn build_request_body(
     messages: &[Message],
     settings: &[ConfigSetting],
     tools: &[ToolDescriptor],
-    stream: bool,
 ) -> String {
     let mut body = serde_json::Map::new();
 
     body.insert("model".into(), serde_json::json!(model));
-    body.insert("stream".into(), serde_json::json!(stream));
+    body.insert("stream".into(), serde_json::json!(true));
 
     // Build messages array.
     let msgs: Vec<serde_json::Value> = messages.iter().map(message_to_openai).collect();
@@ -959,64 +939,6 @@ fn extract_text(msg: &Message) -> String {
         .join("")
 }
 
-// ── Response parsing ────────────────────────────────────────────────
-
-fn parse_chat_response(body: &str) -> Result<Completion, String> {
-    let response: serde_json::Value =
-        serde_json::from_str(body).map_err(|e| format!("failed to parse response: {e}"))?;
-
-    if let Some(error) = response.get("error") {
-        let msg = error
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("unknown error");
-        return Err(format!("OpenRouter API error: {msg}"));
-    }
-
-    let choices = response
-        .get("choices")
-        .and_then(|c| c.as_array())
-        .ok_or("no choices in response")?;
-    let choice = choices.first().ok_or("empty choices array")?;
-    let message = choice.get("message").ok_or("no message in choice")?;
-
-    let mut parts = Vec::new();
-
-    if let Some(content) = message.get("content").and_then(|c| c.as_str())
-        && !content.is_empty()
-    {
-        parts.push(MessagePart::Text(content.to_string()));
-    }
-
-    if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
-        for tc in tool_calls {
-            let id = tc.get("id").and_then(|i| i.as_str()).unwrap_or("");
-            let function = tc.get("function").unwrap_or(&serde_json::Value::Null);
-            let name = function.get("name").and_then(|n| n.as_str()).unwrap_or("");
-            let args = function
-                .get("arguments")
-                .and_then(|a| a.as_str())
-                .unwrap_or("{}");
-            parts.push(MessagePart::ToolCall(ToolCall {
-                id: id.into(),
-                name: name.into(),
-                arguments_json: args.into(),
-                provider_metadata_json: String::new(),
-            }));
-        }
-    }
-
-    let usage = response.get("usage").and_then(parse_usage);
-
-    Ok(Completion {
-        message: Message {
-            role: "assistant".into(),
-            parts,
-        },
-        usage,
-    })
-}
-
 fn parse_usage(usage: &serde_json::Value) -> Option<Usage> {
     Some(Usage {
         input_tokens: u32::try_from(usage.get("prompt_tokens")?.as_u64()?).ok()?,
@@ -1087,31 +1009,6 @@ fn http_get(api_key: &str, path: &str) -> Result<Vec<u8>, String> {
     let body_stream = incoming_body
         .stream()
         .map_err(|()| "failed to get response stream".to_string())?;
-
-    let mut result = Vec::new();
-    loop {
-        match body_stream.blocking_read(65536) {
-            Ok(bytes) => {
-                if bytes.is_empty() {
-                    break;
-                }
-                result.extend_from_slice(&bytes);
-            }
-            Err(StreamError::Closed) => break,
-            Err(StreamError::LastOperationFailed(e)) => {
-                return Err(format!("read error: {}", e.to_debug_string()));
-            }
-        }
-    }
-
-    drop(body_stream);
-    drop(incoming_body);
-
-    Ok(result)
-}
-
-fn http_post(api_key: &str, path: &str, body: &str) -> Result<Vec<u8>, String> {
-    let (incoming_body, body_stream) = http_post_streaming(api_key, path, body)?;
 
     let mut result = Vec::new();
     loop {
@@ -1400,10 +1297,10 @@ mod tests {
             role: "user".into(),
             parts: vec![MessagePart::Text("Hello".into())],
         }];
-        let body = build_request_body("openai/gpt-4o-mini", &messages, &[], &[], false);
+        let body = build_request_body("openai/gpt-4o-mini", &messages, &[], &[]);
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(json["model"], "openai/gpt-4o-mini");
-        assert_eq!(json["stream"], false);
+        assert_eq!(json["stream"], true);
         assert_eq!(json["provider"]["require_parameters"], true);
     }
 
@@ -1423,7 +1320,7 @@ mod tests {
                 value: SettingValue::Integer(1024),
             },
         ];
-        let body = build_request_body("test/model", &messages, &settings, &[], false);
+        let body = build_request_body("test/model", &messages, &settings, &[]);
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(json["temperature"], 0.7);
         assert_eq!(json["max_tokens"], 1024);
@@ -1460,70 +1357,6 @@ mod tests {
         assert_eq!(json["role"], "assistant");
         assert_eq!(json["tool_calls"][0]["id"], "call-1");
         assert_eq!(json["tool_calls"][0]["function"]["name"], "get_weather");
-    }
-
-    // ── Response parsing tests ──────────────────────────────────────
-
-    #[test]
-    fn parse_chat_response_text_only() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "Hello!"
-                },
-                "finish_reason": "stop"
-            }],
-            "usage": {
-                "prompt_tokens": 10,
-                "completion_tokens": 5
-            }
-        })
-        .to_string();
-        let completion = parse_chat_response(&body).unwrap();
-        assert_eq!(extract_text(&completion.message), "Hello!");
-        assert_eq!(completion.usage.unwrap().input_tokens, 10);
-    }
-
-    #[test]
-    fn parse_chat_response_with_tool_calls() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call-1",
-                        "type": "function",
-                        "function": {
-                            "name": "get_weather",
-                            "arguments": "{\"city\":\"Paris\"}"
-                        }
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        })
-        .to_string();
-        let completion = parse_chat_response(&body).unwrap();
-        let tc = match &completion.message.parts[0] {
-            MessagePart::ToolCall(tc) => tc,
-            _ => panic!("expected tool call"),
-        };
-        assert_eq!(tc.id, "call-1");
-        assert_eq!(tc.name, "get_weather");
-    }
-
-    #[test]
-    fn parse_chat_response_api_error() {
-        let body = serde_json::json!({
-            "error": {
-                "message": "Rate limit exceeded"
-            }
-        })
-        .to_string();
-        let err = parse_chat_response(&body).unwrap_err();
-        assert!(err.contains("Rate limit"));
     }
 
     // ── SSE parsing tests ───────────────────────────────────────────

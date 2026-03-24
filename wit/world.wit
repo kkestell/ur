@@ -199,7 +199,7 @@ interface extension {
 
 /// Exported by extensions filling the `llm-provider` slot.
 interface llm-provider {
-    use types.{message, completion, model-descriptor, config-setting, tool-descriptor};
+    use types.{message, model-descriptor, config-setting, completion-chunk, tool-descriptor};
 
     /// The provider's short identifier (e.g. "anthropic", "openai").
     ///
@@ -209,15 +209,6 @@ interface llm-provider {
     /// Declare available models and their settings schemas.
     list-models: func() -> list<model-descriptor>;
 
-    /// Perform a completion with a resolved model and typed settings.
-    complete: func(messages: list<message>, model: string, settings: list<config-setting>,
-                   tools: list<tool-descriptor>) -> result<completion, string>;
-}
-
-/// Exported by extensions filling the `llm-provider` slot (streaming).
-interface llm-streaming-provider {
-    use types.{message, config-setting, completion-chunk, tool-descriptor};
-
     /// A stream of completion chunks pulled incrementally.
     resource completion-stream {
         /// Returns the next chunk, or `none` when the stream is exhausted.
@@ -226,9 +217,9 @@ interface llm-streaming-provider {
 
     /// Begin a streaming completion. The caller pulls chunks via the
     /// returned resource handle.
-    complete-streaming: func(messages: list<message>, model: string,
-                             settings: list<config-setting>,
-                             tools: list<tool-descriptor>)
+    complete: func(messages: list<message>, model: string,
+                   settings: list<config-setting>,
+                   tools: list<tool-descriptor>)
         -> result<completion-stream, string>;
 }
 
@@ -261,7 +252,6 @@ world llm-extension {
     import host;
     export extension;
     export llm-provider;
-    export llm-streaming-provider;
 }
 
 /// World for LLM extensions that make outbound HTTP requests (guest-side).
@@ -270,7 +260,6 @@ world llm-extension-http {
     import wasi:http/outgoing-handler@0.2.6;
     export extension;
     export llm-provider;
-    export llm-streaming-provider;
 }
 
 /// World for extensions that provide session persistence.

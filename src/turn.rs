@@ -52,7 +52,7 @@ fn stream_completion(
     let mut parts: Vec<wit_types::MessagePart> = Vec::new();
     let mut usage = None;
 
-    llm.complete_streaming(messages, model_id, settings, tools, |chunk| {
+    llm.complete(messages, model_id, settings, tools, |chunk| {
         for dp in &chunk.delta_parts {
             match dp {
                 wit_types::MessagePart::Text(delta) => {

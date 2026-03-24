@@ -6,13 +6,12 @@ wit_bindgen::generate!({
 use std::cell::RefCell;
 
 use exports::ur::extension::extension::Guest as ExtGuest;
-use exports::ur::extension::llm_provider::Guest as LlmGuest;
-use exports::ur::extension::llm_streaming_provider::{
-    CompletionStream, Guest as LlmStreamingGuest, GuestCompletionStream,
+use exports::ur::extension::llm_provider::{
+    CompletionStream, Guest as LlmGuest, GuestCompletionStream,
 };
 use ur::extension::types::{
-    Completion, CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart,
-    ModelDescriptor, SettingDescriptor, ToolCall, ToolDescriptor, Usage,
+    CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
+    SettingDescriptor, ToolCall, ToolDescriptor, Usage,
 };
 
 struct LlmTest;
@@ -47,7 +46,13 @@ impl ExtGuest for LlmTest {
 
 // ── LLM provider ────────────────────────────────────────────────────
 
+struct TestStream {
+    inner: RefCell<Option<CompletionChunk>>,
+}
+
 impl LlmGuest for LlmTest {
+    type CompletionStream = TestStream;
+
     fn provider_id() -> String {
         "test".into()
     }
@@ -62,32 +67,6 @@ impl LlmGuest for LlmTest {
     }
 
     fn complete(
-        messages: Vec<Message>,
-        _model: String,
-        _settings: Vec<ConfigSetting>,
-        tools: Vec<ToolDescriptor>,
-    ) -> Result<Completion, String> {
-        let message = deterministic_response(&messages, &tools);
-        Ok(Completion {
-            message,
-            usage: Some(Usage {
-                input_tokens: 1,
-                output_tokens: 1,
-            }),
-        })
-    }
-}
-
-// ── Streaming provider ──────────────────────────────────────────────
-
-struct TestStream {
-    inner: RefCell<Option<CompletionChunk>>,
-}
-
-impl LlmStreamingGuest for LlmTest {
-    type CompletionStream = TestStream;
-
-    fn complete_streaming(
         messages: Vec<Message>,
         _model: String,
         _settings: Vec<ConfigSetting>,
