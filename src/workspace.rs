@@ -476,11 +476,13 @@ impl UrWorkspace {
     ///
     /// Returns an error if the session provider fails to load.
     pub fn open_session(&self, session_id: &str) -> Result<UrSession> {
+        let sessions_dir = self.sessions_dir();
         UrSession::open(
             self.engine.clone(),
             self.manifest.clone(),
             self.config.clone(),
             session_id,
+            &sessions_dir,
         )
     }
 
@@ -491,9 +493,16 @@ impl UrWorkspace {
     /// Returns an error if the session provider fails to load.
     #[expect(dead_code, reason = "public API surface for future clients")]
     pub fn list_sessions(&self) -> Result<Vec<wit_types::SessionInfo>> {
-        let mut session_ext = crate::session::load_session_provider(&self.engine, &self.manifest)?;
+        let sessions_dir = self.sessions_dir();
+        let mut session_ext =
+            crate::session::load_session_provider(&self.engine, &self.manifest, &sessions_dir)?;
         session_ext
             .list_sessions()?
             .map_err(|e| anyhow::anyhow!("list_sessions: {e}"))
+    }
+
+    /// Returns the sessions data directory for this workspace.
+    fn sessions_dir(&self) -> std::path::PathBuf {
+        manifest::manifest_dir(&self.ur_root, &self.workspace_path).join("sessions")
     }
 }

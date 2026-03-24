@@ -4,7 +4,7 @@
 //! agent turn state machine. Clients subscribe to structured events
 //! via a callback rather than reading terminal output.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use tracing::{debug, info};
@@ -135,6 +135,7 @@ pub struct UrSession {
     manifest: WorkspaceManifest,
     config: UserConfig,
     session_id: String,
+    sessions_dir: PathBuf,
     events: Vec<PersistedEvent>,
     /// Number of events already persisted to the session provider.
     persisted_event_count: usize,
@@ -156,8 +157,9 @@ impl UrSession {
         manifest: WorkspaceManifest,
         config: UserConfig,
         session_id: &str,
+        sessions_dir: &Path,
     ) -> Result<Self> {
-        let mut session_ext = load_slot(&engine, &manifest, "session-provider")?;
+        let mut session_ext = load_session_slot(&engine, &manifest, sessions_dir)?;
         session_ext
             .init(&[])?
             .map_err(|e| anyhow::anyhow!("session init: {e}"))?;
@@ -186,6 +188,7 @@ impl UrSession {
             manifest,
             config,
             session_id: session_id.to_owned(),
+            sessions_dir: sessions_dir.to_owned(),
             events,
             persisted_event_count,
             turn_count: 0,
@@ -437,7 +440,7 @@ impl UrSession {
 
     /// Appends new events to the session provider and runs compaction.
     fn persist_and_compact(&mut self) -> Result<()> {
-        let mut session_ext = load_slot(&self.engine, &self.manifest, "session-provider")?;
+        let mut session_ext = load_session_slot(&self.engine, &self.manifest, &self.sessions_dir)?;
         session_ext
             .init(&[])?
             .map_err(|e| anyhow::anyhow!("session init: {e}"))?;
@@ -717,6 +720,22 @@ fn load_slot(
     Ok(instance)
 }
 
+/// Loads the session provider with a preopened data directory.
+fn load_session_slot(
+    engine: &Engine,
+    manifest: &WorkspaceManifest,
+    sessions_dir: &Path,
+) -> Result<ExtensionInstance> {
+    let entry = first_enabled(manifest, "session-provider")?;
+    let caps = extension_host::strings_to_capabilities(&entry.capabilities);
+    let opts = LoadOptions {
+        capabilities: Some(&caps),
+        data_dir: Some(sessions_dir),
+    };
+    let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
+    Ok(instance)
+}
+
 /// Loads the LLM provider extension matching a specific provider ID.
 fn load_llm_provider(
     engine: &Engine,
@@ -775,8 +794,9 @@ fn load_general_extensions(
 pub(crate) fn load_session_provider(
     engine: &Engine,
     manifest: &WorkspaceManifest,
+    sessions_dir: &Path,
 ) -> Result<ExtensionInstance> {
-    let mut ext = load_slot(engine, manifest, "session-provider")?;
+    let mut ext = load_session_slot(engine, manifest, sessions_dir)?;
     ext.init(&[])?
         .map_err(|e| anyhow::anyhow!("session init: {e}"))?;
     Ok(ext)
