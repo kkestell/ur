@@ -21,10 +21,7 @@ Each extension is a subdirectory containing a `.wasm` file. When you run ur, it:
 
 ### Extension Directories
 
-An extension directory contains either:
-
-- **Pre-built**: A `.wasm` file directly in the extension directory
-- **From source**: Rust source that compiles to `target/wasm32-wasip2/release/*.wasm`
+An extension directory must contain exactly one `.wasm` file, either at the directory root or in a subdirectory. Discovery searches the entire extension directory tree and errors if multiple `.wasm` files are found for one extension.
 
 ## The Workspace Manifest
 

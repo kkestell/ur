@@ -87,8 +87,7 @@ pub fn discover(
                 continue;
             }
 
-            let wasm_path = find_wasm_file(&ext_dir);
-            let Some(wasm_path) = wasm_path else {
+            let Some(wasm_path) = find_wasm_file(&ext_dir)? else {
                 continue;
             };
 
@@ -105,36 +104,42 @@ pub fn discover(
     Ok(extensions)
 }
 
-/// Finds the first `.wasm` file in a directory, checking common locations.
-fn find_wasm_file(ext_dir: &Path) -> Option<PathBuf> {
-    // Check root of the extension directory first.
-    if let Some(path) = find_wasm_in_dir(ext_dir) {
-        return Some(path);
+/// Recursively locates the `.wasm` file inside an extension directory.
+///
+/// Returns `Ok(Some(path))` when exactly one `.wasm` file exists,
+/// `Ok(None)` when none are found, and `Err` when multiple candidates
+/// would make the choice ambiguous.
+fn find_wasm_file(ext_dir: &Path) -> Result<Option<PathBuf>> {
+    let mut candidates = Vec::new();
+    collect_wasm_files(ext_dir, &mut candidates);
+    match candidates.len() {
+        0 => Ok(None),
+        1 => Ok(Some(candidates.remove(0))),
+        _ => bail!(
+            "multiple .wasm files in {}: {}",
+            ext_dir.display(),
+            candidates
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     }
-
-    // Check target/wasm32-wasip2/release/ for source extensions.
-    let target_dir = ext_dir.join("target/wasm32-wasip2/release");
-    if target_dir.is_dir()
-        && let Some(path) = find_wasm_in_dir(&target_dir)
-    {
-        return Some(path);
-    }
-
-    None
 }
 
-/// Finds the first `.wasm` file directly inside a directory (non-recursive).
-fn find_wasm_in_dir(dir: &Path) -> Option<PathBuf> {
+/// Collects all `.wasm` files under `dir`, recursing into subdirectories.
+fn collect_wasm_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return None;
+        return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "wasm") && path.is_file() {
-            return Some(path);
+        if path.is_dir() {
+            collect_wasm_files(&path, out);
+        } else if path.extension().is_some_and(|e| e == "wasm") && path.is_file() {
+            out.push(path);
         }
     }
-    None
 }
 
 /// Compiles a WASM component, detects its slot, instantiates to query identity.

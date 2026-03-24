@@ -2,7 +2,6 @@
   "permissions": {
     "allow": [
       "Bash(make*)",
-      "Bash(bash scripts/smoke-test.sh)",
       "Bash(cargo check:*)",
       "Bash(cargo build:*)",
       "Bash(cargo fmt:*)",
