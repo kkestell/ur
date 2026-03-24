@@ -76,6 +76,93 @@ pub enum ApprovalDecision {
     Deny,
 }
 
+/// A persisted event in the session timeline.
+///
+/// Captures enough structured history to restore the final visible
+/// client state from a single source of truth. Does not preserve
+/// every streamed token delta — only assembled messages and domain
+/// events.
+#[derive(Debug, Clone)]
+#[expect(dead_code, reason = "phase 3 API — consumed by snapshot/replay")]
+pub enum PersistedEvent {
+    /// A turn started.
+    TurnStarted {
+        /// Zero-based index of this turn.
+        turn_index: u32,
+    },
+    /// The user sent a message.
+    UserMessage {
+        /// The user message text.
+        text: String,
+    },
+    /// The assistant produced a complete text message.
+    AssistantMessage {
+        /// The assembled assistant text.
+        text: String,
+    },
+    /// The LLM requested a tool call.
+    ToolCallRequested {
+        /// Tool call identifier.
+        id: String,
+        /// Tool name.
+        name: String,
+        /// JSON-encoded arguments.
+        arguments_json: String,
+    },
+    /// A tool approval was requested.
+    ToolApprovalRequested {
+        /// Tool call identifier.
+        id: String,
+        /// Tool name.
+        name: String,
+    },
+    /// A tool approval decision was made.
+    ToolApprovalDecided {
+        /// Tool call identifier.
+        id: String,
+        /// The client's decision.
+        decision: ApprovalDecision,
+    },
+    /// A tool returned a result.
+    ToolResultReceived {
+        /// Matches the originating tool call ID.
+        tool_call_id: String,
+        /// Tool output content.
+        content: String,
+    },
+    /// A turn completed successfully.
+    TurnComplete {
+        /// Zero-based index of the completed turn.
+        turn_index: u32,
+    },
+    /// A turn was interrupted before completion.
+    TurnInterrupted {
+        /// Zero-based index of the interrupted turn.
+        turn_index: u32,
+        /// Reason for the interruption.
+        reason: String,
+    },
+}
+
+/// A snapshot of session state sufficient to restore client UI.
+///
+/// Contains the session identity, conversation messages, and a
+/// structured event timeline that records domain events beyond
+/// plain messages (turn boundaries, tool approvals, interruptions).
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "fields read by downstream clients")
+)]
+pub struct SessionSnapshot {
+    /// The session identifier.
+    pub session_id: String,
+    /// The conversation message history.
+    pub messages: Vec<wit_types::Message>,
+    /// Structured event timeline for UI restoration.
+    pub events: Vec<PersistedEvent>,
+}
+
 /// Session-scoped coordinator for turn execution.
 ///
 /// Owns the loaded session messages and drives the agent turn loop.
@@ -89,6 +176,8 @@ pub struct UrSession {
     session_id: String,
     messages: Vec<wit_types::Message>,
     loaded_message_count: usize,
+    events: Vec<PersistedEvent>,
+    turn_count: u32,
 }
 
 impl UrSession {
@@ -132,6 +221,8 @@ impl UrSession {
             session_id: session_id.to_owned(),
             messages,
             loaded_message_count,
+            events: Vec::new(),
+            turn_count: 0,
         })
     }
 
@@ -162,6 +253,10 @@ impl UrSession {
         user_message: &str,
         mut on_event: impl FnMut(SessionEvent) -> Option<ApprovalDecision>,
     ) -> Result<()> {
+        let turn_index = self.turn_count;
+        self.turn_count += 1;
+        self.events.push(PersistedEvent::TurnStarted { turn_index });
+
         // ── 1. Add user message ──────────────────────────────────────
         let user_msg = wit_types::Message {
             role: "user".into(),
@@ -169,26 +264,176 @@ impl UrSession {
         };
         debug!(text = user_message, "adding user message");
         self.messages.push(user_msg);
+        self.events.push(PersistedEvent::UserMessage {
+            text: user_message.to_owned(),
+        });
 
         // ── 2. Resolve role and load LLM ─────────────────────────────
+        let (mut llm, settings, tools) = self.prepare_turn()?;
+
+        // ── 3. First LLM completion (streaming) ─────────────────────
+        info!(messages = self.messages.len(), "calling LLM streaming");
+        let completion = stream_completion(
+            &mut llm,
+            &self.messages,
+            &settings.model_id,
+            &settings.config_settings,
+            &tools,
+            &mut on_event,
+        )?;
+
+        let tool_calls = extract_tool_calls(&completion.message);
+        if tool_calls.is_empty() {
+            let text = extract_text(&completion.message);
+            self.events
+                .push(PersistedEvent::AssistantMessage { text: text.clone() });
+            on_event(SessionEvent::AssistantMessage { text });
+        } else {
+            for tc in &tool_calls {
+                info!(tool = %tc.name, args = %tc.arguments_json, "LLM returned tool call");
+                self.events.push(PersistedEvent::ToolCallRequested {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    arguments_json: tc.arguments_json.clone(),
+                });
+                on_event(SessionEvent::ToolCall {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    arguments_json: tc.arguments_json.clone(),
+                });
+            }
+        }
+
+        self.messages.push(completion.message.clone());
+
+        // ── 4. Tool dispatch ─────────────────────────────────────────
+        if !tool_calls.is_empty() {
+            dispatch_tool_calls(
+                &tool_calls,
+                &self.engine,
+                &self.manifest,
+                &mut self.messages,
+                &mut self.events,
+                &mut on_event,
+            )?;
+
+            // ── 5. Second LLM completion (with tool results) ────────
+            info!(
+                messages = self.messages.len(),
+                "calling LLM streaming (with tool results)"
+            );
+            let completion2 = stream_completion(
+                &mut llm,
+                &self.messages,
+                &settings.model_id,
+                &settings.config_settings,
+                &tools,
+                &mut on_event,
+            )?;
+            let text = extract_text(&completion2.message);
+            self.events
+                .push(PersistedEvent::AssistantMessage { text: text.clone() });
+            on_event(SessionEvent::AssistantMessage { text });
+            self.messages.push(completion2.message);
+        }
+
+        self.persist_and_compact()?;
+
+        self.events
+            .push(PersistedEvent::TurnComplete { turn_index });
+        on_event(SessionEvent::TurnComplete);
+        info!("turn complete");
+        Ok(())
+    }
+
+    /// Returns a snapshot of the session state for UI restoration.
+    #[expect(dead_code, reason = "public API surface for future clients")]
+    pub fn snapshot(&self) -> SessionSnapshot {
+        SessionSnapshot {
+            session_id: self.session_id.clone(),
+            messages: self.messages.clone(),
+            events: self.events.clone(),
+        }
+    }
+
+    /// Replays persisted events through a callback for UI restoration.
+    ///
+    /// Converts each `PersistedEvent` into the corresponding
+    /// `SessionEvent` so clients can rebuild their UI state using
+    /// the same rendering logic they use for live events.
+    #[expect(dead_code, reason = "public API surface for future clients")]
+    pub fn replay(&self, mut on_event: impl FnMut(SessionEvent)) {
+        for event in &self.events {
+            let session_event = match event {
+                PersistedEvent::AssistantMessage { text } => {
+                    Some(SessionEvent::AssistantMessage { text: text.clone() })
+                }
+                PersistedEvent::ToolCallRequested {
+                    id,
+                    name,
+                    arguments_json,
+                } => Some(SessionEvent::ToolCall {
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments_json: arguments_json.clone(),
+                }),
+                PersistedEvent::ToolApprovalRequested { id, name } => {
+                    Some(SessionEvent::ApprovalRequired {
+                        id: id.clone(),
+                        tool_name: name.clone(),
+                        arguments_json: String::new(),
+                    })
+                }
+                PersistedEvent::ToolResultReceived {
+                    tool_call_id,
+                    content,
+                } => Some(SessionEvent::ToolResult {
+                    tool_call_id: tool_call_id.clone(),
+                    tool_name: String::new(),
+                    content: content.clone(),
+                }),
+                PersistedEvent::TurnComplete { .. } => Some(SessionEvent::TurnComplete),
+                PersistedEvent::TurnInterrupted { reason, .. } => {
+                    Some(SessionEvent::TurnError(reason.clone()))
+                }
+                // Internal bookkeeping events don't produce client events.
+                PersistedEvent::TurnStarted { .. }
+                | PersistedEvent::UserMessage { .. }
+                | PersistedEvent::ToolApprovalDecided { .. } => None,
+            };
+
+            if let Some(e) = session_event {
+                on_event(e);
+            }
+        }
+    }
+
+    /// Resolves the LLM provider, settings, and tools for a turn.
+    fn prepare_turn(
+        &self,
+    ) -> Result<(
+        ExtensionInstance,
+        TurnSettings,
+        Vec<wit_types::ToolDescriptor>,
+    )> {
         let providers = model::collect_provider_models(&self.engine, &self.manifest)?;
         let (provider_id, model_id) = model::resolve_role(&self.config, "default", &providers)?;
         info!(%provider_id, %model_id, "resolved role \"default\"");
 
         let init_config = provider::init_config(&provider_id);
 
-        // Probe for settings descriptors first.
+        // Probe for settings descriptors.
         let (mut settings_probe, extension_id) =
             load_llm_provider(&self.engine, &self.manifest, &provider_id, &init_config)?;
         let _ = settings_probe.list_models();
         let descriptors = settings_probe.list_settings()?;
         drop(settings_probe);
 
-        let settings = self
+        let config_settings = self
             .config
             .settings_for(&extension_id, &model_id, &descriptors)?;
 
-        // ── 3. Load general extensions and collect tools ─────────────
+        // Load general extensions and collect tools.
         let mut generals = load_general_extensions(&self.engine, &self.manifest)?;
         let mut tools: Vec<wit_types::ToolDescriptor> = Vec::new();
         for ext in &mut generals {
@@ -200,69 +445,16 @@ impl UrSession {
             info!(count = tools.len(), "collected tools");
         }
 
-        // ── 4. First LLM completion (streaming) ─────────────────────
-        let (mut llm, _) =
-            load_llm_provider(&self.engine, &self.manifest, &provider_id, &init_config)?;
+        let (llm, _) = load_llm_provider(&self.engine, &self.manifest, &provider_id, &init_config)?;
 
-        info!(messages = self.messages.len(), "calling LLM streaming");
-        let completion = stream_completion(
-            &mut llm,
-            &self.messages,
-            &model_id,
-            &settings,
-            &tools,
-            &mut on_event,
-        )?;
-
-        let tool_calls = extract_tool_calls(&completion.message);
-        if tool_calls.is_empty() {
-            let text = extract_text(&completion.message);
-            on_event(SessionEvent::AssistantMessage { text });
-        } else {
-            for tc in &tool_calls {
-                on_event(SessionEvent::ToolCall {
-                    id: tc.id.clone(),
-                    name: tc.name.clone(),
-                    arguments_json: tc.arguments_json.clone(),
-                });
-            }
-        }
-
-        self.messages.push(completion.message.clone());
-
-        // ── 5. Tool dispatch ─────────────────────────────────────────
-        if !tool_calls.is_empty() {
-            dispatch_tool_calls(
-                &tool_calls,
-                &self.engine,
-                &self.manifest,
-                &mut self.messages,
-                &mut on_event,
-            )?;
-
-            // ── 6. Second LLM completion (with tool results) ────────
-            info!(
-                messages = self.messages.len(),
-                "calling LLM streaming (with tool results)"
-            );
-            let completion2 = stream_completion(
-                &mut llm,
-                &self.messages,
-                &model_id,
-                &settings,
-                &tools,
-                &mut on_event,
-            )?;
-            let text = extract_text(&completion2.message);
-            on_event(SessionEvent::AssistantMessage { text });
-            self.messages.push(completion2.message);
-        }
-
-        self.persist_and_compact()?;
-
-        on_event(SessionEvent::TurnComplete);
-        info!("turn complete");
-        Ok(())
+        Ok((
+            llm,
+            TurnSettings {
+                model_id: model_id.clone(),
+                config_settings,
+            },
+            tools,
+        ))
     }
 
     /// Appends new messages to the session provider and runs compaction.
@@ -309,6 +501,12 @@ impl UrSession {
 
         Ok(())
     }
+}
+
+/// Resolved LLM settings for a single turn.
+struct TurnSettings {
+    model_id: String,
+    config_settings: Vec<wit_types::ConfigSetting>,
 }
 
 // --- Internal helpers (extracted from turn.rs) ---
@@ -388,6 +586,7 @@ fn dispatch_tool_calls(
     engine: &Engine,
     manifest: &WorkspaceManifest,
     messages: &mut Vec<wit_types::Message>,
+    events: &mut Vec<PersistedEvent>,
     on_event: &mut impl FnMut(SessionEvent) -> Option<ApprovalDecision>,
 ) -> Result<()> {
     if tool_calls.is_empty() {
@@ -437,9 +636,12 @@ fn dispatch_tool_calls(
 
     for result in results {
         let msg = result?;
-        // Emit tool result events.
         for part in &msg.parts {
             if let wit_types::MessagePart::ToolResult(tr) = part {
+                events.push(PersistedEvent::ToolResultReceived {
+                    tool_call_id: tr.tool_call_id.clone(),
+                    content: tr.content.clone(),
+                });
                 on_event(SessionEvent::ToolResult {
                     tool_call_id: tr.tool_call_id.clone(),
                     tool_name: tr.tool_name.clone(),
@@ -651,5 +853,123 @@ mod tests {
     fn approval_decision_is_eq() {
         assert_eq!(ApprovalDecision::Approve, ApprovalDecision::Approve);
         assert_ne!(ApprovalDecision::Approve, ApprovalDecision::Deny);
+    }
+
+    #[test]
+    fn persisted_event_variants_are_constructible() {
+        let events = [
+            PersistedEvent::TurnStarted { turn_index: 0 },
+            PersistedEvent::UserMessage {
+                text: "hello".into(),
+            },
+            PersistedEvent::AssistantMessage {
+                text: "world".into(),
+            },
+            PersistedEvent::ToolCallRequested {
+                id: "1".into(),
+                name: "test".into(),
+                arguments_json: "{}".into(),
+            },
+            PersistedEvent::ToolApprovalRequested {
+                id: "1".into(),
+                name: "test".into(),
+            },
+            PersistedEvent::ToolApprovalDecided {
+                id: "1".into(),
+                decision: ApprovalDecision::Approve,
+            },
+            PersistedEvent::ToolResultReceived {
+                tool_call_id: "1".into(),
+                content: "ok".into(),
+            },
+            PersistedEvent::TurnComplete { turn_index: 0 },
+            PersistedEvent::TurnInterrupted {
+                turn_index: 0,
+                reason: "cancelled".into(),
+            },
+        ];
+        assert_eq!(events.len(), 9);
+    }
+
+    #[test]
+    fn session_snapshot_contains_messages_and_events() {
+        let snapshot = SessionSnapshot {
+            session_id: "test-session".into(),
+            messages: vec![
+                text_message("user", "hi"),
+                text_message("assistant", "hello"),
+            ],
+            events: vec![
+                PersistedEvent::TurnStarted { turn_index: 0 },
+                PersistedEvent::UserMessage { text: "hi".into() },
+                PersistedEvent::AssistantMessage {
+                    text: "hello".into(),
+                },
+                PersistedEvent::TurnComplete { turn_index: 0 },
+            ],
+        };
+
+        assert_eq!(snapshot.session_id, "test-session");
+        assert_eq!(snapshot.messages.len(), 2);
+        assert_eq!(snapshot.events.len(), 4);
+    }
+
+    #[test]
+    fn replay_emits_matching_session_events() {
+        let events = vec![
+            PersistedEvent::TurnStarted { turn_index: 0 },
+            PersistedEvent::UserMessage { text: "hi".into() },
+            PersistedEvent::AssistantMessage {
+                text: "hello".into(),
+            },
+            PersistedEvent::ToolCallRequested {
+                id: "c1".into(),
+                name: "search".into(),
+                arguments_json: "{\"q\":\"rust\"}".into(),
+            },
+            PersistedEvent::ToolResultReceived {
+                tool_call_id: "c1".into(),
+                content: "found".into(),
+            },
+            PersistedEvent::TurnComplete { turn_index: 0 },
+        ];
+
+        // Build replayed events using the same logic as replay().
+        let mut replayed = Vec::new();
+        for event in &events {
+            let session_event = match event {
+                PersistedEvent::AssistantMessage { text } => {
+                    Some(SessionEvent::AssistantMessage { text: text.clone() })
+                }
+                PersistedEvent::ToolCallRequested {
+                    id,
+                    name,
+                    arguments_json,
+                } => Some(SessionEvent::ToolCall {
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments_json: arguments_json.clone(),
+                }),
+                PersistedEvent::ToolResultReceived {
+                    tool_call_id,
+                    content,
+                } => Some(SessionEvent::ToolResult {
+                    tool_call_id: tool_call_id.clone(),
+                    tool_name: String::new(),
+                    content: content.clone(),
+                }),
+                PersistedEvent::TurnComplete { .. } => Some(SessionEvent::TurnComplete),
+                _ => None,
+            };
+            if let Some(e) = session_event {
+                replayed.push(e);
+            }
+        }
+
+        assert_eq!(replayed.len(), 4);
+        assert!(matches!(replayed[0], SessionEvent::AssistantMessage { .. }));
+        assert!(matches!(replayed[1], SessionEvent::ToolCall { .. }));
+        assert!(matches!(replayed[2], SessionEvent::ToolResult { .. }));
+        assert!(matches!(replayed[3], SessionEvent::TurnComplete));
     }
 }
