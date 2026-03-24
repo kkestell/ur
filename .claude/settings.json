@@ -6,7 +6,14 @@
       "Bash(cargo check:*)",
       "Bash(cargo build:*)",
       "Bash(cargo fmt:*)",
-      "Bash(cargo doc:*)"
+      "Bash(cargo doc:*)",
+      "Bash(curl -s 'https://platform.openai.com/docs/api-reference/chat/create')",
+      "Bash(curl -s 'https://ai.google.dev/gemini-api/docs/function-calling')",
+      "Bash(curl -s 'https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview')",
+      "WebFetch(domain:platform.openai.com)",
+      "WebFetch(domain:ai.google.dev)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebSearch"
     ]
   }
 }

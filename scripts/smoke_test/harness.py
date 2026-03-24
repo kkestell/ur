@@ -14,9 +14,12 @@ from typing import Iterable
 
 # Patterns in command output that indicate a transient API error worth retrying.
 TRANSIENT_ERROR_PATTERNS: tuple[str, ...] = (
+    "500",
     "503",
     "429",
     "UNAVAILABLE",
+    "INTERNAL",
+    "Internal error",
     "overloaded",
     "rate limit",
     "Rate limit",
@@ -268,21 +271,26 @@ class SmokeHarness:
         args = tuple(command)
         if not quiet:
             print()
-            print(f"$ {shlex.join(display)}")
+            print(f"$ {shlex.join(display)}", flush=True)
         run_args = tuple(str(part) for part in args)
-        result = subprocess.run(
-            run_args,
-            cwd=self.root,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-        if not quiet and result.stdout:
-            print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+
+        if quiet:
+            # Quiet mode: capture everything, print nothing.
+            result = subprocess.run(
+                run_args,
+                cwd=self.root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+        else:
+            # Stream output byte-by-byte so LLM token streaming is visible.
+            result = self._run_streaming(run_args, env)
+
         if check and result.returncode != 0:
             raise subprocess.CalledProcessError(
                 result.returncode,
@@ -290,6 +298,36 @@ class SmokeHarness:
                 output=result.stdout,
             )
         return result
+
+    def _run_streaming(
+        self,
+        args: tuple[str, ...],
+        env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a command, forwarding output to the terminal in real time."""
+        import sys
+
+        proc = subprocess.Popen(
+            args,
+            cwd=self.root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        chunks: list[bytes] = []
+        assert proc.stdout is not None
+        while True:
+            byte = proc.stdout.read(1)
+            if not byte:
+                break
+            chunks.append(byte)
+            sys.stdout.buffer.write(byte)
+            sys.stdout.buffer.flush()
+        proc.wait()
+        stdout = b"".join(chunks).decode("utf-8", errors="replace")
+        if stdout and not stdout.endswith("\n"):
+            print()
+        return subprocess.CompletedProcess(args, proc.returncode, stdout=stdout)
 
     def _require_workspace(self) -> Path:
         if self.workspace is None:
