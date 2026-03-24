@@ -60,3 +60,9 @@ unnecessary_safety_doc = "warn"
 unneeded_field_pattern = "warn"
 unused_result_ok = "warn"
 literal_string_with_formatting_args = "allow"
+
+[dev-dependencies]
+assert_cmd = "2.2.0"
+dotenvy = "0.15.7"
+predicates = "3.1.4"
+tempfile = "3.27.0"
