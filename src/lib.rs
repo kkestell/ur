@@ -12,6 +12,7 @@ pub mod discovery;
 pub mod extension_host;
 pub mod extension_settings;
 pub mod keyring;
+pub mod logging;
 pub mod manifest;
 pub mod model;
 pub mod provider;
