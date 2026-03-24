@@ -12,10 +12,12 @@ use anyhow::Result;
 use wasmtime::Engine;
 
 use crate::config::{self, UserConfig};
+use crate::extension_host::wit_types;
 use crate::extension_settings;
 use crate::keyring;
 use crate::manifest::{self, ManifestEntry, WorkspaceManifest};
 use crate::model::{self, ProviderModels};
+use crate::session::UrSession;
 
 /// Workspace-scoped coordinator.
 ///
@@ -111,16 +113,19 @@ impl UrWorkspace {
     }
 
     /// Returns a reference to the Wasmtime engine.
+    #[expect(dead_code, reason = "public API surface for future clients")]
     pub fn engine(&self) -> &Engine {
         &self.engine
     }
 
     /// Returns a reference to the `ur_root` path.
+    #[expect(dead_code, reason = "public API surface for future clients")]
     pub fn ur_root(&self) -> &Path {
         &self.ur_root
     }
 
     /// Returns a reference to the workspace path.
+    #[expect(dead_code, reason = "public API surface for future clients")]
     pub fn workspace_path(&self) -> &Path {
         &self.workspace_path
     }
@@ -458,5 +463,37 @@ impl UrWorkspace {
     #[expect(dead_code, reason = "public API surface for future clients")]
     pub fn roles(&self) -> &BTreeMap<String, String> {
         &self.config.roles
+    }
+
+    // --- Session access ---
+
+    /// Opens an existing session by ID.
+    ///
+    /// Loads the session's persisted messages and returns a session
+    /// coordinator ready for `run_turn()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the session provider fails to load.
+    pub fn open_session(&self, session_id: &str) -> Result<UrSession> {
+        UrSession::open(
+            self.engine.clone(),
+            self.manifest.clone(),
+            self.config.clone(),
+            session_id,
+        )
+    }
+
+    /// Lists sessions from the active session provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the session provider fails to load.
+    #[expect(dead_code, reason = "public API surface for future clients")]
+    pub fn list_sessions(&self) -> Result<Vec<wit_types::SessionInfo>> {
+        let mut session_ext = crate::session::load_session_provider(&self.engine, &self.manifest)?;
+        session_ext
+            .list_sessions()?
+            .map_err(|e| anyhow::anyhow!("list_sessions: {e}"))
     }
 }

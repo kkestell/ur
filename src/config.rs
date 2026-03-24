@@ -21,7 +21,7 @@ use crate::extension_host::wit_types;
 /// [extensions.google]
 /// "gemini-3-flash-preview.thinking_level" = "high"
 /// ```
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct UserConfig {
     /// Role name → "provider/model" mapping.
     #[serde(default)]

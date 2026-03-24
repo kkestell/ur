@@ -11,7 +11,7 @@ use crate::discovery::{self, DiscoveredExtension, SourceTier};
 use crate::slot::{Cardinality, find_slot, validate_required_slots};
 
 /// Persisted state for all extensions in a workspace.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceManifest {
     pub workspace: String,
     pub extensions: Vec<ManifestEntry>,
