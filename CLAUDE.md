@@ -1,4 +1,6 @@
 Use the @Makefile targets to build, lint, format, and test the project.
+Always run `make smoke-test` after `make verify` — API keys are available in `.env`.
+If `.env` is missing or a key is not found, check `.env` at the project root and add any missing keys there.
 Use cargo add to install dependencies -- do not modify Cargo.toml directly.
 Follow the 7 rules of great commit messages. No Claude Code attribution.
 Do not use branches. Work directly out of main.

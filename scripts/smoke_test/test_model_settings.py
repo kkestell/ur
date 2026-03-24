@@ -6,6 +6,7 @@ from smoke_test.harness import SmokeHarness
 
 
 def run(h: SmokeHarness) -> None:
+    h.section("configure roles and settings")
     h.run("role", "set", "default", "google/gemini-3-flash-preview")
     h.run("role", "set", "fast", "google/gemini-3.1-pro-preview")
     h.run("role", "set", "lite", "google/gemini-3.1-flash-lite-preview")
@@ -37,7 +38,7 @@ def run(h: SmokeHarness) -> None:
     assert "thinking_level" in config_output.stdout
     assert "max_output_tokens" in config_output.stdout
 
-    # Error cases
+    h.section("expected errors: invalid settings")
     h.run_err(
         "extension", "config", "llm-google", "set",
         "nonexistent_key", "42",
@@ -54,14 +55,12 @@ def run(h: SmokeHarness) -> None:
         "extension", "config", "llm-google", "set",
         "gemini-3-flash-preview.max_output_tokens", "0",
     )
-
-    # Readonly rejection
     h.run_err(
         "extension", "config", "llm-google", "set",
         "gemini-3-flash-preview.context_window_in", "500000",
     )
 
-    # Verify config.toml contains dotted keys
+    h.section("verify config.toml")
     config_text = h.config_path.read_text(encoding="utf-8")
     assert 'thinking_level' in config_text
     assert "max_output_tokens" in config_text

@@ -7,9 +7,24 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+# Patterns in command output that indicate a transient API error worth retrying.
+TRANSIENT_ERROR_PATTERNS: tuple[str, ...] = (
+    "503",
+    "429",
+    "UNAVAILABLE",
+    "overloaded",
+    "rate limit",
+    "Rate limit",
+    "high demand",
+    "try again",
+    "timed out",
+    "DEADLINE_EXCEEDED",
+)
 
 
 @dataclass(frozen=True)
@@ -92,13 +107,38 @@ class SmokeHarness:
         """Print and execute: ur <args>. Raises on non-zero exit."""
         return self._run_ur(args, check=True, env_overrides=env)
 
+    def run_with_retries(
+        self,
+        *args: str,
+        env: dict[str, str] | None = None,
+        max_retries: int = 3,
+    ) -> subprocess.CompletedProcess[str]:
+        """Like run(), but retries on transient API errors with exponential backoff."""
+        for attempt in range(max_retries + 1):
+            result = self._run_ur(args, check=False, env_overrides=env)
+            if result.returncode == 0:
+                return result
+            if attempt < max_retries and _is_transient(result.stdout):
+                delay = 2 ** attempt
+                print(f"  ↳ transient error, retrying in {delay}s (attempt {attempt + 1}/{max_retries})...")
+                time.sleep(delay)
+                continue
+            # Non-transient error or exhausted retries — raise.
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                args,
+                output=result.stdout,
+            )
+        # Unreachable, but satisfies the type checker.
+        raise RuntimeError("unreachable")
+
     def run_err(
         self,
         *args: str,
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        """Print and execute: ur <args>. Continues only on non-zero exit."""
-        result = self._run_ur(args, check=False, env_overrides=env)
+        """Execute ur <args>, assert non-zero exit. Output suppressed unless verbose."""
+        result = self._run_ur(args, check=False, env_overrides=env, quiet=True)
         if result.returncode == 0:
             joined = shlex.join(("ur", *args))
             raise RuntimeError(f"expected non-zero exit from: {joined}")
@@ -111,6 +151,11 @@ class SmokeHarness:
     ) -> subprocess.CompletedProcess[str]:
         """Print and execute: ur <args>. Never raises for exit status."""
         return self._run_ur(args, check=False, env_overrides=env)
+
+    @staticmethod
+    def section(title: str) -> None:
+        """Print a clearly visible sub-section header."""
+        print(f"\n  ── {title} ──")
 
     def cat(self, path: Path) -> None:
         """Print file contents."""
@@ -199,6 +244,7 @@ class SmokeHarness:
         *,
         check: bool,
         env_overrides: dict[str, str] | None = None,
+        quiet: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         workspace = self._require_workspace()
         ur_root = self._require_ur_root()
@@ -207,7 +253,7 @@ class SmokeHarness:
         env = self._env | {"UR_ROOT": str(ur_root)}
         if env_overrides is not None:
             env |= env_overrides
-        return self._run(display_command, command, env=env, check=check)
+        return self._run(display_command, command, env=env, check=check, quiet=quiet)
 
     def _run(
         self,
@@ -216,11 +262,13 @@ class SmokeHarness:
         *,
         env: dict[str, str],
         check: bool,
+        quiet: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         display = tuple(display_command)
         args = tuple(command)
-        print()
-        print(f"$ {shlex.join(display)}")
+        if not quiet:
+            print()
+            print(f"$ {shlex.join(display)}")
         run_args = tuple(str(part) for part in args)
         result = subprocess.run(
             run_args,
@@ -233,7 +281,7 @@ class SmokeHarness:
             errors="replace",
             check=False,
         )
-        if result.stdout:
+        if not quiet and result.stdout:
             print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
         if check and result.returncode != 0:
             raise subprocess.CalledProcessError(
@@ -252,3 +300,8 @@ class SmokeHarness:
         if self.ur_root is None:
             raise RuntimeError("smoke harness has not been entered")
         return self.ur_root
+
+
+def _is_transient(output: str) -> bool:
+    """Check if command output contains a transient API error."""
+    return any(pattern in output for pattern in TRANSIENT_ERROR_PATTERNS)

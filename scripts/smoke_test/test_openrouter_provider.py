@@ -16,6 +16,8 @@ def run(h: SmokeHarness) -> None:
     h.run("extension", "disable", "llm-google")
 
     try:
+        h.section("OpenRouter tool-calling flow")
+
         # Set a specific model for deterministic testing.
         h.run("role", "set", "default", "openrouter/qwen/qwen3.5-9b")
 
@@ -29,7 +31,7 @@ def run(h: SmokeHarness) -> None:
         h.run("extension", "config", "llm-openrouter", "list")
 
         # Run the tool-calling flow.
-        result = h.run(
+        result = h.run_with_retries(
             "run",
             env={"UR_RUN_USER_MESSAGE": PARIS_WEATHER_PROMPT},
         )

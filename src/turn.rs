@@ -302,7 +302,7 @@ fn dispatch_tool_calls(
 
                     for ext in &mut generals {
                         if let Ok(result) = ext.call_tool(&tc.name, &tc.arguments_json)? {
-                            println!("[turn] tool result for {:?}: {result:?}", tc.name);
+                            println!("[turn] tool result: {result:?}");
                             return Ok(wit_types::Message {
                                 role: "tool".into(),
                                 parts: vec![wit_types::MessagePart::ToolResult(

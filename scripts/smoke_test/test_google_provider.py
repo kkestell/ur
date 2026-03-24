@@ -24,12 +24,7 @@ def run_case(
     # Extract model ID from "google/model-id"
     model_id = model_ref.split("/", 1)[1]
 
-    print()
-    print(
-        "Running Google smoke case:",
-        case_name,
-        f"(model={model_ref}, thinking_level={thinking_level}, max_output_tokens={max_output_tokens})",
-    )
+    h.section(f"{case_name} ({model_ref})")
 
     set_model = h.run("role", "set", "default", model_ref)
     assert model_ref in set_model.stdout
@@ -46,7 +41,7 @@ def run_case(
     )
     assert f"max_output_tokens = {max_output_tokens}" in set_max_tokens.stdout
 
-    result = h.run(
+    result = h.run_with_retries(
         "run",
         env={"UR_RUN_USER_MESSAGE": PARIS_WEATHER_PROMPT},
     )

@@ -6,10 +6,13 @@ from smoke_test.harness import SmokeHarness
 
 
 def run(h: SmokeHarness) -> None:
+    h.section("list and inspect")
     h.run("extension", "list")
     h.run("extension", "inspect", "session-jsonl")
     h.run("extension", "inspect", "llm-google")
     h.run("extension", "inspect", "compaction-llm")
+
+    h.section("expected errors: inspect/enable/disable")
     h.run_err("extension", "inspect", "nonexistent")
 
     # llm-provider is AtLeastOne, so disable one of the two enabled providers.
@@ -24,6 +27,7 @@ def run(h: SmokeHarness) -> None:
     h.run_err("extension", "enable", "nonexistent")
     h.run_err("extension", "disable", "nonexistent")
 
+    h.section("workspace extensions")
     h.run("extension", "inspect", "test-extension")
     h.run("extension", "enable", "test-extension")
     h.run_err("extension", "enable", "test-extension")

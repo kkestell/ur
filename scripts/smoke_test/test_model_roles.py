@@ -6,19 +6,21 @@ from smoke_test.harness import SmokeHarness
 
 
 def run(h: SmokeHarness) -> None:
+    h.section("list and get roles")
     result = h.run("role", "list")
     assert "google/gemini-3-flash-preview" in result.stdout
 
     h.run("role", "get", "default")
     h.run("role", "get", "fast")
 
-    # Extension config: list settings for llm-google
+    h.section("extension config list")
     config_list = h.run("extension", "config", "llm-google", "list")
     assert "thinking_level" in config_list.stdout
     assert "max_output_tokens" in config_list.stdout
     assert "context_window_in" in config_list.stdout
     assert "(readonly)" in config_list.stdout
 
+    h.section("set and verify roles")
     h.run("role", "set", "default", "google/gemini-3-flash-preview")
     h.run("role", "get", "default")
 
@@ -32,12 +34,12 @@ def run(h: SmokeHarness) -> None:
     h.run("role", "set", "default", "google/gemini-3.1-pro-preview")
     h.run("role", "set", "default", "google/gemini-3-flash-preview")
 
+    h.section("expected errors: invalid role targets")
     h.run_err("role", "set", "default", "fake/nonexistent")
     h.run_err("role", "set", "default", "invalid-no-slash")
     h.run_err("role", "set", "default", "google/nonexistent-model")
 
-    # --- extension config get (readonly metadata) ---
-
+    h.section("extension config get (readonly metadata)")
     result = h.run(
         "extension", "config", "llm-google", "get",
         "gemini-3-flash-preview.context_window_in",
