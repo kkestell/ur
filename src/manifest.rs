@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-
+use tracing::{debug, info};
 use wasmtime::Engine;
 
 use crate::discovery::{self, DiscoveredExtension, SourceTier};
@@ -61,12 +61,18 @@ pub fn escape_workspace_path(path: &Path) -> String {
 pub fn load_manifest(ur_root: &Path, workspace: &Path) -> Result<Option<WorkspaceManifest>> {
     let path = manifest_dir(ur_root, workspace).join("manifest.json");
     if !path.exists() {
+        debug!(path = %path.display(), "no existing manifest");
         return Ok(None);
     }
     let contents =
         std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let manifest =
+    let manifest: WorkspaceManifest =
         serde_json::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?;
+    debug!(
+        path = %path.display(),
+        extensions = manifest.extensions.len(),
+        "loaded existing manifest"
+    );
     Ok(Some(manifest))
 }
 
@@ -139,11 +145,14 @@ pub fn scan_and_load(
     ur_root: &Path,
     workspace: &Path,
 ) -> Result<WorkspaceManifest> {
+    info!(workspace = %workspace.display(), "scanning for extensions");
     let discovered = discovery::discover(engine, ur_root, workspace)?;
     let existing = load_manifest(ur_root, workspace)?;
     let merged = merge(existing, discovered, workspace);
     validate_required_slots(merged.extensions.iter().map(|e| (&e.slot, e.enabled)))?;
     save_manifest(ur_root, workspace, &merged)?;
+    let enabled = merged.extensions.iter().filter(|e| e.enabled).count();
+    info!(total = merged.extensions.len(), enabled, "manifest ready");
     Ok(merged)
 }
 

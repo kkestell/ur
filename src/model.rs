@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Result, bail};
+use tracing::{debug, info};
 
 use crate::config::UserConfig;
 use crate::extension_host::{self, wit_types};
@@ -62,11 +63,20 @@ pub fn collect_provider_models(
             .map_err(|e| anyhow::anyhow!("{}: provider-id failed: {e}", entry.id))?;
         match instance.list_models()? {
             Ok(models) => {
+                debug!(
+                    provider = %provider_id,
+                    models = models.len(),
+                    "collected models from provider"
+                );
                 result.insert(provider_id, models);
             }
             Err(e) => tracing::warn!(extension = %entry.id, error = %e, "list-models failed"),
         }
     }
+    info!(
+        providers = result.len(),
+        "provider model collection complete"
+    );
     Ok(result)
 }
 

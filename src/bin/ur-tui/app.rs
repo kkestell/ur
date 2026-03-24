@@ -7,6 +7,7 @@
 //! state transitions from raw crossterm events.
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use tracing::{debug, info};
 use ur::manifest::ManifestEntry;
 use ur::workspace::UrWorkspace;
 
@@ -137,11 +138,14 @@ impl App {
             return;
         }
 
+        info!(input = input, "command submitted");
         match commands::parse(input) {
             Some(commands::Command::Quit) => {
+                info!("quit requested");
                 self.should_quit = true;
             }
             Some(commands::Command::Extensions) => {
+                debug!("opening extensions modal");
                 let content = format_extensions(self.workspace.list_extensions());
                 self.mode = Mode::Modal {
                     title: "Extensions".to_owned(),
@@ -149,6 +153,7 @@ impl App {
                 };
             }
             Some(commands::Command::Unknown(cmd)) => {
+                debug!(command = cmd.as_str(), "unknown command");
                 self.messages.push(Message {
                     text: format!("Unknown command: {cmd}"),
                 });

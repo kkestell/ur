@@ -8,6 +8,7 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
 
 use crate::extension_host::wit_types;
 
@@ -43,10 +44,17 @@ impl UserConfig {
     pub fn load(ur_root: &Path) -> Result<Self> {
         let path = ur_root.join("config.toml");
         if !path.exists() {
+            debug!(path = %path.display(), "no config file, using defaults");
             return Ok(Self::default());
         }
         let contents = std::fs::read_to_string(&path)?;
         let config: Self = toml::from_str(&contents)?;
+        info!(
+            path = %path.display(),
+            roles = config.roles.len(),
+            extensions = config.extensions.len(),
+            "config loaded"
+        );
         Ok(config)
     }
 

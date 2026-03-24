@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
+use clap::Parser;
 use crossterm::event::poll;
 use crossterm::execute;
 use crossterm::terminal::{
@@ -25,14 +26,34 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use ur::app::UrApp;
+use ur::logging;
 
 use app::App;
+
+#[derive(Parser, Debug)]
+#[command(name = "ur-tui")]
+struct Cli {
+    /// Enable verbose logging output.
+    #[arg(short, long)]
+    verbose: bool,
+}
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() -> Result<()> {
+    let args = Cli::parse();
+
     let ur_root = env::var("UR_ROOT").map_or_else(|_| dirs_home().join(".ur"), PathBuf::from);
+
+    // File sink only — no stderr mirror because the TUI owns the terminal.
+    let log_handle = logging::init("ur-tui", &ur_root, args.verbose, false);
+    tracing::info!(
+        verbose = args.verbose,
+        ur_root = %ur_root.display(),
+        "ur-tui starting"
+    );
+
     let workspace_dir = env::current_dir().expect("cannot determine current directory");
 
     let ur_app = UrApp::new(ur_root)?;
@@ -46,8 +67,6 @@ fn main() -> Result<()> {
     // raw mode if the TUI crashes.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        // Ignore errors during panic cleanup — the original panic message
-        // is more important.
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
         default_hook(info);
@@ -56,6 +75,13 @@ fn main() -> Result<()> {
     let result = run_event_loop(&mut terminal, &mut tui_app);
 
     restore_terminal(&mut terminal)?;
+
+    tracing::info!("ur-tui shutting down");
+
+    if let Err(ref e) = result {
+        tracing::error!(error = %e, "ur-tui exiting with error");
+        eprintln!("log: {}", log_handle.path().display());
+    }
     result
 }
 
@@ -79,6 +105,7 @@ fn run_event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut A
 }
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
+    tracing::debug!("entering alternate screen");
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -87,6 +114,7 @@ fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
+    tracing::debug!("restoring terminal");
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;

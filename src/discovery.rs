@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
+use tracing::{debug, info, warn};
 use wasmtime::Engine;
 
 use crate::extension_host::{self, ExtensionInstance, LoadOptions, wit_types};
@@ -74,6 +75,7 @@ pub fn discover(
 
     for (dir, tier) in &tiers {
         if !dir.is_dir() {
+            debug!(tier = %tier, dir = %dir.display(), "skipping missing tier directory");
             continue;
         }
 
@@ -89,10 +91,18 @@ pub fn discover(
             }
 
             let Some(wasm_path) = find_wasm_file(&ext_dir)? else {
+                warn!(dir = %ext_dir.display(), "no .wasm file found in extension directory");
                 continue;
             };
 
             let ext = load_discovered(engine, &wasm_path, *tier)?;
+            debug!(
+                id = %ext.id,
+                name = %ext.name,
+                tier = %tier,
+                slot = ext.slot.as_deref().unwrap_or("(none)"),
+                "discovered extension"
+            );
 
             if !seen_ids.insert(ext.id.clone()) {
                 bail!("duplicate extension id: {}", ext.id);
@@ -102,6 +112,7 @@ pub fn discover(
         }
     }
 
+    info!(count = extensions.len(), "extension discovery complete");
     Ok(extensions)
 }
 

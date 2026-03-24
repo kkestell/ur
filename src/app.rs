@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use tracing::{debug, info};
 use wasmtime::Engine;
 
 use crate::config::UserConfig;
@@ -39,10 +40,12 @@ impl UrApp {
     /// Returns an error if the Wasmtime engine or cache cannot be
     /// initialized.
     pub fn new(ur_root: PathBuf) -> Result<Self> {
+        debug!(ur_root = %ur_root.display(), "initializing wasmtime engine");
         let cache = wasmtime::Cache::new(wasmtime::CacheConfig::new())?;
         let mut config = wasmtime::Config::new();
         config.cache(Some(cache));
         let engine = Engine::new(&config)?;
+        info!(ur_root = %ur_root.display(), "app initialized");
 
         Ok(Self { engine, ur_root })
     }
@@ -59,8 +62,14 @@ impl UrApp {
     /// fails.
     pub fn open_workspace(&self, path: impl AsRef<Path>) -> Result<UrWorkspace> {
         let workspace_path = std::fs::canonicalize(path.as_ref())?;
+        info!(workspace = %workspace_path.display(), "opening workspace");
         let m = manifest::scan_and_load(&self.engine, &self.ur_root, &workspace_path)?;
         let config = UserConfig::load(&self.ur_root)?;
+        info!(
+            workspace = %workspace_path.display(),
+            extensions = m.extensions.len(),
+            "workspace ready"
+        );
 
         Ok(UrWorkspace::new(
             self.engine.clone(),
