@@ -27,7 +27,7 @@ BUILTIN_EXTENSION_MANIFESTS := \
 
 BUILTIN_EXTENSION_DIRS := $(patsubst %/Cargo.toml,%,$(BUILTIN_EXTENSION_MANIFESTS))
 
-# Repo-local checks also cover the smoke-test workspace extension.
+# Repo-local checks also cover the workspace test extensions.
 REPO_EXTENSION_MANIFESTS := \
 	$(BUILTIN_EXTENSION_MANIFESTS) \
 	extensions/workspace/test-extension/Cargo.toml
@@ -43,7 +43,6 @@ REPO_EXTENSION_MANIFESTS := \
 	format \
 	fmt-check \
 	verify \
-	smoke-test \
 	install \
 	uninstall
 
@@ -92,9 +91,6 @@ fmt-check:
 	done
 
 verify: fmt-check check test clippy
-
-smoke-test:
-	python3 scripts/smoke-test.py
 
 install: build-extensions
 	$(CARGO) build --manifest-path $(HOST_MANIFEST) $(INSTALL_CARGO_FLAGS)
