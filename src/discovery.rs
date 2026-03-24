@@ -180,7 +180,7 @@ fn load_discovered(
     // Validate declared capabilities match actual component imports.
     let component = wasmtime::component::Component::from_file(engine, &abs_path)
         .map_err(|e| anyhow::anyhow!("re-loading component {}: {e}", wasm_path.display()))?;
-    extension_host::validate_capabilities(engine, &component, &capabilities, &id);
+    extension_host::validate_capabilities(engine, &component, capabilities, &id);
 
     Ok(DiscoveredExtension {
         id,

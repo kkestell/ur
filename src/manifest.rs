@@ -112,7 +112,7 @@ pub fn merge(
                 wasm_path: ext.wasm_path.to_string_lossy().into_owned(),
                 checksum: ext.checksum,
                 enabled,
-                capabilities: extension_host::capabilities_to_strings(&ext.capabilities),
+                capabilities: extension_host::capabilities_to_strings(ext.capabilities),
             }
         })
         .collect();

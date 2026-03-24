@@ -65,10 +65,6 @@ pub enum SessionEvent {
 
 /// Client response to an approval request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "API contract for client-side tool denial")
-)]
 pub enum ApprovalDecision {
     /// Approve the tool call.
     Approve,
@@ -83,7 +79,6 @@ pub enum ApprovalDecision {
 /// `LlmCompletion` and `ToolResult` embed full `Message` objects so
 /// reconstruction is lossless.
 #[derive(Debug, Clone)]
-#[expect(dead_code, reason = "fields read by snapshot/replay/persistence")]
 pub enum PersistedEvent {
     /// A turn started.
     TurnStarted { turn_index: u32 },
@@ -213,8 +208,8 @@ impl UrSession {
                     role: "user".into(),
                     parts: vec![wit_types::MessagePart::Text(text.clone())],
                 }),
-                PersistedEvent::LlmCompletion { message } => Some(message.clone()),
-                PersistedEvent::ToolResult { message } => Some(message.clone()),
+                PersistedEvent::LlmCompletion { message }
+                | PersistedEvent::ToolResult { message } => Some(message.clone()),
                 _ => None,
             })
             .collect()
@@ -847,7 +842,7 @@ mod tests {
 
     #[test]
     fn messages_for_llm_derives_from_events() {
-        let events = vec![
+        let events = [
             PersistedEvent::TurnStarted { turn_index: 0 },
             PersistedEvent::UserMessage {
                 text: "Hello".into(),
@@ -865,8 +860,8 @@ mod tests {
                     role: "user".into(),
                     parts: vec![wit_types::MessagePart::Text(text.clone())],
                 }),
-                PersistedEvent::LlmCompletion { message } => Some(message.clone()),
-                PersistedEvent::ToolResult { message } => Some(message.clone()),
+                PersistedEvent::LlmCompletion { message }
+                | PersistedEvent::ToolResult { message } => Some(message.clone()),
                 _ => None,
             })
             .collect();
@@ -880,7 +875,7 @@ mod tests {
 
     #[test]
     fn messages_for_llm_includes_tool_turn() {
-        let events = vec![
+        let events = [
             PersistedEvent::UserMessage {
                 text: "Weather?".into(),
             },
@@ -902,8 +897,8 @@ mod tests {
                     role: "user".into(),
                     parts: vec![wit_types::MessagePart::Text(text.clone())],
                 }),
-                PersistedEvent::LlmCompletion { message } => Some(message.clone()),
-                PersistedEvent::ToolResult { message } => Some(message.clone()),
+                PersistedEvent::LlmCompletion { message }
+                | PersistedEvent::ToolResult { message } => Some(message.clone()),
                 _ => None,
             })
             .collect();
@@ -926,7 +921,7 @@ mod tests {
 
     #[test]
     fn messages_for_llm_filters_non_message_events() {
-        let events = vec![
+        let events = [
             PersistedEvent::TurnStarted { turn_index: 0 },
             PersistedEvent::UserMessage { text: "hi".into() },
             PersistedEvent::ToolApprovalRequested {
@@ -947,8 +942,8 @@ mod tests {
                     role: "user".into(),
                     parts: vec![wit_types::MessagePart::Text(text.clone())],
                 }),
-                PersistedEvent::LlmCompletion { message } => Some(message.clone()),
-                PersistedEvent::ToolResult { message } => Some(message.clone()),
+                PersistedEvent::LlmCompletion { message }
+                | PersistedEvent::ToolResult { message } => Some(message.clone()),
                 _ => None,
             })
             .collect();
@@ -1048,7 +1043,7 @@ mod tests {
 
     #[test]
     fn replay_emits_matching_session_events() {
-        let events = vec![
+        let events = [
             PersistedEvent::TurnStarted { turn_index: 0 },
             PersistedEvent::UserMessage { text: "hi".into() },
             PersistedEvent::LlmCompletion {

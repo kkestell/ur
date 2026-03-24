@@ -259,7 +259,7 @@ fn build_host_state(
 }
 
 /// Converts `ExtensionCapabilities` flags to a list of string tags.
-pub fn capabilities_to_strings(caps: &wit_types::ExtensionCapabilities) -> Vec<String> {
+pub fn capabilities_to_strings(caps: wit_types::ExtensionCapabilities) -> Vec<String> {
     let mut out = Vec::new();
     if caps.contains(wit_types::ExtensionCapabilities::FILESYSTEM_READ) {
         out.push("filesystem-read".into());
@@ -303,7 +303,7 @@ pub struct LoadOptions<'a> {
 pub fn validate_capabilities(
     engine: &Engine,
     component: &Component,
-    capabilities: &wit_types::ExtensionCapabilities,
+    capabilities: wit_types::ExtensionCapabilities,
     ext_id: &str,
 ) {
     let ct = component.component_type();
@@ -317,15 +317,15 @@ pub fn validate_capabilities(
     let declares_fs = capabilities.contains(wit_types::ExtensionCapabilities::FILESYSTEM_READ)
         || capabilities.contains(wit_types::ExtensionCapabilities::FILESYSTEM_WRITE);
 
-    if has_fs && !declares_fs {
-        panic!(
-            "extension '{ext_id}' imports wasi:filesystem but did not declare \
-             filesystem-read or filesystem-write"
-        );
-    }
-    if has_http && !capabilities.contains(wit_types::ExtensionCapabilities::NETWORK) {
-        panic!("extension '{ext_id}' imports wasi:http but did not declare network");
-    }
+    assert!(
+        !has_fs || declares_fs,
+        "extension '{ext_id}' imports wasi:filesystem but did not declare \
+         filesystem-read or filesystem-write"
+    );
+    assert!(
+        !has_http || capabilities.contains(wit_types::ExtensionCapabilities::NETWORK),
+        "extension '{ext_id}' imports wasi:http but did not declare network"
+    );
 }
 
 impl ExtensionInstance {
