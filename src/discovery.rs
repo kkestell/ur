@@ -158,12 +158,12 @@ fn load_discovered(
 
     // Load with all capabilities linked (discovery needs to call
     // declare_capabilities before we know what to restrict).
-    let mut instance = ExtensionInstance::load(engine, &abs_path, &LoadOptions::default())
-        .map_err(|e| anyhow::anyhow!("loading {}: {e}", wasm_path.display()))?;
+    let (mut instance, component) =
+        ExtensionInstance::load_returning_component(engine, &abs_path, &LoadOptions::default())
+            .map_err(|e| anyhow::anyhow!("loading {}: {e}", wasm_path.display()))?;
 
     let detected_slot = instance.slot_name().map(str::to_owned);
 
-    // Query identity and capabilities from the component.
     let id = instance
         .id()
         .map_err(|e| anyhow::anyhow!("calling id() on {}: {e}", wasm_path.display()))?;
@@ -177,9 +177,6 @@ fn load_discovered(
         )
     })?;
 
-    // Validate declared capabilities match actual component imports.
-    let component = wasmtime::component::Component::from_file(engine, &abs_path)
-        .map_err(|e| anyhow::anyhow!("re-loading component {}: {e}", wasm_path.display()))?;
     extension_host::validate_capabilities(engine, &component, capabilities, &id);
 
     Ok(DiscoveredExtension {

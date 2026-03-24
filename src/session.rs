@@ -11,7 +11,7 @@ use tracing::{debug, info};
 use wasmtime::Engine;
 
 use crate::config::UserConfig;
-use crate::extension_host::{self, ExtensionInstance, LoadOptions, wit_types};
+use crate::extension_host::{ExtensionInstance, LoadOptions, wit_types};
 use crate::manifest::{ManifestEntry, WorkspaceManifest};
 use crate::model;
 use crate::provider;
@@ -197,22 +197,8 @@ impl UrSession {
     }
 
     /// Derives the LLM message history from the event log.
-    ///
-    /// Only `UserMessage`, `LlmCompletion`, and `ToolResult` events
-    /// produce messages; everything else is filtered out.
     pub fn messages_for_llm(&self) -> Vec<wit_types::Message> {
-        self.events
-            .iter()
-            .filter_map(|e| match e {
-                PersistedEvent::UserMessage { text } => Some(wit_types::Message {
-                    role: "user".into(),
-                    parts: vec![wit_types::MessagePart::Text(text.clone())],
-                }),
-                PersistedEvent::LlmCompletion { message }
-                | PersistedEvent::ToolResult { message } => Some(message.clone()),
-                _ => None,
-            })
-            .collect()
+        messages_from_events(&self.events)
     }
 
     /// Runs a single agent turn with a user message.
@@ -625,6 +611,26 @@ fn dispatch_tool_calls(
     Ok(())
 }
 
+/// Derives LLM messages from a slice of persisted events.
+///
+/// Only `UserMessage`, `LlmCompletion`, and `ToolResult` events
+/// produce messages; everything else is filtered out.
+fn messages_from_events(events: &[PersistedEvent]) -> Vec<wit_types::Message> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            PersistedEvent::UserMessage { text } => Some(wit_types::Message {
+                role: "user".into(),
+                parts: vec![wit_types::MessagePart::Text(text.clone())],
+            }),
+            PersistedEvent::LlmCompletion { message } | PersistedEvent::ToolResult { message } => {
+                Some(message.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// Converts a WIT `SessionEvent` to an internal `PersistedEvent`.
 fn wit_event_to_persisted(e: wit_types::SessionEvent) -> PersistedEvent {
     match e {
@@ -706,11 +712,7 @@ fn load_slot(
     slot: &str,
 ) -> Result<ExtensionInstance> {
     let entry = first_enabled(manifest, slot)?;
-    let caps = extension_host::strings_to_capabilities(&entry.capabilities);
-    let opts = LoadOptions {
-        capabilities: Some(&caps),
-        ..LoadOptions::default()
-    };
+    let opts = LoadOptions::for_entry(entry);
     let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
     Ok(instance)
 }
@@ -722,11 +724,8 @@ fn load_session_slot(
     sessions_dir: &Path,
 ) -> Result<ExtensionInstance> {
     let entry = first_enabled(manifest, "session-provider")?;
-    let caps = extension_host::strings_to_capabilities(&entry.capabilities);
-    let opts = LoadOptions {
-        capabilities: Some(&caps),
-        data_dir: Some(sessions_dir),
-    };
+    let mut opts = LoadOptions::for_entry(entry);
+    opts.data_dir = Some(sessions_dir);
     let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
     Ok(instance)
 }
@@ -742,11 +741,7 @@ fn load_llm_provider(
         if !entry.enabled || entry.slot.as_deref() != Some("llm-provider") {
             continue;
         }
-        let caps = extension_host::strings_to_capabilities(&entry.capabilities);
-        let opts = LoadOptions {
-            capabilities: Some(&caps),
-            ..LoadOptions::default()
-        };
+        let opts = LoadOptions::for_entry(entry);
         let mut instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
         instance
             .init(init_config)?
@@ -770,11 +765,7 @@ fn load_general_extensions(
         if !entry.enabled || entry.slot.is_some() {
             continue;
         }
-        let caps = extension_host::strings_to_capabilities(&entry.capabilities);
-        let opts = LoadOptions {
-            capabilities: Some(&caps),
-            ..LoadOptions::default()
-        };
+        let opts = LoadOptions::for_entry(entry);
         let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
         result.push(instance);
     }
@@ -853,18 +844,7 @@ mod tests {
             PersistedEvent::TurnComplete { turn_index: 0 },
         ];
 
-        let messages: Vec<wit_types::Message> = events
-            .iter()
-            .filter_map(|e| match e {
-                PersistedEvent::UserMessage { text } => Some(wit_types::Message {
-                    role: "user".into(),
-                    parts: vec![wit_types::MessagePart::Text(text.clone())],
-                }),
-                PersistedEvent::LlmCompletion { message }
-                | PersistedEvent::ToolResult { message } => Some(message.clone()),
-                _ => None,
-            })
-            .collect();
+        let messages = messages_from_events(&events);
 
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, "user");
@@ -890,18 +870,7 @@ mod tests {
             },
         ];
 
-        let messages: Vec<wit_types::Message> = events
-            .iter()
-            .filter_map(|e| match e {
-                PersistedEvent::UserMessage { text } => Some(wit_types::Message {
-                    role: "user".into(),
-                    parts: vec![wit_types::MessagePart::Text(text.clone())],
-                }),
-                PersistedEvent::LlmCompletion { message }
-                | PersistedEvent::ToolResult { message } => Some(message.clone()),
-                _ => None,
-            })
-            .collect();
+        let messages = messages_from_events(&events);
 
         assert_eq!(messages.len(), 4);
         assert_eq!(messages[0].role, "user");
@@ -935,18 +904,7 @@ mod tests {
             PersistedEvent::TurnComplete { turn_index: 0 },
         ];
 
-        let messages: Vec<wit_types::Message> = events
-            .iter()
-            .filter_map(|e| match e {
-                PersistedEvent::UserMessage { text } => Some(wit_types::Message {
-                    role: "user".into(),
-                    parts: vec![wit_types::MessagePart::Text(text.clone())],
-                }),
-                PersistedEvent::LlmCompletion { message }
-                | PersistedEvent::ToolResult { message } => Some(message.clone()),
-                _ => None,
-            })
-            .collect();
+        let messages = messages_from_events(&events);
 
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].role, "user");

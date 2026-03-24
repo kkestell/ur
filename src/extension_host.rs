@@ -17,16 +17,6 @@ use crate::slot;
 /// share `types` and `host` interfaces via `with` to avoid
 /// duplicate type definitions.
 mod worlds {
-    // Every world imports WASI HTTP + filesystem. The `with` clauses
-    // map those to wasmtime-wasi / wasmtime-wasi-http so the bindgen
-    // re-uses existing Host traits instead of generating new ones.
-
-    // Shared WASI `with` mappings used in every world below:
-    //   "wasi:http/*"       → wasmtime_wasi_http::p2::bindings
-    //   "wasi:io/*"         → wasmtime_wasi::p2::bindings (sync where needed)
-    //   "wasi:filesystem/*" → wasmtime_wasi::p2::bindings (sync where needed)
-    //   "wasi:clocks/*"     → wasmtime_wasi::p2::bindings
-
     pub mod general {
         wasmtime::component::bindgen!({
             path: "wit",
@@ -292,9 +282,19 @@ pub fn strings_to_capabilities(tags: &[String]) -> wit_types::ExtensionCapabilit
 pub struct LoadOptions<'a> {
     /// Declared capabilities from the manifest. When `None` (discovery),
     /// all WASI interfaces are linked.
-    pub capabilities: Option<&'a wit_types::ExtensionCapabilities>,
+    pub capabilities: Option<wit_types::ExtensionCapabilities>,
     /// Host-side data directory preopened as `/data` inside the guest.
     pub data_dir: Option<&'a Path>,
+}
+
+impl LoadOptions<'_> {
+    /// Builds options from a manifest entry's capability strings.
+    pub fn for_entry(entry: &crate::manifest::ManifestEntry) -> Self {
+        Self {
+            capabilities: Some(strings_to_capabilities(&entry.capabilities)),
+            data_dir: None,
+        }
+    }
 }
 
 /// Validates that declared capabilities match the component's actual WASI imports.
@@ -341,18 +341,25 @@ impl ExtensionInstance {
     /// Returns an error if the component cannot be loaded, or if the
     /// WASM component does not satisfy the world's export requirements.
     pub fn load(engine: &Engine, path: &Path, opts: &LoadOptions<'_>) -> wasmtime::Result<Self> {
+        let (instance, _component) = Self::load_returning_component(engine, path, opts)?;
+        Ok(instance)
+    }
+
+    /// Like `load`, but also returns the compiled `Component` so callers
+    /// (e.g. discovery) can inspect it without recompiling.
+    pub fn load_returning_component(
+        engine: &Engine,
+        path: &Path,
+        opts: &LoadOptions<'_>,
+    ) -> wasmtime::Result<(Self, Component)> {
         let component = Component::from_file(engine, path)?;
         let detected = slot::detect_slot(engine, &component);
 
-        let link_http = match opts.capabilities {
+        let link_http = match &opts.capabilities {
             Some(caps) => caps.contains(wit_types::ExtensionCapabilities::NETWORK),
             None => true, // discovery: link everything
         };
 
-        // Build linker: WASI base + conditional HTTP + our custom host.
-        // We add imports individually instead of using the world's
-        // add_to_linker (which would require HostState to implement
-        // all WASI Host traits).
         let mut linker = Linker::new(engine);
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
         if link_http {
@@ -363,37 +370,39 @@ impl ExtensionInstance {
             |state| state,
         )?;
 
-        let host_state = build_host_state(opts.capabilities, opts.data_dir);
+        let host_state = build_host_state(opts.capabilities.as_ref(), opts.data_dir);
 
-        match detected {
+        let instance = match detected {
             Some("llm-provider") => {
                 let mut store = Store::new(engine, host_state);
                 let bindings =
                     worlds::llm::LlmExtension::instantiate(&mut store, &component, &linker)?;
-                Ok(Self::Llm { store, bindings })
+                Self::Llm { store, bindings }
             }
             Some("session-provider") => {
                 let mut store = Store::new(engine, host_state);
                 let bindings = worlds::session::SessionExtension::instantiate(
                     &mut store, &component, &linker,
                 )?;
-                Ok(Self::Session { store, bindings })
+                Self::Session { store, bindings }
             }
             Some("compaction-provider") => {
                 let mut store = Store::new(engine, host_state);
                 let bindings = worlds::compaction::CompactionExtension::instantiate(
                     &mut store, &component, &linker,
                 )?;
-                Ok(Self::Compaction { store, bindings })
+                Self::Compaction { store, bindings }
             }
             Some(_) | None => {
                 let mut store = Store::new(engine, host_state);
                 let bindings = worlds::general::GeneralExtension::instantiate(
                     &mut store, &component, &linker,
                 )?;
-                Ok(Self::General { store, bindings })
+                Self::General { store, bindings }
             }
-        }
+        };
+
+        Ok((instance, component))
     }
 
     /// Returns the slot name for this extension, or `None` for general extensions.

@@ -13,14 +13,40 @@ use crate::{
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SerdeSessionEvent {
-    TurnStarted { turn_index: u32 },
-    UserMessage { text: String },
-    LlmCompletion { message: SerdeMessage },
-    ToolResult { message: SerdeMessage },
-    ToolApprovalRequested { id: String, name: String },
-    ToolApprovalDecided { id: String, decision: String },
-    TurnComplete { turn_index: u32 },
-    TurnInterrupted { turn_index: u32, reason: String },
+    TurnStarted {
+        turn_index: u32,
+    },
+    UserMessage {
+        text: String,
+    },
+    LlmCompletion {
+        message: SerdeMessage,
+    },
+    ToolResult {
+        message: SerdeMessage,
+    },
+    ToolApprovalRequested {
+        id: String,
+        name: String,
+    },
+    ToolApprovalDecided {
+        id: String,
+        decision: SerdeApprovalDecision,
+    },
+    TurnComplete {
+        turn_index: u32,
+    },
+    TurnInterrupted {
+        turn_index: u32,
+        reason: String,
+    },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SerdeApprovalDecision {
+    Approve,
+    Deny,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -67,8 +93,8 @@ impl SerdeSessionEvent {
             SessionEvent::ToolApprovalDecided(rec) => Self::ToolApprovalDecided {
                 id: rec.id.clone(),
                 decision: match rec.decision {
-                    ApprovalDecision::Approve => "approve".into(),
-                    ApprovalDecision::Deny => "deny".into(),
+                    ApprovalDecision::Approve => SerdeApprovalDecision::Approve,
+                    ApprovalDecision::Deny => SerdeApprovalDecision::Deny,
                 },
             },
             SessionEvent::TurnComplete(idx) => Self::TurnComplete { turn_index: *idx },
@@ -91,10 +117,9 @@ impl SerdeSessionEvent {
             Self::ToolApprovalDecided { id, decision } => {
                 SessionEvent::ToolApprovalDecided(ToolApprovalDecisionRecord {
                     id,
-                    decision: if decision == "approve" {
-                        ApprovalDecision::Approve
-                    } else {
-                        ApprovalDecision::Deny
+                    decision: match decision {
+                        SerdeApprovalDecision::Approve => ApprovalDecision::Approve,
+                        SerdeApprovalDecision::Deny => ApprovalDecision::Deny,
                     },
                 })
             }

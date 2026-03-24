@@ -27,11 +27,7 @@ pub fn collect_provider_models(
             continue;
         }
         let path = Path::new(&entry.wasm_path);
-        let caps = extension_host::strings_to_capabilities(&entry.capabilities);
-        let opts = extension_host::LoadOptions {
-            capabilities: Some(&caps),
-            ..extension_host::LoadOptions::default()
-        };
+        let opts = extension_host::LoadOptions::for_entry(entry);
         // Probe with empty init to discover provider ID, then re-load
         // with real credentials so list_models() can make authenticated calls.
         let mut probe = extension_host::ExtensionInstance::load(engine, path, &opts)
