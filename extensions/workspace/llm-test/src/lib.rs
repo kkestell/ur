@@ -184,7 +184,9 @@ fn deterministic_response(
             .unwrap_or_default();
         return Message {
             role: "assistant".into(),
-            parts: vec![MessagePart::Text(format!("Tool result received: {content}"))],
+            parts: vec![MessagePart::Text(format!(
+                "Tool result received: {content}"
+            ))],
         };
     }
 

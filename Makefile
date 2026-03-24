@@ -27,10 +27,15 @@ BUILTIN_EXTENSION_MANIFESTS := \
 
 BUILTIN_EXTENSION_DIRS := $(patsubst %/Cargo.toml,%,$(BUILTIN_EXTENSION_MANIFESTS))
 
+# Workspace test extensions built for integration tests.
+TEST_EXTENSION_MANIFESTS := \
+	extensions/workspace/test-extension/Cargo.toml \
+	extensions/workspace/llm-test/Cargo.toml
+
 # Repo-local checks also cover the workspace test extensions.
 REPO_EXTENSION_MANIFESTS := \
 	$(BUILTIN_EXTENSION_MANIFESTS) \
-	extensions/workspace/test-extension/Cargo.toml
+	$(TEST_EXTENSION_MANIFESTS)
 
 .PHONY: \
 	build \
@@ -52,7 +57,7 @@ build-ur:
 	$(CARGO) build --manifest-path $(HOST_MANIFEST)
 
 build-extensions:
-	@for manifest in $(BUILTIN_EXTENSION_MANIFESTS); do \
+	@for manifest in $(BUILTIN_EXTENSION_MANIFESTS) $(TEST_EXTENSION_MANIFESTS); do \
 		echo "==> cargo build --manifest-path $$manifest --target $(WASM_TARGET) --release"; \
 		$(CARGO) build --manifest-path "$$manifest" --target $(WASM_TARGET) --release; \
 	done
@@ -64,7 +69,7 @@ check:
 		$(CARGO) check --manifest-path "$$manifest" --target $(WASM_TARGET); \
 	done
 
-test:
+test: build-extensions
 	$(CARGO) test --manifest-path $(HOST_MANIFEST)
 
 clippy:
