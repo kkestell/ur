@@ -183,11 +183,13 @@ impl UrSession {
     }
 
     /// Returns the session identifier.
+    #[must_use]
     pub fn id(&self) -> &str {
         &self.session_id
     }
 
     /// Derives the LLM message history from the event log.
+    #[must_use]
     pub fn messages_for_llm(&self) -> Vec<wit_types::Message> {
         messages_from_events(&self.events)
     }
@@ -292,6 +294,7 @@ impl UrSession {
     }
 
     /// Returns a snapshot of the session state for UI restoration.
+    #[must_use]
     pub fn snapshot(&self) -> SessionSnapshot {
         SessionSnapshot {
             session_id: self.session_id.clone(),

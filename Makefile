@@ -7,12 +7,15 @@ HOST_MANIFEST := Cargo.toml
 
 # install builds release by default; set DEBUG=1 for a debug install.
 ifdef DEBUG
-  HOST_BINARY := target/debug/ur
+  HOST_BINARY_DIR := target/debug
   INSTALL_CARGO_FLAGS :=
 else
-  HOST_BINARY := target/release/ur
+  HOST_BINARY_DIR := target/release
   INSTALL_CARGO_FLAGS := --release
 endif
+
+HOST_BINARY := $(HOST_BINARY_DIR)/ur
+HOST_BINARY_TUI := $(HOST_BINARY_DIR)/ur-tui
 
 BINDIR ?= $(HOME)/.local/bin
 UR_ROOT ?= $(HOME)/.ur
@@ -101,6 +104,7 @@ install: build-extensions
 	$(CARGO) build --manifest-path $(HOST_MANIFEST) $(INSTALL_CARGO_FLAGS)
 	@mkdir -p "$(BINDIR)"
 	cp "$(HOST_BINARY)" "$(BINDIR)/ur"
+	cp "$(HOST_BINARY_TUI)" "$(BINDIR)/ur-tui"
 	@for ext_dir in $(BUILTIN_EXTENSION_DIRS); do \
 		ext_name=$$(basename "$$ext_dir"); \
 		dest="$(SYSTEM_EXTENSION_INSTALL_DIR)/$$ext_name"; \
@@ -110,5 +114,5 @@ install: build-extensions
 	done
 
 uninstall:
-	rm -f "$(BINDIR)/ur"
+	rm -f "$(BINDIR)/ur" "$(BINDIR)/ur-tui"
 	rm -rf "$(UR_ROOT)"

@@ -72,11 +72,13 @@ impl UrApp {
     }
 
     /// Returns a reference to the `ur_root` path.
+    #[must_use]
     pub fn ur_root(&self) -> &Path {
         &self.ur_root
     }
 
     /// Returns a reference to the Wasmtime engine.
+    #[must_use]
     pub fn engine(&self) -> &Engine {
         &self.engine
     }

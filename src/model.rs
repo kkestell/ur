@@ -17,6 +17,10 @@ use crate::manifest;
 pub type ProviderModels = BTreeMap<String, Vec<wit_types::ModelDescriptor>>;
 
 /// Queries all enabled LLM providers for their declared provider ID and models.
+///
+/// # Errors
+///
+/// Returns an error if a provider extension fails to load or initialise.
 pub fn collect_provider_models(
     engine: &wasmtime::Engine,
     manifest: &manifest::WorkspaceManifest,
@@ -70,6 +74,10 @@ pub fn collect_provider_models(
 ///
 /// Tries the requested role, falls back to `"default"`, then falls back
 /// to the first provider's default model.
+///
+/// # Errors
+///
+/// Returns an error if no LLM providers are available.
 pub fn resolve_role(
     config: &UserConfig,
     role: &str,
@@ -94,6 +102,7 @@ pub fn resolve_role(
 }
 
 /// Finds a model descriptor by provider and model ID.
+#[must_use]
 pub fn find_descriptor<'a>(
     provider_models: &'a ProviderModels,
     provider_id: &str,

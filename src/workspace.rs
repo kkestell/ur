@@ -113,26 +113,31 @@ impl UrWorkspace {
     }
 
     /// Returns a reference to the Wasmtime engine.
+    #[must_use]
     pub fn engine(&self) -> &Engine {
         &self.engine
     }
 
     /// Returns a reference to the `ur_root` path.
+    #[must_use]
     pub fn ur_root(&self) -> &Path {
         &self.ur_root
     }
 
     /// Returns a reference to the workspace path.
+    #[must_use]
     pub fn workspace_path(&self) -> &Path {
         &self.workspace_path
     }
 
     /// Returns a reference to the workspace manifest.
+    #[must_use]
     pub fn manifest(&self) -> &WorkspaceManifest {
         &self.manifest
     }
 
     /// Returns a reference to the user config.
+    #[must_use]
     pub fn config(&self) -> &UserConfig {
         &self.config
     }
@@ -140,6 +145,7 @@ impl UrWorkspace {
     // --- Extension management ---
 
     /// Returns the list of all discovered extensions.
+    #[must_use]
     pub fn list_extensions(&self) -> &[ManifestEntry] {
         &self.manifest.extensions
     }
@@ -454,6 +460,7 @@ impl UrWorkspace {
     }
 
     /// Returns the configured role mappings.
+    #[must_use]
     pub fn roles(&self) -> &BTreeMap<String, String> {
         &self.config.roles
     }

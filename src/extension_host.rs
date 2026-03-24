@@ -249,6 +249,7 @@ fn build_host_state(
 }
 
 /// Converts `ExtensionCapabilities` flags to a list of string tags.
+#[must_use]
 pub fn capabilities_to_strings(caps: wit_types::ExtensionCapabilities) -> Vec<String> {
     let mut out = Vec::new();
     if caps.contains(wit_types::ExtensionCapabilities::FILESYSTEM_READ) {
@@ -264,6 +265,7 @@ pub fn capabilities_to_strings(caps: wit_types::ExtensionCapabilities) -> Vec<St
 }
 
 /// Converts a list of string tags to `ExtensionCapabilities` flags.
+#[must_use]
 pub fn strings_to_capabilities(tags: &[String]) -> wit_types::ExtensionCapabilities {
     let mut caps = wit_types::ExtensionCapabilities::empty();
     for tag in tags {
@@ -289,6 +291,7 @@ pub struct LoadOptions<'a> {
 
 impl LoadOptions<'_> {
     /// Builds options from a manifest entry's capability strings.
+    #[must_use]
     pub fn for_entry(entry: &crate::manifest::ManifestEntry) -> Self {
         Self {
             capabilities: Some(strings_to_capabilities(&entry.capabilities)),
@@ -299,7 +302,9 @@ impl LoadOptions<'_> {
 
 /// Validates that declared capabilities match the component's actual WASI imports.
 ///
-/// Panics if the component imports a WASI capability it didn't declare.
+/// # Panics
+///
+/// Panics if the component imports a WASI capability it did not declare.
 pub fn validate_capabilities(
     engine: &Engine,
     component: &Component,
@@ -347,6 +352,10 @@ impl ExtensionInstance {
 
     /// Like `load`, but also returns the compiled `Component` so callers
     /// (e.g. discovery) can inspect it without recompiling.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the component cannot be loaded or instantiated.
     pub fn load_returning_component(
         engine: &Engine,
         path: &Path,
@@ -406,6 +415,7 @@ impl ExtensionInstance {
     }
 
     /// Returns the slot name for this extension, or `None` for general extensions.
+    #[must_use]
     pub fn slot_name(&self) -> Option<&'static str> {
         match self {
             Self::Llm { .. } => Some("llm-provider"),

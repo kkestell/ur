@@ -67,6 +67,7 @@ impl UserConfig {
     /// Resolves a role name to `(provider_id, model_id)`.
     ///
     /// Returns `None` if the role is not configured.
+    #[must_use]
     pub fn resolve_role(&self, role: &str) -> Option<(&str, &str)> {
         let ref_str = self.roles.get(role)?;
         parse_model_ref(ref_str)
@@ -77,6 +78,10 @@ impl UserConfig {
     /// Filters `descriptors` (from `list-settings()`) to mutable, non-secret
     /// settings prefixed with `<model_id>.`, reads values from config, and
     /// returns `ConfigSetting` entries with short keys (prefix stripped).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a setting value cannot be converted to the expected type.
     pub fn settings_for(
         &self,
         extension_id: &str,
@@ -109,6 +114,7 @@ impl UserConfig {
 ///
 /// Splits on the first slash only, so `openrouter/openai/gpt-4o-mini`
 /// yields `("openrouter", "openai/gpt-4o-mini")`.
+#[must_use]
 pub fn parse_model_ref(s: &str) -> Option<(&str, &str)> {
     let slash = s.find('/')?;
     let provider = &s[..slash];
@@ -171,6 +177,10 @@ pub(crate) fn validate_number(n: f64, schema: &wit_types::SettingNumber, key: &s
 }
 
 /// Parses a CLI string value into a TOML value according to the setting's schema.
+///
+/// # Errors
+///
+/// Returns an error if `raw` cannot be parsed or validated for `schema`.
 pub fn parse_setting_value(
     raw: &str,
     schema: &wit_types::SettingSchema,
@@ -269,6 +279,7 @@ pub(crate) fn default_value(schema: &wit_types::SettingSchema) -> wit_types::Set
 }
 
 /// Returns the type name for a setting schema.
+#[must_use]
 pub fn schema_type_name(schema: &wit_types::SettingSchema) -> &'static str {
     match schema {
         wit_types::SettingSchema::Integer(_) => "integer",
