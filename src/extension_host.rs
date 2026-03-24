@@ -163,11 +163,15 @@ impl wit_host::Host for HostState {
         Err("not yet routed".into())
     }
 
-    fn load_session(&mut self, _id: String) -> Result<Vec<wit_types::Message>, String> {
+    fn load_session(&mut self, _id: String) -> Result<Vec<wit_types::SessionEvent>, String> {
         Err("not yet routed".into())
     }
 
-    fn append_session(&mut self, _id: String, _msg: wit_types::Message) -> Result<(), String> {
+    fn append_session(
+        &mut self,
+        _id: String,
+        _event: wit_types::SessionEvent,
+    ) -> Result<(), String> {
         Err("not yet routed".into())
     }
 
@@ -639,7 +643,7 @@ impl ExtensionInstance {
         Ok(Ok(()))
     }
 
-    /// Loads session messages from a session provider extension.
+    /// Loads session events from a session provider extension.
     ///
     /// # Errors
     ///
@@ -648,7 +652,7 @@ impl ExtensionInstance {
     pub fn load_session(
         &mut self,
         id: &str,
-    ) -> wasmtime::Result<Result<Vec<wit_types::Message>, String>> {
+    ) -> wasmtime::Result<Result<Vec<wit_types::SessionEvent>, String>> {
         match self {
             Self::Session { store, bindings } => bindings
                 .ur_extension_session_provider()
@@ -657,7 +661,7 @@ impl ExtensionInstance {
         }
     }
 
-    /// Appends a message to a session via a session provider extension.
+    /// Appends an event to a session via a session provider extension.
     ///
     /// # Errors
     ///
@@ -666,12 +670,12 @@ impl ExtensionInstance {
     pub fn append_session(
         &mut self,
         id: &str,
-        msg: &wit_types::Message,
+        event: &wit_types::SessionEvent,
     ) -> wasmtime::Result<Result<(), String>> {
         match self {
             Self::Session { store, bindings } => bindings
                 .ur_extension_session_provider()
-                .call_append(store, id, msg),
+                .call_append(store, id, event),
             _ => Ok(Err("not a session-provider".into())),
         }
     }

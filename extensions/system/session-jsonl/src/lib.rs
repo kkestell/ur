@@ -7,7 +7,8 @@ wit_bindgen::generate!({
 use exports::ur::extension::extension::Guest as ExtGuest;
 use exports::ur::extension::session_provider::Guest as SessionGuest;
 use ur::extension::types::{
-    ConfigEntry, ExtensionCapabilities, Message, SessionInfo, SettingDescriptor, ToolDescriptor,
+    ConfigEntry, ExtensionCapabilities, SessionEvent, SessionInfo, SettingDescriptor,
+    ToolDescriptor,
 };
 
 struct SessionJsonl;
@@ -43,11 +44,11 @@ impl ExtGuest for SessionJsonl {
 }
 
 impl SessionGuest for SessionJsonl {
-    fn load(_id: String) -> Result<Vec<Message>, String> {
+    fn load(_id: String) -> Result<Vec<SessionEvent>, String> {
         Ok(Vec::new())
     }
 
-    fn append(_id: String, _msg: Message) -> Result<(), String> {
+    fn append(_id: String, _event: SessionEvent) -> Result<(), String> {
         Ok(())
     }
 

@@ -162,21 +162,12 @@ impl UrSession {
             .init(&[])?
             .map_err(|e| anyhow::anyhow!("session init: {e}"))?;
 
-        let messages: Vec<wit_types::Message> = session_ext
+        let wit_events: Vec<wit_types::SessionEvent> = session_ext
             .load_session(session_id)?
             .map_err(|e| anyhow::anyhow!("load_session: {e}"))?;
 
-        // Convert loaded messages to events.
-        let events: Vec<PersistedEvent> = messages
-            .into_iter()
-            .map(|msg| match msg.role.as_str() {
-                "user" => PersistedEvent::UserMessage {
-                    text: extract_text(&msg),
-                },
-                "tool" => PersistedEvent::ToolResult { message: msg },
-                _ => PersistedEvent::LlmCompletion { message: msg },
-            })
-            .collect();
+        let events: Vec<PersistedEvent> =
+            wit_events.into_iter().map(wit_event_to_persisted).collect();
 
         let persisted_event_count = events.len();
         info!(
@@ -444,40 +435,23 @@ impl UrSession {
         ))
     }
 
-    /// Appends new messages to the session provider and runs compaction.
-    ///
-    /// Derives messages from new events and appends them. The session
-    /// provider still works with `Message` until Step 3 introduces
-    /// event-based persistence.
+    /// Appends new events to the session provider and runs compaction.
     fn persist_and_compact(&mut self) -> Result<()> {
         let mut session_ext = load_slot(&self.engine, &self.manifest, "session-provider")?;
         session_ext
             .init(&[])?
             .map_err(|e| anyhow::anyhow!("session init: {e}"))?;
 
-        // Derive messages from events added since last persist.
         let new_events = &self.events[self.persisted_event_count..];
-        let pending: Vec<wit_types::Message> = new_events
-            .iter()
-            .filter_map(|e| match e {
-                PersistedEvent::UserMessage { text } => Some(wit_types::Message {
-                    role: "user".into(),
-                    parts: vec![wit_types::MessagePart::Text(text.clone())],
-                }),
-                PersistedEvent::LlmCompletion { message } => Some(message.clone()),
-                PersistedEvent::ToolResult { message } => Some(message.clone()),
-                _ => None,
-            })
-            .collect();
-
         debug!(
-            count = pending.len(),
+            count = new_events.len(),
             session_id = self.session_id,
-            "appending messages to session"
+            "appending events to session"
         );
-        for message in &pending {
+        for event in new_events {
+            let wit_event = persisted_to_wit_event(event);
             session_ext
-                .append_session(&self.session_id, message)?
+                .append_session(&self.session_id, &wit_event)?
                 .map_err(|e| anyhow::anyhow!("append_session: {e}"))?;
         }
 
@@ -651,6 +625,80 @@ fn dispatch_tool_calls(
         events.push(PersistedEvent::ToolResult { message: msg });
     }
     Ok(())
+}
+
+/// Converts a WIT `SessionEvent` to an internal `PersistedEvent`.
+fn wit_event_to_persisted(e: wit_types::SessionEvent) -> PersistedEvent {
+    match e {
+        wit_types::SessionEvent::TurnStarted(turn_index) => {
+            PersistedEvent::TurnStarted { turn_index }
+        }
+        wit_types::SessionEvent::UserMessage(text) => PersistedEvent::UserMessage { text },
+        wit_types::SessionEvent::LlmCompletion(message) => {
+            PersistedEvent::LlmCompletion { message }
+        }
+        wit_types::SessionEvent::ToolResult(message) => PersistedEvent::ToolResult { message },
+        wit_types::SessionEvent::ToolApprovalRequested(req) => {
+            PersistedEvent::ToolApprovalRequested {
+                id: req.id,
+                name: req.name,
+            }
+        }
+        wit_types::SessionEvent::ToolApprovalDecided(rec) => PersistedEvent::ToolApprovalDecided {
+            id: rec.id,
+            decision: match rec.decision {
+                wit_types::ApprovalDecision::Approve => ApprovalDecision::Approve,
+                wit_types::ApprovalDecision::Deny => ApprovalDecision::Deny,
+            },
+        },
+        wit_types::SessionEvent::TurnComplete(turn_index) => {
+            PersistedEvent::TurnComplete { turn_index }
+        }
+        wit_types::SessionEvent::TurnInterrupted(ti) => PersistedEvent::TurnInterrupted {
+            turn_index: ti.turn_index,
+            reason: ti.reason,
+        },
+    }
+}
+
+/// Converts an internal `PersistedEvent` to a WIT `SessionEvent`.
+fn persisted_to_wit_event(e: &PersistedEvent) -> wit_types::SessionEvent {
+    match e {
+        PersistedEvent::TurnStarted { turn_index } => {
+            wit_types::SessionEvent::TurnStarted(*turn_index)
+        }
+        PersistedEvent::UserMessage { text } => wit_types::SessionEvent::UserMessage(text.clone()),
+        PersistedEvent::LlmCompletion { message } => {
+            wit_types::SessionEvent::LlmCompletion(message.clone())
+        }
+        PersistedEvent::ToolResult { message } => {
+            wit_types::SessionEvent::ToolResult(message.clone())
+        }
+        PersistedEvent::ToolApprovalRequested { id, name } => {
+            wit_types::SessionEvent::ToolApprovalRequested(wit_types::ToolApprovalRequest {
+                id: id.clone(),
+                name: name.clone(),
+            })
+        }
+        PersistedEvent::ToolApprovalDecided { id, decision } => {
+            wit_types::SessionEvent::ToolApprovalDecided(wit_types::ToolApprovalDecisionRecord {
+                id: id.clone(),
+                decision: match decision {
+                    ApprovalDecision::Approve => wit_types::ApprovalDecision::Approve,
+                    ApprovalDecision::Deny => wit_types::ApprovalDecision::Deny,
+                },
+            })
+        }
+        PersistedEvent::TurnComplete { turn_index } => {
+            wit_types::SessionEvent::TurnComplete(*turn_index)
+        }
+        PersistedEvent::TurnInterrupted { turn_index, reason } => {
+            wit_types::SessionEvent::TurnInterrupted(wit_types::TurnInterruption {
+                turn_index: *turn_index,
+                reason: reason.clone(),
+            })
+        }
+    }
 }
 
 /// Finds the first enabled entry for a slot and loads it.
