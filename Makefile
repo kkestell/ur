@@ -5,12 +5,27 @@ WASM_TARGET ?= wasm32-wasip2
 
 HOST_MANIFEST := Cargo.toml
 
+# install builds release by default; set DEBUG=1 for a debug install.
+ifdef DEBUG
+  HOST_BINARY := target/debug/ur
+  INSTALL_CARGO_FLAGS :=
+else
+  HOST_BINARY := target/release/ur
+  INSTALL_CARGO_FLAGS := --release
+endif
+
+BINDIR ?= $(HOME)/.local/bin
+UR_ROOT ?= $(HOME)/.ur
+SYSTEM_EXTENSION_INSTALL_DIR := $(UR_ROOT)/extensions/system
+
 # Built-in extensions ship from the system tier.
 BUILTIN_EXTENSION_MANIFESTS := \
 	extensions/system/session-jsonl/Cargo.toml \
 	extensions/system/compaction-llm/Cargo.toml \
 	extensions/system/llm-google/Cargo.toml \
 	extensions/system/llm-openrouter/Cargo.toml
+
+BUILTIN_EXTENSION_DIRS := $(patsubst %/Cargo.toml,%,$(BUILTIN_EXTENSION_MANIFESTS))
 
 # Repo-local checks also cover the smoke-test workspace extension.
 REPO_EXTENSION_MANIFESTS := \
@@ -28,7 +43,9 @@ REPO_EXTENSION_MANIFESTS := \
 	format \
 	fmt-check \
 	verify \
-	smoke-test
+	smoke-test \
+	install \
+	uninstall
 
 build: build-ur build-extensions
 
@@ -78,3 +95,19 @@ verify: fmt-check check test clippy
 
 smoke-test:
 	python3 scripts/smoke-test.py
+
+install: build-extensions
+	$(CARGO) build --manifest-path $(HOST_MANIFEST) $(INSTALL_CARGO_FLAGS)
+	@mkdir -p "$(BINDIR)"
+	cp "$(HOST_BINARY)" "$(BINDIR)/ur"
+	@for ext_dir in $(BUILTIN_EXTENSION_DIRS); do \
+		ext_name=$$(basename "$$ext_dir"); \
+		dest="$(SYSTEM_EXTENSION_INSTALL_DIR)/$$ext_name"; \
+		rm -rf "$$dest"; \
+		mkdir -p "$$dest"; \
+		find "$$ext_dir/target/$(WASM_TARGET)/release" -name '*.wasm' -exec cp {} "$$dest/" \; ; \
+	done
+
+uninstall:
+	rm -f "$(BINDIR)/ur"
+	rm -rf "$(UR_ROOT)"
