@@ -39,6 +39,7 @@ pub static SLOTS: &[SlotDefinition] = &[
 ];
 
 /// Looks up a slot definition by name.
+#[must_use]
 pub fn find_slot(name: &str) -> Option<&'static SlotDefinition> {
     SLOTS.iter().find(|s| s.name == name)
 }
@@ -61,6 +62,7 @@ const SLOT_EXPORTS: &[(&str, &str)] = &[
 ///
 /// Returns `Some("llm-provider")` etc. for slot extensions, or `None` for
 /// general extensions that only export the base `extension` interface.
+#[must_use]
 pub fn detect_slot(engine: &Engine, component: &Component) -> Option<&'static str> {
     let ct = component.component_type();
     for &(export_name, slot_name) in SLOT_EXPORTS {

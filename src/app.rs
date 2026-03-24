@@ -72,13 +72,13 @@ impl UrApp {
     }
 
     /// Returns a reference to the `ur_root` path.
-    #[expect(dead_code, reason = "public API surface for future clients")]
+    #[must_use]
     pub fn ur_root(&self) -> &Path {
         &self.ur_root
     }
 
     /// Returns a reference to the Wasmtime engine.
-    #[expect(dead_code, reason = "public API surface for future clients")]
+    #[must_use]
     pub fn engine(&self) -> &Engine {
         &self.engine
     }

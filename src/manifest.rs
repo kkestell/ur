@@ -36,6 +36,7 @@ pub struct ManifestEntry {
 // --- Persistence ---
 
 /// Returns the directory where the manifest for a workspace is stored.
+#[must_use]
 pub fn manifest_dir(ur_root: &Path, workspace: &Path) -> PathBuf {
     let escaped = escape_workspace_path(workspace);
     ur_root.join("workspaces").join(escaped)
@@ -45,6 +46,7 @@ pub fn manifest_dir(ur_root: &Path, workspace: &Path) -> PathBuf {
 ///
 /// Canonicalizes the path, replaces `/` with `_`, and strips the
 /// leading `_`.
+#[must_use]
 pub fn escape_workspace_path(path: &Path) -> String {
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let s = canonical.to_string_lossy().replace('/', "_");
@@ -89,6 +91,7 @@ pub fn save_manifest(ur_root: &Path, workspace: &Path, manifest: &WorkspaceManif
 /// New system extensions default to enabled; user and workspace
 /// extensions default to disabled. Existing entries keep their
 /// enabled state. Extensions no longer discovered are removed.
+#[must_use]
 pub fn merge(
     existing: Option<WorkspaceManifest>,
     discovered: Vec<DiscoveredExtension>,

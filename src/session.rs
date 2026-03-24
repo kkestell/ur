@@ -18,10 +18,6 @@ use crate::provider;
 
 /// A structured event emitted during turn execution.
 #[derive(Debug, Clone)]
-#[expect(
-    dead_code,
-    reason = "fields read by downstream clients matching on events"
-)]
 pub enum SessionEvent {
     /// LLM is streaming a text delta.
     TextDelta(String),
@@ -107,10 +103,6 @@ pub enum PersistedEvent {
 /// structured event timeline that records domain events beyond
 /// plain messages (turn boundaries, tool approvals, interruptions).
 #[derive(Debug, Clone)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "fields read by downstream clients")
-)]
 pub struct SessionSnapshot {
     /// The session identifier.
     pub session_id: String,
@@ -191,12 +183,13 @@ impl UrSession {
     }
 
     /// Returns the session identifier.
-    #[expect(dead_code, reason = "public API surface for future clients")]
+    #[must_use]
     pub fn id(&self) -> &str {
         &self.session_id
     }
 
     /// Derives the LLM message history from the event log.
+    #[must_use]
     pub fn messages_for_llm(&self) -> Vec<wit_types::Message> {
         messages_from_events(&self.events)
     }
@@ -301,7 +294,7 @@ impl UrSession {
     }
 
     /// Returns a snapshot of the session state for UI restoration.
-    #[expect(dead_code, reason = "public API surface for future clients")]
+    #[must_use]
     pub fn snapshot(&self) -> SessionSnapshot {
         SessionSnapshot {
             session_id: self.session_id.clone(),
@@ -315,7 +308,6 @@ impl UrSession {
     /// Converts each `PersistedEvent` into the corresponding
     /// `SessionEvent` so clients can rebuild their UI state using
     /// the same rendering logic they use for live events.
-    #[expect(dead_code, reason = "public API surface for future clients")]
     pub fn replay(&self, mut on_event: impl FnMut(SessionEvent)) {
         for event in &self.events {
             let session_event = match event {

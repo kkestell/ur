@@ -113,30 +113,31 @@ impl UrWorkspace {
     }
 
     /// Returns a reference to the Wasmtime engine.
-    #[expect(dead_code, reason = "public API surface for future clients")]
+    #[must_use]
     pub fn engine(&self) -> &Engine {
         &self.engine
     }
 
     /// Returns a reference to the `ur_root` path.
-    #[expect(dead_code, reason = "public API surface for future clients")]
+    #[must_use]
     pub fn ur_root(&self) -> &Path {
         &self.ur_root
     }
 
     /// Returns a reference to the workspace path.
-    #[expect(dead_code, reason = "public API surface for future clients")]
+    #[must_use]
     pub fn workspace_path(&self) -> &Path {
         &self.workspace_path
     }
 
     /// Returns a reference to the workspace manifest.
+    #[must_use]
     pub fn manifest(&self) -> &WorkspaceManifest {
         &self.manifest
     }
 
     /// Returns a reference to the user config.
-    #[expect(dead_code, reason = "public API surface for future clients")]
+    #[must_use]
     pub fn config(&self) -> &UserConfig {
         &self.config
     }
@@ -144,7 +145,7 @@ impl UrWorkspace {
     // --- Extension management ---
 
     /// Returns the list of all discovered extensions.
-    #[expect(dead_code, reason = "public API surface for future clients")]
+    #[must_use]
     pub fn list_extensions(&self) -> &[ManifestEntry] {
         &self.manifest.extensions
     }
@@ -454,13 +455,12 @@ impl UrWorkspace {
     /// # Errors
     ///
     /// Returns an error if provider queries fail.
-    #[expect(dead_code, reason = "public API surface for future clients")]
     pub fn collect_provider_models(&self) -> Result<ProviderModels> {
         model::collect_provider_models(&self.engine, &self.manifest)
     }
 
     /// Returns the configured role mappings.
-    #[expect(dead_code, reason = "public API surface for future clients")]
+    #[must_use]
     pub fn roles(&self) -> &BTreeMap<String, String> {
         &self.config.roles
     }
@@ -491,7 +491,6 @@ impl UrWorkspace {
     /// # Errors
     ///
     /// Returns an error if the session provider fails to load.
-    #[expect(dead_code, reason = "public API surface for future clients")]
     pub fn list_sessions(&self) -> Result<Vec<wit_types::SessionInfo>> {
         let sessions_dir = self.sessions_dir();
         let mut session_ext =
