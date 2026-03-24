@@ -134,6 +134,18 @@ interface types {
         parameters-json-schema: string,
     }
 
+    /// Controls which tools the model may or must use.
+    variant tool-choice {
+        /// Model decides whether to use tools.
+        auto,
+        /// Model must not use any tools.
+        none,
+        /// Model must use at least one tool.
+        required,
+        /// Model must use this specific tool.
+        specific(string),
+    }
+
     /// A single chunk from a streaming completion.
     record completion-chunk {
         delta-parts: list<message-part>,
@@ -199,7 +211,7 @@ interface extension {
 
 /// Exported by extensions filling the `llm-provider` slot.
 interface llm-provider {
-    use types.{message, model-descriptor, config-setting, completion-chunk, tool-descriptor};
+    use types.{message, model-descriptor, config-setting, completion-chunk, tool-descriptor, tool-choice};
 
     /// The provider's short identifier (e.g. "anthropic", "openai").
     ///
@@ -217,9 +229,13 @@ interface llm-provider {
 
     /// Begin a streaming completion. The caller pulls chunks via the
     /// returned resource handle.
+    ///
+    /// `tool-choice` controls whether and which tools the model may use.
+    /// `none` means the provider uses its default behavior (typically auto).
     complete: func(messages: list<message>, model: string,
                    settings: list<config-setting>,
-                   tools: list<tool-descriptor>)
+                   tools: list<tool-descriptor>,
+                   tool-choice: option<tool-choice>)
         -> result<completion-stream, string>;
 }
 

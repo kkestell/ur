@@ -13,7 +13,7 @@ use exports::ur::extension::llm_provider::{
 use ur::extension::types::{
     CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
     SettingBoolean, SettingDescriptor, SettingInteger, SettingNumber, SettingSchema, SettingString,
-    SettingValue, ToolCall, ToolDescriptor, Usage,
+    SettingValue, ToolCall, ToolChoice, ToolDescriptor, Usage,
 };
 use wasi::http::outgoing_handler;
 use wasi::http::types::{Fields, IncomingBody, Method, OutgoingBody, OutgoingRequest, Scheme};
@@ -149,9 +149,10 @@ impl LlmGuest for LlmOpenRouter {
         model: String,
         settings: Vec<ConfigSetting>,
         tools: Vec<ToolDescriptor>,
+        tool_choice: Option<ToolChoice>,
     ) -> Result<CompletionStream, String> {
         let api_key = get_api_key()?;
-        let body = build_request_body(&model, &messages, &settings, &tools);
+        let body = build_request_body(&model, &messages, &settings, &tools, tool_choice.as_ref());
 
         let (incoming_body, body_stream) =
             http_post_streaming(&api_key, "/api/v1/chat/completions", &body)?;
@@ -385,26 +386,27 @@ fn parse_sse_chunk(
         }
     }
 
+    // Emit tool calls eagerly as soon as their arguments are valid JSON.
+    pending_tool_calls.retain(|tc| {
+        if !tc.arguments.is_empty()
+            && serde_json::from_str::<serde_json::Value>(&tc.arguments).is_ok()
+        {
+            delta_parts.push(MessagePart::ToolCall(ToolCall {
+                id: tc.id.clone(),
+                name: tc.name.clone(),
+                arguments_json: tc.arguments.clone(),
+                provider_metadata_json: String::new(),
+            }));
+            false // remove from pending
+        } else {
+            true // keep accumulating
+        }
+    });
+
     let finish_reason = choice
         .get("finish_reason")
         .and_then(|r| r.as_str())
         .map(String::from);
-
-    // When finish_reason is set and we have pending tool calls, emit them.
-    if finish_reason.is_some() && !pending_tool_calls.is_empty() {
-        let parts: Vec<MessagePart> = pending_tool_calls
-            .drain(..)
-            .map(|tc| {
-                MessagePart::ToolCall(ToolCall {
-                    id: tc.id,
-                    name: tc.name,
-                    arguments_json: tc.arguments,
-                    provider_metadata_json: String::new(),
-                })
-            })
-            .collect();
-        delta_parts.extend(parts);
-    }
 
     let usage = response.get("usage").and_then(parse_usage);
 
@@ -782,6 +784,7 @@ fn build_request_body(
     messages: &[Message],
     settings: &[ConfigSetting],
     tools: &[ToolDescriptor],
+    tool_choice: Option<&ToolChoice>,
 ) -> String {
     let mut body = serde_json::Map::new();
 
@@ -810,6 +813,20 @@ fn build_request_body(
             })
             .collect();
         body.insert("tools".into(), serde_json::Value::Array(tool_defs));
+
+        // Map tool_choice to OpenAI format.
+        if let Some(tc) = tool_choice {
+            let value = match tc {
+                ToolChoice::Auto => serde_json::json!("auto"),
+                ToolChoice::None => serde_json::json!("none"),
+                ToolChoice::Required => serde_json::json!("required"),
+                ToolChoice::Specific(name) => serde_json::json!({
+                    "type": "function",
+                    "function": {"name": name}
+                }),
+            };
+            body.insert("tool_choice".into(), value);
+        }
     }
 
     // Settings.
@@ -1297,7 +1314,7 @@ mod tests {
             role: "user".into(),
             parts: vec![MessagePart::Text("Hello".into())],
         }];
-        let body = build_request_body("openai/gpt-4o-mini", &messages, &[], &[]);
+        let body = build_request_body("openai/gpt-4o-mini", &messages, &[], &[], None);
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(json["model"], "openai/gpt-4o-mini");
         assert_eq!(json["stream"], true);
@@ -1320,7 +1337,7 @@ mod tests {
                 value: SettingValue::Integer(1024),
             },
         ];
-        let body = build_request_body("test/model", &messages, &settings, &[]);
+        let body = build_request_body("test/model", &messages, &settings, &[], None);
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(json["temperature"], 0.7);
         assert_eq!(json["max_tokens"], 1024);

@@ -13,7 +13,7 @@ use exports::ur::extension::llm_provider::{
 use ur::extension::types::{
     CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
     SettingDescriptor, SettingEnum, SettingInteger, SettingSchema, SettingString, ToolCall,
-    ToolDescriptor, Usage,
+    ToolChoice, ToolDescriptor, Usage,
 };
 use wasi::http::outgoing_handler;
 use wasi::http::types::{Fields, IncomingBody, Method, OutgoingBody, OutgoingRequest, Scheme};
@@ -165,9 +165,10 @@ impl LlmGuest for LlmGoogle {
         model: String,
         settings: Vec<ConfigSetting>,
         tools: Vec<ToolDescriptor>,
+        tool_choice: Option<ToolChoice>,
     ) -> Result<CompletionStream, String> {
         let api_key = get_api_key()?;
-        let body = build_request_body(&messages, &settings, &tools);
+        let body = build_request_body(&messages, &settings, &tools, tool_choice.as_ref());
 
         let url = format!("/v1beta/models/{model}:streamGenerateContent?alt=sse");
 
@@ -365,6 +366,7 @@ fn build_request_body(
     messages: &[Message],
     settings: &[ConfigSetting],
     tools: &[ToolDescriptor],
+    tool_choice: Option<&ToolChoice>,
 ) -> String {
     let mut body = serde_json::Map::new();
 
@@ -410,6 +412,23 @@ fn build_request_body(
             "tools".into(),
             serde_json::json!([{ "functionDeclarations": declarations }]),
         );
+
+        // Map tool_choice to Gemini toolConfig.functionCallingConfig.
+        if let Some(tc) = tool_choice {
+            let config = match tc {
+                ToolChoice::Auto => serde_json::json!({"mode": "AUTO"}),
+                ToolChoice::None => serde_json::json!({"mode": "NONE"}),
+                ToolChoice::Required => serde_json::json!({"mode": "ANY"}),
+                ToolChoice::Specific(name) => serde_json::json!({
+                    "mode": "ANY",
+                    "allowedFunctionNames": [name]
+                }),
+            };
+            body.insert(
+                "toolConfig".into(),
+                serde_json::json!({"functionCallingConfig": config}),
+            );
+        }
     }
 
     // Generation config from settings.

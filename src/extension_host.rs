@@ -440,6 +440,7 @@ impl ExtensionInstance {
         model: &str,
         settings: &[wit_types::ConfigSetting],
         tools: &[wit_types::ToolDescriptor],
+        tool_choice: Option<&wit_types::ToolChoice>,
         mut on_chunk: impl FnMut(&wit_types::CompletionChunk),
     ) -> wasmtime::Result<Result<(), String>> {
         let Self::Llm { store, bindings } = self else {
@@ -452,6 +453,7 @@ impl ExtensionInstance {
             model,
             settings,
             tools,
+            tool_choice,
         )? {
             Ok(s) => s,
             Err(e) => return Ok(Err(e)),

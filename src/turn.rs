@@ -52,7 +52,7 @@ fn stream_completion(
     let mut parts: Vec<wit_types::MessagePart> = Vec::new();
     let mut usage = None;
 
-    llm.complete(messages, model_id, settings, tools, |chunk| {
+    llm.complete(messages, model_id, settings, tools, None, |chunk| {
         for dp in &chunk.delta_parts {
             match dp {
                 wit_types::MessagePart::Text(delta) => {
@@ -208,7 +208,7 @@ pub fn run(engine: &Engine, ur_root: &Path, workspace: &Path) -> Result<()> {
 
     // ── 5. Tool dispatch ─────────────────────────────────────────────
     if !tool_calls.is_empty() {
-        dispatch_tool_calls(&tool_calls, &mut generals, &mut messages)?;
+        dispatch_tool_calls(&tool_calls, engine, &manifest, &mut messages)?;
 
         // ── 6. Second LLM completion (with tool results) ────────────
         println!(
@@ -270,35 +270,64 @@ fn pending_session_appends(
     &messages[loaded_message_count..]
 }
 
-/// Dispatches tool calls to general extensions, appending results to messages.
+/// Dispatches tool calls to general extensions in parallel, appending results to messages.
+///
+/// Each tool call runs in its own scoped thread with a fresh extension
+/// instance. Results are collected and appended in the original tool
+/// call order.
 fn dispatch_tool_calls(
     tool_calls: &[&wit_types::ToolCall],
-    generals: &mut [ExtensionInstance],
+    engine: &Engine,
+    manifest: &WorkspaceManifest,
     messages: &mut Vec<wit_types::Message>,
 ) -> Result<()> {
+    if tool_calls.is_empty() {
+        return Ok(());
+    }
+
     for tc in tool_calls {
         println!("[turn] dispatching tool {:?} to extensions...", tc.name);
+    }
 
-        let mut handled = false;
-        for ext in generals.iter_mut() {
-            if let Ok(result) = ext.call_tool(&tc.name, &tc.arguments_json)? {
-                println!("[turn] tool result: {result:?}");
-                messages.push(wit_types::Message {
-                    role: "tool".into(),
-                    parts: vec![wit_types::MessagePart::ToolResult(wit_types::ToolResult {
-                        tool_call_id: tc.id.clone(),
-                        tool_name: tc.name.clone(),
-                        content: result,
-                    })],
-                });
-                handled = true;
-                break;
-            }
-        }
+    let results: Vec<Result<wit_types::Message>> = std::thread::scope(|s| {
+        let handles: Vec<_> = tool_calls
+            .iter()
+            .map(|tc| {
+                s.spawn(move || {
+                    let mut generals = load_general_extensions(engine, manifest)?;
+                    for ext in &mut generals {
+                        ext.init(&[])?
+                            .map_err(|e| anyhow::anyhow!("extension init: {e}"))?;
+                    }
 
-        if !handled {
-            bail!("no extension handled tool {:?}", tc.name);
-        }
+                    for ext in &mut generals {
+                        if let Ok(result) = ext.call_tool(&tc.name, &tc.arguments_json)? {
+                            println!("[turn] tool result for {:?}: {result:?}", tc.name);
+                            return Ok(wit_types::Message {
+                                role: "tool".into(),
+                                parts: vec![wit_types::MessagePart::ToolResult(
+                                    wit_types::ToolResult {
+                                        tool_call_id: tc.id.clone(),
+                                        tool_name: tc.name.clone(),
+                                        content: result,
+                                    },
+                                )],
+                            });
+                        }
+                    }
+                    bail!("no extension handled tool {:?}", tc.name)
+                })
+            })
+            .collect();
+
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("tool dispatch thread panicked"))
+            .collect()
+    });
+
+    for result in results {
+        messages.push(result?);
     }
     Ok(())
 }

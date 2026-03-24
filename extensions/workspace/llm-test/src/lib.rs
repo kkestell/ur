@@ -11,7 +11,7 @@ use exports::ur::extension::llm_provider::{
 };
 use ur::extension::types::{
     CompletionChunk, ConfigEntry, ConfigSetting, Message, MessagePart, ModelDescriptor,
-    SettingDescriptor, ToolCall, ToolDescriptor, Usage,
+    SettingDescriptor, ToolCall, ToolChoice, ToolDescriptor, Usage,
 };
 
 struct LlmTest;
@@ -71,8 +71,9 @@ impl LlmGuest for LlmTest {
         _model: String,
         _settings: Vec<ConfigSetting>,
         tools: Vec<ToolDescriptor>,
+        tool_choice: Option<ToolChoice>,
     ) -> Result<CompletionStream, String> {
-        let message = deterministic_response(&messages, &tools);
+        let message = deterministic_response(&messages, &tools, tool_choice.as_ref());
         let chunk = CompletionChunk {
             delta_parts: message.parts,
             finish_reason: Some("stop".into()),
@@ -121,7 +122,35 @@ fn last_user_text(messages: &[Message]) -> String {
         .unwrap_or_default()
 }
 
-fn deterministic_response(messages: &[Message], tools: &[ToolDescriptor]) -> Message {
+fn deterministic_response(
+    messages: &[Message],
+    tools: &[ToolDescriptor],
+    tool_choice: Option<&ToolChoice>,
+) -> Message {
+    // When tool_choice is specific, force a call to the named tool.
+    if let Some(ToolChoice::Specific(name)) = tool_choice {
+        return Message {
+            role: "assistant".into(),
+            parts: vec![MessagePart::ToolCall(ToolCall {
+                id: "call-forced".into(),
+                name: name.clone(),
+                arguments_json: r#"{"location":"Paris"}"#.into(),
+                provider_metadata_json: String::new(),
+            })],
+        };
+    }
+
+    // When tool_choice is none, never call tools — just echo.
+    if matches!(tool_choice, Some(ToolChoice::None)) {
+        return Message {
+            role: "assistant".into(),
+            parts: vec![MessagePart::Text(format!(
+                "Echo: {}",
+                last_user_text(messages)
+            ))],
+        };
+    }
+
     // If tools are declared and we haven't seen a tool result yet,
     // call the first tool with dummy args.
     if !tools.is_empty() && !has_tool_result(messages) {
