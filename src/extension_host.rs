@@ -512,10 +512,6 @@ impl ExtensionInstance {
     ///
     /// Returns an error if the guest call traps, or `Ok(Err(...))`
     /// if this is not a session provider.
-    #[expect(
-        dead_code,
-        reason = "Session listing remains available for upcoming CLI flows"
-    )]
     pub fn list_sessions(
         &mut self,
     ) -> wasmtime::Result<Result<Vec<wit_types::SessionInfo>, String>> {

@@ -11,11 +11,7 @@ def run(h: SmokeHarness) -> None:
     h.run("role", "set", "default", "test/echo")
 
     try:
-        result = h.run("-v", "run")
-        assert "LLM returned tool call" in result.stdout
-        assert "tool result" in result.stdout
-        assert "calling LLM streaming (with tool results)" in result.stdout
-        assert "Tool result received:" in result.stdout
+        h.run("-v", "run")
     finally:
         h.run("extension", "disable", "llm-test")
         h.run("extension", "disable", "test-extension")

@@ -1,3 +1,4 @@
+mod app;
 mod cli;
 mod config;
 mod discovery;
@@ -7,19 +8,24 @@ mod keyring;
 mod manifest;
 mod model;
 mod provider;
+mod session;
 mod slot;
 mod turn;
+mod workspace;
 
 use std::env;
+use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
 use mimalloc::MiMalloc;
 use tracing_subscriber::EnvFilter;
-use wasmtime::Engine;
 
+use app::UrApp;
 use cli::{Cli, Command, ExtConfigAction, ExtensionAction, RoleAction};
+use session::SessionEvent;
+use workspace::{SettingGetResult, SettingSetResult, UrWorkspace};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -38,89 +44,115 @@ fn main() -> Result<()> {
     }
 
     let ur_root = env::var("UR_ROOT").map_or_else(|_| dirs_home().join(".ur"), PathBuf::from);
-
-    let workspace = args
+    let workspace_dir = args
         .workspace
         .unwrap_or_else(|| env::current_dir().expect("cannot determine current directory"));
 
-    let workspace = std::fs::canonicalize(&workspace)?;
-
-    let engine = {
-        let cache = wasmtime::Cache::new(wasmtime::CacheConfig::new())?;
-        let mut config = wasmtime::Config::new();
-        config.cache(Some(cache));
-        Engine::new(&config)?
-    };
+    let app = UrApp::new(ur_root)?;
+    let mut ws = app.open_workspace(&workspace_dir)?;
 
     match args.command {
-        Command::Extension { action } => match action {
-            ExtensionAction::List => {
-                let m = manifest::scan_and_load(&engine, &ur_root, &workspace)?;
-                cli::print_list(&m);
+        Command::Extension { action } => handle_extension(&mut ws, action),
+        Command::Role { action } => handle_role(&mut ws, action),
+        Command::Run => handle_run(&mut ws),
+    }
+}
+
+fn handle_extension(ws: &mut UrWorkspace, action: ExtensionAction) -> Result<()> {
+    match action {
+        ExtensionAction::List => {
+            cli::print_list(ws.manifest());
+        }
+        ExtensionAction::Enable { id } => {
+            ws.enable_extension(&id)?;
+            println!("Enabled {id}");
+        }
+        ExtensionAction::Disable { id } => {
+            ws.disable_extension(&id)?;
+            println!("Disabled {id}");
+        }
+        ExtensionAction::Inspect { id } => {
+            let entry = ws.find_extension(&id)?;
+            cli::print_inspect(entry);
+        }
+        ExtensionAction::Config { id, action } => match action {
+            ExtConfigAction::List { pattern } => {
+                let settings = ws.list_extension_settings(&id, pattern.as_deref())?;
+                println!("{:<40}{:<10}VALUE", "KEY", "TYPE");
+                for s in &settings {
+                    println!("{:<40}{:<10}{}", s.key, s.type_name, s.value_display);
+                }
             }
-            ExtensionAction::Enable { id } => {
-                let mut m = manifest::scan_and_load(&engine, &ur_root, &workspace)?;
-                manifest::enable(&mut m, &id)?;
-                manifest::save_manifest(&ur_root, &workspace, &m)?;
-                println!("Enabled {id}");
-            }
-            ExtensionAction::Disable { id } => {
-                let mut m = manifest::scan_and_load(&engine, &ur_root, &workspace)?;
-                manifest::disable(&mut m, &id)?;
-                manifest::save_manifest(&ur_root, &workspace, &m)?;
-                println!("Disabled {id}");
-            }
-            ExtensionAction::Inspect { id } => {
-                let m = manifest::scan_and_load(&engine, &ur_root, &workspace)?;
-                let entry = manifest::find_entry(&m, &id)?;
-                cli::print_inspect(entry);
-            }
-            ExtensionAction::Config { id, action } => {
-                let m = manifest::scan_and_load(&engine, &ur_root, &workspace)?;
-                match action {
-                    ExtConfigAction::List { pattern } => {
-                        extension_settings::cmd_config_list(
-                            &engine,
-                            &ur_root,
-                            &m,
-                            &id,
-                            pattern.as_deref(),
-                        )?;
+            ExtConfigAction::Get { key } => match ws.get_extension_setting(&id, &key)? {
+                SettingGetResult::SecretSet => println!("****"),
+                SettingGetResult::SecretUnset => println!("(not set)"),
+                SettingGetResult::Value(v) => println!("{v}"),
+            },
+            ExtConfigAction::Set { key, value } => {
+                match ws.set_extension_setting(&id, &key, value.as_deref())? {
+                    SettingSetResult::SecretRequired { name } => {
+                        eprint!("{name}: ");
+                        let secret = rpassword::read_password()?;
+                        ws.store_secret(&id, &key, &secret)?;
+                        println!("{key} stored securely.");
                     }
-                    ExtConfigAction::Get { key } => {
-                        extension_settings::cmd_config_get(&engine, &ur_root, &m, &id, &key)?;
-                    }
-                    ExtConfigAction::Set { key, value } => {
-                        extension_settings::cmd_config_set(
-                            &engine,
-                            &ur_root,
-                            &m,
-                            &id,
-                            &key,
-                            value.as_deref(),
-                        )?;
+                    SettingSetResult::Stored { key: k, value: v } => {
+                        println!("{id}: {k} = {v}");
                     }
                 }
             }
         },
-        Command::Role { action } => {
-            let m = manifest::scan_and_load(&engine, &ur_root, &workspace)?;
-            let providers = model::collect_provider_models(&engine, &m)?;
-            let mut config = config::UserConfig::load(&ur_root)?;
+    }
+    Ok(())
+}
 
-            match action {
-                RoleAction::List => model::cmd_list(&config, &providers)?,
-                RoleAction::Get { role } => model::cmd_get(&config, &providers, &role)?,
-                RoleAction::Set { role, model_ref } => {
-                    model::cmd_set(&ur_root, &mut config, &providers, &role, &model_ref)?;
-                }
+fn handle_role(ws: &mut UrWorkspace, action: RoleAction) -> Result<()> {
+    match action {
+        RoleAction::List => {
+            let roles = ws.list_roles()?;
+            println!("{:<12}MODEL", "ROLE");
+            for entry in &roles {
+                println!("{:<12}{}", entry.role, entry.model_ref);
             }
         }
-        Command::Run => {
-            turn::run(&engine, &ur_root, &workspace)?;
+        RoleAction::Get { role } => {
+            let resolved = ws.resolve_role(&role)?;
+            println!(
+                "{} -> {}/{}",
+                resolved.role, resolved.provider_id, resolved.model_id
+            );
+        }
+        RoleAction::Set { role, model_ref } => {
+            let resolved = ws.set_role(&role, &model_ref)?;
+            println!(
+                "{} -> {}/{}",
+                resolved.role, resolved.provider_id, resolved.model_id
+            );
         }
     }
+    Ok(())
+}
 
+fn handle_run(ws: &mut UrWorkspace) -> Result<()> {
+    let user_message =
+        turn::resolve_run_user_message(std::env::var(turn::RUN_USER_MESSAGE_ENV_VAR).ok());
+    let mut session = ws.open_session("demo")?;
+    session.run_turn(&user_message, |event| {
+        match event {
+            SessionEvent::TextDelta(delta) => {
+                print!("{delta}");
+                let _ = std::io::stdout().flush();
+            }
+            SessionEvent::AssistantMessage { .. } => {
+                println!();
+            }
+            SessionEvent::ApprovalRequired { .. } => {
+                return Some(session::ApprovalDecision::Approve);
+            }
+            _ => {}
+        }
+        None
+    })?;
     Ok(())
 }
 
