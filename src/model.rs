@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 
-use crate::config::{self, UserConfig};
+use crate::config::UserConfig;
 use crate::extension_host::{self, wit_types};
 use crate::manifest;
 
@@ -101,47 +101,6 @@ pub fn find_descriptor<'a>(
     provider_models
         .get(provider_id)
         .and_then(|models| models.iter().find(|m| m.id == model_id))
-}
-
-// --- CLI command handlers (role subcommand) ---
-
-pub fn cmd_list(config: &UserConfig, provider_models: &ProviderModels) -> Result<()> {
-    println!("{:<12}MODEL", "ROLE");
-    if !config.roles.contains_key("default") {
-        let (p, model_id) = resolve_role(config, "default", provider_models)?;
-        println!("{:<12}{p}/{model_id}", "default");
-    }
-    for (role, model_ref) in &config.roles {
-        println!("{role:<12}{model_ref}");
-    }
-    Ok(())
-}
-
-pub fn cmd_get(config: &UserConfig, provider_models: &ProviderModels, role: &str) -> Result<()> {
-    let (provider_id, model_id) = resolve_role(config, role, provider_models)?;
-    println!("{role} -> {provider_id}/{model_id}");
-    Ok(())
-}
-
-pub fn cmd_set(
-    ur_root: &Path,
-    config: &mut UserConfig,
-    provider_models: &ProviderModels,
-    role: &str,
-    model_ref: &str,
-) -> Result<()> {
-    let (provider_id, model_id) = config::parse_model_ref(model_ref).ok_or_else(|| {
-        anyhow::anyhow!("invalid model reference '{model_ref}' (expected provider/model)")
-    })?;
-
-    find_descriptor(provider_models, provider_id, model_id)
-        .ok_or_else(|| anyhow::anyhow!("model '{model_ref}' not found in any enabled provider"))?;
-
-    config.roles.insert(role.to_owned(), model_ref.to_owned());
-    config.save(ur_root)?;
-
-    println!("{role} -> {provider_id}/{model_id}");
-    Ok(())
 }
 
 #[cfg(test)]
