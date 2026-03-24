@@ -21,10 +21,7 @@ def run(h: SmokeHarness) -> None:
         h.run("role", "set", "default", "openrouter/qwen/qwen3.5-9b")
         h.run("role", "get", "default")
         h.run("extension", "config", "llm-openrouter", "list")
-        h.run_with_retries(
-            "run",
-            env={"UR_RUN_USER_MESSAGE": PARIS_WEATHER_PROMPT},
-        )
+        h.run_with_retries("run", PARIS_WEATHER_PROMPT)
     finally:
         h.run("extension", "enable", "llm-google")
         h.run("extension", "disable", "test-extension")

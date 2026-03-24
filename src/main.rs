@@ -10,7 +10,6 @@ mod model;
 mod provider;
 mod session;
 mod slot;
-mod turn;
 mod workspace;
 
 use std::env;
@@ -54,7 +53,7 @@ fn main() -> Result<()> {
     match args.command {
         Command::Extension { action } => handle_extension(&mut ws, action),
         Command::Role { action } => handle_role(&mut ws, action),
-        Command::Run => handle_run(&mut ws),
+        Command::Run { message } => handle_run(&mut ws, &message),
     }
 }
 
@@ -133,11 +132,9 @@ fn handle_role(ws: &mut UrWorkspace, action: RoleAction) -> Result<()> {
     Ok(())
 }
 
-fn handle_run(ws: &mut UrWorkspace) -> Result<()> {
-    let user_message =
-        turn::resolve_run_user_message(std::env::var(turn::RUN_USER_MESSAGE_ENV_VAR).ok());
+fn handle_run(ws: &mut UrWorkspace, message: &str) -> Result<()> {
     let mut session = ws.open_session("demo")?;
-    session.run_turn(&user_message, |event| {
+    session.run_turn(message, |event| {
         match event {
             SessionEvent::TextDelta(delta) => {
                 print!("{delta}");

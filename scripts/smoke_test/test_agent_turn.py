@@ -11,7 +11,7 @@ def run(h: SmokeHarness) -> None:
     h.run("role", "set", "default", "test/echo")
 
     try:
-        h.run("-v", "run")
+        h.run("-v", "run", "Hello, please greet the world")
     finally:
         h.run("extension", "disable", "llm-test")
         h.run("extension", "disable", "test-extension")

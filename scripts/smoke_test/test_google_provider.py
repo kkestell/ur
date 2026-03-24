@@ -34,10 +34,7 @@ def run_case(
         "extension", "config", "llm-google", "set",
         f"{model_id}.max_output_tokens", max_output_tokens,
     )
-    h.run_with_retries(
-        "run",
-        env={"UR_RUN_USER_MESSAGE": PARIS_WEATHER_PROMPT},
-    )
+    h.run_with_retries("run", PARIS_WEATHER_PROMPT)
 
 
 def run(h: SmokeHarness) -> None:

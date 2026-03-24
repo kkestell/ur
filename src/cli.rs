@@ -33,8 +33,11 @@ pub enum Command {
         #[command(subcommand)]
         action: RoleAction,
     },
-    /// Run a single agent turn (tracer bullet).
-    Run,
+    /// Run a single agent turn.
+    Run {
+        /// The user message to send.
+        message: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
