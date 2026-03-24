@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 use mimalloc::MiMalloc;
+use tracing_subscriber::EnvFilter;
 use wasmtime::Engine;
 
 use cli::{Cli, Command, ExtConfigAction, ExtensionAction, RoleAction};
@@ -25,6 +26,16 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() -> Result<()> {
     let args = Cli::parse();
+
+    if args.verbose {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("ur=debug")),
+            )
+            .with_target(true)
+            .with_writer(std::io::stderr)
+            .init();
+    }
 
     let ur_root = env::var("UR_ROOT").map_or_else(|_| dirs_home().join(".ur"), PathBuf::from);
 

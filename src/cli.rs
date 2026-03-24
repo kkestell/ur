@@ -13,6 +13,10 @@ pub struct Cli {
     #[arg(short, long)]
     pub workspace: Option<PathBuf>,
 
+    /// Enable verbose logging output.
+    #[arg(short, long, global = true)]
+    pub verbose: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }

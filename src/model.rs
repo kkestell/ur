@@ -49,7 +49,7 @@ pub fn collect_provider_models(
             .init(&init_config)
             .map_err(|e| anyhow::anyhow!("init {}: {e}", entry.id))?;
         if let Err(e) = init_result {
-            eprintln!("warning: {}: init failed: {e}", entry.id);
+            tracing::warn!(extension = %entry.id, error = %e, "init failed");
             continue;
         }
         let provider_id = instance
@@ -59,7 +59,7 @@ pub fn collect_provider_models(
             Ok(models) => {
                 result.insert(provider_id, models);
             }
-            Err(e) => eprintln!("warning: {}: list-models failed: {e}", entry.id),
+            Err(e) => tracing::warn!(extension = %entry.id, error = %e, "list-models failed"),
         }
     }
     Ok(result)

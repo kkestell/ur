@@ -104,7 +104,7 @@ impl worlds::general::ur::extension::types::Host for HostState {}
 /// providers will be wired up via role resolution.
 impl wit_host::Host for HostState {
     fn log(&mut self, msg: String) {
-        println!("[host log] {msg}");
+        tracing::debug!(%msg, "extension log");
     }
 
     fn complete(
