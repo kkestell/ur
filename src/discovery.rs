@@ -47,8 +47,12 @@ pub struct DiscoveredExtension {
 ///
 /// Returns an error if the file cannot be read.
 pub fn compute_checksum(path: &Path) -> Result<String> {
-    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-    let hash = Sha256::digest(&bytes);
+    let file = std::fs::File::open(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut reader, &mut hasher)
+        .with_context(|| format!("hashing {}", path.display()))?;
+    let hash = hasher.finalize();
     Ok(format!("sha256:{hash:x}"))
 }
 

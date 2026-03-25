@@ -1,5 +1,3 @@
-// Rust guideline compliant 2026-02-21
-
 //! Per-run file logging bootstrap for `ur` and `ur-tui`.
 //!
 //! Every process run gets its own log file under `$UR_ROOT/logs/`.

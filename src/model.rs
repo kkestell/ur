@@ -28,7 +28,7 @@ pub fn collect_provider_models(
 ) -> Result<ProviderModels> {
     let mut result = BTreeMap::new();
     for entry in &manifest.extensions {
-        if !entry.enabled || entry.slot.as_deref() != Some("llm-provider") {
+        if !entry.enabled || entry.slot.as_deref() != Some(crate::slot::LLM_PROVIDER) {
             continue;
         }
         let path = Path::new(&entry.wasm_path);

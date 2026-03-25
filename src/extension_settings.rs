@@ -21,7 +21,7 @@ pub(crate) fn load_extension(
     let mut instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
 
     // For LLM providers, resolve API key via provider ID.
-    if entry.slot.as_deref() == Some("llm-provider")
+    if entry.slot.as_deref() == Some(crate::slot::LLM_PROVIDER)
         && instance.init(&[])?.is_ok()
         && let Ok(Ok(provider_id)) = instance.provider_id()
     {

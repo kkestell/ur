@@ -1,5 +1,3 @@
-// Rust guideline compliant 2026-02-21
-
 //! Slash command parsing for the TUI.
 //!
 //! Recognises `/quit` and `/extensions` from raw input strings.

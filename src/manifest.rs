@@ -60,20 +60,23 @@ pub fn escape_workspace_path(path: &Path) -> String {
 /// Returns an error if the file exists but cannot be parsed.
 pub fn load_manifest(ur_root: &Path, workspace: &Path) -> Result<Option<WorkspaceManifest>> {
     let path = manifest_dir(ur_root, workspace).join("manifest.json");
-    if !path.exists() {
-        debug!(path = %path.display(), "no existing manifest");
-        return Ok(None);
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => {
+            let manifest: WorkspaceManifest = serde_json::from_str(&contents)
+                .with_context(|| format!("parsing {}", path.display()))?;
+            debug!(
+                path = %path.display(),
+                extensions = manifest.extensions.len(),
+                "loaded existing manifest"
+            );
+            Ok(Some(manifest))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            debug!(path = %path.display(), "no existing manifest");
+            Ok(None)
+        }
+        Err(e) => Err(anyhow::Error::from(e).context(format!("reading {}", path.display()))),
     }
-    let contents =
-        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let manifest: WorkspaceManifest =
-        serde_json::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?;
-    debug!(
-        path = %path.display(),
-        extensions = manifest.extensions.len(),
-        "loaded existing manifest"
-    );
-    Ok(Some(manifest))
 }
 
 /// Writes a manifest to disk, creating parent directories as needed.

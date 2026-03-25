@@ -1,5 +1,3 @@
-// Rust guideline compliant 2026-02-21
-
 //! TUI application state and event handling.
 //!
 //! `App` owns all mutable UI state: the input buffer, the message log,
@@ -12,8 +10,6 @@ use ur::manifest::ManifestEntry;
 use ur::workspace::UrWorkspace;
 
 use crate::commands;
-
-// --- Types ---
 
 /// Current interaction mode of the TUI.
 #[derive(Debug, Clone)]
@@ -76,8 +72,6 @@ impl App {
         }
     }
 
-    // --- Private helpers ---
-
     fn handle_key_normal(&mut self, key: KeyEvent) {
         match key.code {
             // Ctrl+C exits from any state.
@@ -91,10 +85,12 @@ impl App {
             }
             KeyCode::Backspace => {
                 if self.cursor_pos > 0 {
-                    // Remove the char just before the cursor.
-                    let byte_pos = self.cursor_pos - 1;
-                    self.input.remove(byte_pos);
-                    self.cursor_pos = byte_pos;
+                    let prev = self.input[..self.cursor_pos]
+                        .char_indices()
+                        .next_back()
+                        .map_or(0, |(i, _)| i);
+                    self.input.remove(prev);
+                    self.cursor_pos = prev;
                 }
             }
             KeyCode::Delete => {
@@ -104,12 +100,18 @@ impl App {
             }
             KeyCode::Left => {
                 if self.cursor_pos > 0 {
-                    self.cursor_pos -= 1;
+                    self.cursor_pos = self.input[..self.cursor_pos]
+                        .char_indices()
+                        .next_back()
+                        .map_or(0, |(i, _)| i);
                 }
             }
             KeyCode::Right => {
                 if self.cursor_pos < self.input.len() {
-                    self.cursor_pos += 1;
+                    self.cursor_pos = self.input[self.cursor_pos..]
+                        .char_indices()
+                        .nth(1)
+                        .map_or(self.input.len(), |(i, _)| self.cursor_pos + i);
                 }
             }
             KeyCode::Home => {
@@ -169,17 +171,24 @@ impl App {
 
 /// Formats the extension list as a multi-line string for the modal.
 fn format_extensions(entries: &[ManifestEntry]) -> String {
+    use std::fmt::Write;
+
     if entries.is_empty() {
         return "(no extensions)".to_owned();
     }
 
-    entries
-        .iter()
-        .map(|e| {
-            let status = if e.enabled { "enabled" } else { "disabled" };
-            let slot = e.slot.as_deref().unwrap_or("(none)");
-            format!("[{status}] {} — {} (slot: {slot})", e.id, e.name)
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut out = String::new();
+    for (i, e) in entries.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let status = if e.enabled { "enabled" } else { "disabled" };
+        let slot = e.slot.as_deref().unwrap_or("(none)");
+        let _ = write!(
+            out,
+            "[{status}] {} \u{2014} {} (slot: {slot})",
+            e.id, e.name
+        );
+    }
+    out
 }

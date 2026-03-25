@@ -15,6 +15,7 @@ use crate::extension_host::{ExtensionInstance, LoadOptions, wit_types};
 use crate::manifest::{ManifestEntry, WorkspaceManifest};
 use crate::model;
 use crate::provider;
+use crate::slot;
 
 /// A structured event emitted during turn execution.
 #[derive(Debug, Clone)]
@@ -376,12 +377,11 @@ impl UrSession {
 
         let init_config = provider::init_config(&provider_id);
 
-        // Probe for settings descriptors.
-        let (mut settings_probe, extension_id) =
+        // Load LLM once — use it for settings discovery and the actual turn.
+        let (mut llm, extension_id) =
             load_llm_provider(&self.engine, &self.manifest, &provider_id, &init_config)?;
-        let _ = settings_probe.list_models();
-        let descriptors = settings_probe.list_settings()?;
-        drop(settings_probe);
+        let _ = llm.list_models();
+        let descriptors = llm.list_settings()?;
 
         let config_settings = self
             .config
@@ -398,8 +398,6 @@ impl UrSession {
         if !tools.is_empty() {
             info!(count = tools.len(), "collected tools");
         }
-
-        let (llm, _) = load_llm_provider(&self.engine, &self.manifest, &provider_id, &init_config)?;
 
         Ok((
             llm,
@@ -436,7 +434,7 @@ impl UrSession {
         // Compact the full derived message history.
         let messages = self.messages_for_llm();
         info!(count = messages.len(), "compacting messages");
-        let mut compaction = load_slot(&self.engine, &self.manifest, "compaction-provider")?;
+        let mut compaction = load_slot(&self.engine, &self.manifest, slot::COMPACTION_PROVIDER)?;
         compaction
             .init(&[])?
             .map_err(|e| anyhow::anyhow!("compaction init: {e}"))?;
@@ -473,8 +471,7 @@ fn extract_text(msg: &wit_types::Message) -> String {
             wit_types::MessagePart::Text(s) => Some(s.as_str()),
             _ => None,
         })
-        .collect::<Vec<_>>()
-        .join("")
+        .collect()
 }
 
 /// Extracts tool calls from a message's parts.
@@ -715,7 +712,7 @@ fn load_session_slot(
     manifest: &WorkspaceManifest,
     sessions_dir: &Path,
 ) -> Result<ExtensionInstance> {
-    let entry = first_enabled(manifest, "session-provider")?;
+    let entry = first_enabled(manifest, slot::SESSION_PROVIDER)?;
     let mut opts = LoadOptions::for_entry(entry);
     opts.data_dir = Some(sessions_dir);
     let instance = ExtensionInstance::load(engine, Path::new(&entry.wasm_path), &opts)?;
@@ -730,7 +727,7 @@ fn load_llm_provider(
     init_config: &[(String, String)],
 ) -> Result<(ExtensionInstance, String)> {
     for entry in &manifest.extensions {
-        if !entry.enabled || entry.slot.as_deref() != Some("llm-provider") {
+        if !entry.enabled || entry.slot.as_deref() != Some(slot::LLM_PROVIDER) {
             continue;
         }
         let opts = LoadOptions::for_entry(entry);

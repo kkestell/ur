@@ -1,5 +1,3 @@
-// Rust guideline compliant 2026-02-21
-
 //! Ratatui rendering for the TUI.
 //!
 //! `render` is the single entry point: it draws the message log,
@@ -27,15 +25,14 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 }
 
-// --- Private helpers ---
-
 fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
-    let text = app
-        .messages
-        .iter()
-        .map(|m| m.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut text = String::new();
+    for (i, m) in app.messages.iter().enumerate() {
+        if i > 0 {
+            text.push('\n');
+        }
+        text.push_str(&m.text);
+    }
 
     let paragraph = Paragraph::new(text)
         .block(Block::default().borders(Borders::NONE))

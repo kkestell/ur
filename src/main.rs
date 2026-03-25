@@ -1,8 +1,5 @@
-// Rust guideline compliant 2026-02-21
-
-use std::env;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::Result;
 use clap::Parser;
@@ -20,7 +17,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 fn main() -> Result<()> {
     let args = Cli::parse();
 
-    let ur_root = env::var("UR_ROOT").map_or_else(|_| dirs_home().join(".ur"), PathBuf::from);
+    let ur_root = ur::resolve_ur_root();
 
     let log_handle = logging::init("ur", &ur_root, args.verbose, args.verbose);
     tracing::info!(
@@ -41,7 +38,7 @@ fn run(args: &Cli, ur_root: &Path) -> Result<()> {
     let workspace_dir = args
         .workspace
         .clone()
-        .unwrap_or_else(|| env::current_dir().expect("cannot determine current directory"));
+        .unwrap_or_else(|| std::env::current_dir().expect("cannot determine current directory"));
 
     let app = UrApp::new(ur_root.to_owned())?;
     let mut ws = app.open_workspace(&workspace_dir)?;
@@ -147,9 +144,4 @@ fn handle_run(ws: &mut UrWorkspace, message: &str) -> Result<()> {
         None
     })?;
     Ok(())
-}
-
-/// Returns the user's home directory.
-fn dirs_home() -> PathBuf {
-    env::var("HOME").map(PathBuf::from).expect("HOME not set")
 }

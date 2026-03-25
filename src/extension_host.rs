@@ -9,7 +9,7 @@ use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::WasiHttpCtx;
 use wasmtime_wasi_http::p2::{WasiHttpCtxView, WasiHttpView};
 
-use crate::slot;
+use crate::slot::{self, COMPACTION_PROVIDER, LLM_PROVIDER, SESSION_PROVIDER};
 
 /// Bindgen-generated bindings for all four extension worlds.
 ///
@@ -312,12 +312,12 @@ pub fn validate_capabilities(
     ext_id: &str,
 ) {
     let ct = component.component_type();
-    let has_fs = ct
-        .imports(engine)
-        .any(|(name, _)| name.contains("wasi:filesystem"));
-    let has_http = ct
-        .imports(engine)
-        .any(|(name, _)| name.contains("wasi:http"));
+    let mut has_fs = false;
+    let mut has_http = false;
+    for (name, _) in ct.imports(engine) {
+        has_fs = has_fs || name.contains("wasi:filesystem");
+        has_http = has_http || name.contains("wasi:http");
+    }
 
     let declares_fs = capabilities.contains(wit_types::ExtensionCapabilities::FILESYSTEM_READ)
         || capabilities.contains(wit_types::ExtensionCapabilities::FILESYSTEM_WRITE);
@@ -331,6 +331,20 @@ pub fn validate_capabilities(
         !has_http || capabilities.contains(wit_types::ExtensionCapabilities::NETWORK),
         "extension '{ext_id}' imports wasi:http but did not declare network"
     );
+}
+
+/// Dispatches a call through the shared `extension` interface across all
+/// world variants. Each variant has a different concrete bindings type,
+/// but they all expose `.ur_extension_extension()`.
+macro_rules! dispatch_extension {
+    ($self:expr, $method:ident $(, $arg:expr)*) => {
+        match $self {
+            Self::Llm { store, bindings } => bindings.ur_extension_extension().$method(store $(, $arg)*),
+            Self::Session { store, bindings } => bindings.ur_extension_extension().$method(store $(, $arg)*),
+            Self::Compaction { store, bindings } => bindings.ur_extension_extension().$method(store $(, $arg)*),
+            Self::General { store, bindings } => bindings.ur_extension_extension().$method(store $(, $arg)*),
+        }
+    };
 }
 
 impl ExtensionInstance {
@@ -382,20 +396,20 @@ impl ExtensionInstance {
         let host_state = build_host_state(opts.capabilities.as_ref(), opts.data_dir);
 
         let instance = match detected {
-            Some("llm-provider") => {
+            Some(LLM_PROVIDER) => {
                 let mut store = Store::new(engine, host_state);
                 let bindings =
                     worlds::llm::LlmExtension::instantiate(&mut store, &component, &linker)?;
                 Self::Llm { store, bindings }
             }
-            Some("session-provider") => {
+            Some(SESSION_PROVIDER) => {
                 let mut store = Store::new(engine, host_state);
                 let bindings = worlds::session::SessionExtension::instantiate(
                     &mut store, &component, &linker,
                 )?;
                 Self::Session { store, bindings }
             }
-            Some("compaction-provider") => {
+            Some(COMPACTION_PROVIDER) => {
                 let mut store = Store::new(engine, host_state);
                 let bindings = worlds::compaction::CompactionExtension::instantiate(
                     &mut store, &component, &linker,
@@ -418,9 +432,9 @@ impl ExtensionInstance {
     #[must_use]
     pub fn slot_name(&self) -> Option<&'static str> {
         match self {
-            Self::Llm { .. } => Some("llm-provider"),
-            Self::Session { .. } => Some("session-provider"),
-            Self::Compaction { .. } => Some("compaction-provider"),
+            Self::Llm { .. } => Some(LLM_PROVIDER),
+            Self::Session { .. } => Some(SESSION_PROVIDER),
+            Self::Compaction { .. } => Some(COMPACTION_PROVIDER),
             Self::General { .. } => None,
         }
     }
@@ -431,14 +445,7 @@ impl ExtensionInstance {
     ///
     /// Returns an error if the guest call traps.
     pub fn id(&mut self) -> wasmtime::Result<String> {
-        match self {
-            Self::Llm { store, bindings } => bindings.ur_extension_extension().call_id(store),
-            Self::Session { store, bindings } => bindings.ur_extension_extension().call_id(store),
-            Self::Compaction { store, bindings } => {
-                bindings.ur_extension_extension().call_id(store)
-            }
-            Self::General { store, bindings } => bindings.ur_extension_extension().call_id(store),
-        }
+        dispatch_extension!(self, call_id)
     }
 
     /// Returns the extension's declared WASI capabilities.
@@ -447,20 +454,7 @@ impl ExtensionInstance {
     ///
     /// Returns an error if the guest call traps.
     pub fn declare_capabilities(&mut self) -> wasmtime::Result<wit_types::ExtensionCapabilities> {
-        match self {
-            Self::Llm { store, bindings } => bindings
-                .ur_extension_extension()
-                .call_declare_capabilities(store),
-            Self::Session { store, bindings } => bindings
-                .ur_extension_extension()
-                .call_declare_capabilities(store),
-            Self::Compaction { store, bindings } => bindings
-                .ur_extension_extension()
-                .call_declare_capabilities(store),
-            Self::General { store, bindings } => bindings
-                .ur_extension_extension()
-                .call_declare_capabilities(store),
-        }
+        dispatch_extension!(self, call_declare_capabilities)
     }
 
     /// Returns the extension's self-declared human-readable name.
@@ -469,14 +463,7 @@ impl ExtensionInstance {
     ///
     /// Returns an error if the guest call traps.
     pub fn name(&mut self) -> wasmtime::Result<String> {
-        match self {
-            Self::Llm { store, bindings } => bindings.ur_extension_extension().call_name(store),
-            Self::Session { store, bindings } => bindings.ur_extension_extension().call_name(store),
-            Self::Compaction { store, bindings } => {
-                bindings.ur_extension_extension().call_name(store)
-            }
-            Self::General { store, bindings } => bindings.ur_extension_extension().call_name(store),
-        }
+        dispatch_extension!(self, call_name)
     }
 
     /// Calls the extension's `init` function with configuration.
@@ -493,20 +480,7 @@ impl ExtensionInstance {
             })
             .collect();
 
-        match self {
-            Self::Llm { store, bindings } => {
-                bindings.ur_extension_extension().call_init(store, &entries)
-            }
-            Self::Session { store, bindings } => {
-                bindings.ur_extension_extension().call_init(store, &entries)
-            }
-            Self::Compaction { store, bindings } => {
-                bindings.ur_extension_extension().call_init(store, &entries)
-            }
-            Self::General { store, bindings } => {
-                bindings.ur_extension_extension().call_init(store, &entries)
-            }
-        }
+        dispatch_extension!(self, call_init, &entries)
     }
 
     /// Lists the tools this extension can handle.
@@ -515,20 +489,7 @@ impl ExtensionInstance {
     ///
     /// Returns an error if the guest call traps.
     pub fn list_tools(&mut self) -> wasmtime::Result<Vec<wit_types::ToolDescriptor>> {
-        match self {
-            Self::Llm { store, bindings } => {
-                bindings.ur_extension_extension().call_list_tools(store)
-            }
-            Self::Session { store, bindings } => {
-                bindings.ur_extension_extension().call_list_tools(store)
-            }
-            Self::Compaction { store, bindings } => {
-                bindings.ur_extension_extension().call_list_tools(store)
-            }
-            Self::General { store, bindings } => {
-                bindings.ur_extension_extension().call_list_tools(store)
-            }
-        }
+        dispatch_extension!(self, call_list_tools)
     }
 
     /// Lists the configurable settings declared by this extension.
@@ -537,20 +498,7 @@ impl ExtensionInstance {
     ///
     /// Returns an error if the guest call traps.
     pub fn list_settings(&mut self) -> wasmtime::Result<Vec<wit_types::SettingDescriptor>> {
-        match self {
-            Self::Llm { store, bindings } => {
-                bindings.ur_extension_extension().call_list_settings(store)
-            }
-            Self::Session { store, bindings } => {
-                bindings.ur_extension_extension().call_list_settings(store)
-            }
-            Self::Compaction { store, bindings } => {
-                bindings.ur_extension_extension().call_list_settings(store)
-            }
-            Self::General { store, bindings } => {
-                bindings.ur_extension_extension().call_list_settings(store)
-            }
-        }
+        dispatch_extension!(self, call_list_settings)
     }
 
     /// Calls a named tool on the extension.
@@ -563,20 +511,7 @@ impl ExtensionInstance {
         name: &str,
         args: &str,
     ) -> wasmtime::Result<Result<String, String>> {
-        match self {
-            Self::Llm { store, bindings } => bindings
-                .ur_extension_extension()
-                .call_call_tool(store, name, args),
-            Self::Session { store, bindings } => bindings
-                .ur_extension_extension()
-                .call_call_tool(store, name, args),
-            Self::Compaction { store, bindings } => bindings
-                .ur_extension_extension()
-                .call_call_tool(store, name, args),
-            Self::General { store, bindings } => bindings
-                .ur_extension_extension()
-                .call_call_tool(store, name, args),
-        }
+        dispatch_extension!(self, call_call_tool, name, args)
     }
 
     /// Returns the provider ID declared by an LLM provider extension.

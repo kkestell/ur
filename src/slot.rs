@@ -19,20 +19,27 @@ pub struct SlotDefinition {
     pub required: bool,
 }
 
+/// Slot name for session persistence providers.
+pub const SESSION_PROVIDER: &str = "session-provider";
+/// Slot name for compaction providers.
+pub const COMPACTION_PROVIDER: &str = "compaction-provider";
+/// Slot name for LLM providers.
+pub const LLM_PROVIDER: &str = "llm-provider";
+
 /// All slots recognized by the host.
 pub static SLOTS: &[SlotDefinition] = &[
     SlotDefinition {
-        name: "session-provider",
+        name: SESSION_PROVIDER,
         cardinality: Cardinality::ExactlyOne,
         required: true,
     },
     SlotDefinition {
-        name: "compaction-provider",
+        name: COMPACTION_PROVIDER,
         cardinality: Cardinality::ExactlyOne,
         required: true,
     },
     SlotDefinition {
-        name: "llm-provider",
+        name: LLM_PROVIDER,
         cardinality: Cardinality::AtLeastOne,
         required: true,
     },
@@ -50,11 +57,11 @@ pub fn find_slot(name: &str) -> Option<&'static SlotDefinition> {
 /// We check for the slot-specific interface export to determine which slot
 /// a component fills. General extensions export only `extension`.
 const SLOT_EXPORTS: &[(&str, &str)] = &[
-    ("ur:extension/llm-provider@0.4.0", "llm-provider"),
-    ("ur:extension/session-provider@0.4.0", "session-provider"),
+    ("ur:extension/llm-provider@0.4.0", LLM_PROVIDER),
+    ("ur:extension/session-provider@0.4.0", SESSION_PROVIDER),
     (
         "ur:extension/compaction-provider@0.4.0",
-        "compaction-provider",
+        COMPACTION_PROVIDER,
     ),
 ];
 

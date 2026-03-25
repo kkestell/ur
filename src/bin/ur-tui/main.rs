@@ -1,5 +1,3 @@
-// Rust guideline compliant 2026-02-21
-
 //! `ur-tui` — interactive terminal UI for the `ur` workspace assistant.
 //!
 //! First-spike scope: input bar, `/quit`, `/extensions` modal.
@@ -9,9 +7,7 @@ mod app;
 mod commands;
 mod ui;
 
-use std::env;
 use std::io::{self, Stdout};
-use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -44,7 +40,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 fn main() -> Result<()> {
     let args = Cli::parse();
 
-    let ur_root = env::var("UR_ROOT").map_or_else(|_| dirs_home().join(".ur"), PathBuf::from);
+    let ur_root = ur::resolve_ur_root();
 
     // File sink only — no stderr mirror because the TUI owns the terminal.
     let log_handle = logging::init("ur-tui", &ur_root, args.verbose, false);
@@ -54,7 +50,7 @@ fn main() -> Result<()> {
         "ur-tui starting"
     );
 
-    let workspace_dir = env::current_dir().expect("cannot determine current directory");
+    let workspace_dir = std::env::current_dir().expect("cannot determine current directory");
 
     let ur_app = UrApp::new(ur_root)?;
     let workspace = ur_app.open_workspace(&workspace_dir)?;
@@ -119,9 +115,4 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     Ok(())
-}
-
-/// Returns the user's home directory.
-fn dirs_home() -> PathBuf {
-    env::var("HOME").map(PathBuf::from).expect("HOME not set")
 }

@@ -43,19 +43,23 @@ impl UserConfig {
     /// Returns an error if the file exists but cannot be read or parsed.
     pub fn load(ur_root: &Path) -> Result<Self> {
         let path = ur_root.join("config.toml");
-        if !path.exists() {
-            debug!(path = %path.display(), "no config file, using defaults");
-            return Ok(Self::default());
+        match std::fs::read_to_string(&path) {
+            Ok(contents) => {
+                let config: Self = toml::from_str(&contents)?;
+                info!(
+                    path = %path.display(),
+                    roles = config.roles.len(),
+                    extensions = config.extensions.len(),
+                    "config loaded"
+                );
+                Ok(config)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                debug!(path = %path.display(), "no config file, using defaults");
+                Ok(Self::default())
+            }
+            Err(e) => Err(e.into()),
         }
-        let contents = std::fs::read_to_string(&path)?;
-        let config: Self = toml::from_str(&contents)?;
-        info!(
-            path = %path.display(),
-            roles = config.roles.len(),
-            extensions = config.extensions.len(),
-            "config loaded"
-        );
-        Ok(config)
     }
 
     /// Saves config to `{ur_root}/config.toml`.
