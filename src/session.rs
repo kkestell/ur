@@ -10,9 +10,9 @@ use anyhow::{Result, bail};
 use tracing::{debug, info};
 
 use crate::config::UserConfig;
-use crate::manifest::WorkspaceManifest;
+use crate::hooks::{self, HookPoint, HookResult};
+use crate::lua_host::LuaExtension;
 use crate::model;
-use crate::provider;
 use crate::providers::compaction::StubCompactionProvider;
 use crate::providers::session_jsonl::JsonlSessionProvider;
 use crate::providers::{CompactionProvider, LlmProvider, SessionProvider};
@@ -109,6 +109,8 @@ pub struct UrSession {
         ToolDescriptor,
         Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
     )>,
+    /// Lua extensions for hook dispatch.
+    extensions: Vec<Arc<LuaExtension>>,
 }
 
 impl UrSession {
@@ -123,6 +125,7 @@ impl UrSession {
             ToolDescriptor,
             Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
         )>,
+        extensions: Vec<Arc<LuaExtension>>,
     ) -> Result<Self> {
         let stored_events = session_provider.load_session(session_id)?;
         let events: Vec<PersistedEvent> = stored_events
@@ -152,6 +155,7 @@ impl UrSession {
             persisted_event_count,
             turn_count: 0,
             tool_handlers,
+            extensions,
         })
     }
 
@@ -209,6 +213,20 @@ impl UrSession {
             self.config
                 .settings_for(llm.provider_id(), &model_id, &descriptors)?;
 
+        // before_completion hook
+        let hook_ctx = serde_json::json!({
+            "model": model_id,
+            "provider": provider_id,
+        });
+        if let HookResult::Rejected(reason) =
+            hooks::run_hook(&self.extensions, HookPoint::BeforeCompletion, hook_ctx)?
+        {
+            on_event(SessionEvent::TurnError(format!(
+                "completion rejected: {reason}"
+            )));
+            return Ok(());
+        }
+
         // First LLM completion.
         let messages = self.messages_for_llm();
         info!(messages = messages.len(), "calling LLM streaming");
@@ -220,6 +238,13 @@ impl UrSession {
             &tools,
             &mut on_event,
         )?;
+
+        // after_completion hook
+        let hook_ctx = serde_json::json!({
+            "model": model_id,
+            "provider": provider_id,
+        });
+        let _ = hooks::run_hook(&self.extensions, HookPoint::AfterCompletion, hook_ctx);
 
         let tool_calls = extract_tool_calls(&completion.message);
         if tool_calls.is_empty() {
@@ -341,6 +366,34 @@ impl UrSession {
         for tc in tool_calls {
             info!(tool = %tc.name, "dispatching tool");
 
+            // before_tool hook
+            let hook_ctx = serde_json::json!({
+                "tool_name": tc.name,
+                "arguments": tc.arguments_json,
+                "call_id": tc.id,
+            });
+            if let HookResult::Rejected(reason) =
+                hooks::run_hook(&self.extensions, HookPoint::BeforeTool, hook_ctx)?
+            {
+                let result_content = format!("Error: tool rejected by extension: {reason}");
+                on_event(SessionEvent::ToolResult {
+                    tool_call_id: tc.id.clone(),
+                    tool_name: tc.name.clone(),
+                    content: result_content.clone(),
+                });
+                let msg = Message {
+                    role: "tool".into(),
+                    parts: vec![MessagePart::ToolResult(ToolResult {
+                        tool_call_id: tc.id.clone(),
+                        tool_name: tc.name.clone(),
+                        content: result_content,
+                    })],
+                };
+                self.events
+                    .push(PersistedEvent::ToolResult { message: msg });
+                continue;
+            }
+
             let handler = self
                 .tool_handlers
                 .iter()
@@ -355,6 +408,14 @@ impl UrSession {
             } else {
                 format!("Error: no handler for tool {:?}", tc.name)
             };
+
+            // after_tool hook
+            let hook_ctx = serde_json::json!({
+                "tool_name": tc.name,
+                "call_id": tc.id,
+                "result": result_content,
+            });
+            let _ = hooks::run_hook(&self.extensions, HookPoint::AfterTool, hook_ctx);
 
             debug!(tool = %tc.name, %result_content, "tool result");
 

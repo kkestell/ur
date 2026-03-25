@@ -231,6 +231,7 @@ impl UrWorkspace {
             self.config.clone(),
             session_id,
             tool_handlers,
+            self.lua_extensions.clone(),
         )
     }
 

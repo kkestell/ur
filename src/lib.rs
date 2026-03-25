@@ -11,6 +11,7 @@ pub mod cli;
 pub mod config;
 pub mod discovery;
 pub mod extension_settings;
+pub mod hooks;
 pub mod host_api;
 pub mod keyring;
 pub mod logging;
