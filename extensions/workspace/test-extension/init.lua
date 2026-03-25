@@ -28,7 +28,13 @@ ur.tool("echo", {
 
 ur.hook("before_completion", function(ctx)
     ur.log("hook: before_completion, model=" .. tostring(ctx.model))
-    -- Pass through without mutation (could modify model here).
+    -- Demonstrate mutation: prepend a marker to the model ID if it doesn't already have one
+    local model = ctx.model or ""
+    if not string.find(model, "test-extension-marked") then
+        local modified_model = "test-extension-marked:" .. model
+        ur.log("hook: before_completion modifying model to " .. modified_model)
+        return { action = "modify", model = modified_model }
+    end
     return { action = "pass" }
 end)
 
@@ -45,8 +51,11 @@ end)
 
 ur.hook("after_tool", function(ctx)
     ur.log("hook: after_tool for " .. tostring(ctx.tool_name))
-    -- Could modify ctx.result to alter tool output.
-    return { action = "pass" }
+    -- Demonstrate mutation: append a suffix to the tool result
+    local result = ctx.result or ""
+    local modified_result = result .. " [modified by test-extension hook]"
+    ur.log("hook: after_tool modifying result to: " .. modified_result)
+    return { action = "modify", result = modified_result }
 end)
 
 ur.hook("before_session_load", function(ctx)
@@ -55,22 +64,30 @@ ur.hook("before_session_load", function(ctx)
 end)
 
 ur.hook("after_session_load", function(ctx)
-    ur.log("hook: after_session_load, events=" .. tostring(ctx.event_count))
+    ur.log("hook: after_session_load, messages=" .. tostring(#(ctx.messages or {})))
+    -- Could modify messages here; currently just observing
     return { action = "pass" }
 end)
 
 ur.hook("before_session_append", function(ctx)
-    ur.log("hook: before_session_append")
+    local event_type = "unknown"
+    if ctx.event and ctx.event.type then
+        event_type = ctx.event.type
+    end
+    ur.log("hook: before_session_append, event_type=" .. event_type)
+    -- Could modify the event here; currently just observing
     return { action = "pass" }
 end)
 
 ur.hook("before_compaction", function(ctx)
-    ur.log("hook: before_compaction, messages=" .. tostring(ctx.message_count))
+    ur.log("hook: before_compaction, messages=" .. tostring(#(ctx.messages or {})))
+    -- Could modify messages here; currently just observing
     return { action = "pass" }
 end)
 
 ur.hook("after_compaction", function(ctx)
-    ur.log("hook: after_compaction")
+    ur.log("hook: after_compaction, original=" .. tostring(#(ctx.original or {})) .. ", compacted=" .. tostring(#(ctx.compacted or {})))
+    -- Could modify compacted messages here; currently just observing
     return { action = "pass" }
 end)
 
