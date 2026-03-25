@@ -50,34 +50,6 @@ pub enum ExtensionAction {
     Disable { id: String },
     /// Show details for an extension.
     Inspect { id: String },
-    /// Manage extension configuration.
-    Config {
-        /// Extension ID (e.g. "llm-google").
-        id: String,
-        #[command(subcommand)]
-        action: ExtConfigAction,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum ExtConfigAction {
-    /// List settings (optionally filtered by glob pattern).
-    List {
-        /// Glob pattern to filter keys (e.g. "gemini-flash.*").
-        pattern: Option<String>,
-    },
-    /// Get a setting value.
-    Get {
-        /// Setting key (e.g. "gemini-flash.thinking_level").
-        key: String,
-    },
-    /// Set a setting value.
-    Set {
-        /// Setting key (e.g. "gemini-flash.thinking_level").
-        key: String,
-        /// Setting value. Omit to be prompted for secrets.
-        value: Option<String>,
-    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -100,10 +72,7 @@ pub enum RoleAction {
 
 /// Prints extensions in a tabular format.
 pub fn print_list(manifest: &WorkspaceManifest) {
-    println!(
-        "{:<17}{:<18}{:<21}{:<11}ENABLED",
-        "ID", "NAME", "SLOT", "SOURCE"
-    );
+    println!("{:<20}{:<20}{:<11}ENABLED", "ID", "NAME", "SOURCE");
     for ext in &manifest.extensions {
         print_row(ext);
     }
@@ -111,20 +80,25 @@ pub fn print_list(manifest: &WorkspaceManifest) {
 
 /// Prints detailed information about a single extension.
 pub fn print_inspect(entry: &ManifestEntry) {
-    println!("id:       {}", entry.id);
-    println!("name:     {}", entry.name);
-    println!("slot:     {}", entry.slot.as_deref().unwrap_or("\u{2014}"));
-    println!("source:   {}", entry.source);
-    println!("path:     {}", entry.wasm_path);
-    println!("checksum: {}", entry.checksum);
-    println!("enabled:  {}", entry.enabled);
+    println!("id:           {}", entry.id);
+    println!("name:         {}", entry.name);
+    println!("source:       {}", entry.source);
+    println!("path:         {}", entry.dir_path);
+    println!("enabled:      {}", entry.enabled);
+    println!(
+        "capabilities: {}",
+        if entry.capabilities.is_empty() {
+            "(none)".to_owned()
+        } else {
+            entry.capabilities.join(", ")
+        }
+    );
 }
 
 fn print_row(ext: &ManifestEntry) {
-    let slot_display = ext.slot.as_deref().unwrap_or("\u{2014}");
     let enabled_display = if ext.enabled { "\u{2713}" } else { "\u{2717}" };
     println!(
-        "{:<17}{:<18}{:<21}{:<11}{}",
-        ext.id, ext.name, slot_display, ext.source, enabled_display
+        "{:<20}{:<20}{:<11}{}",
+        ext.id, ext.name, ext.source, enabled_display
     );
 }

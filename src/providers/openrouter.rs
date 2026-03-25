@@ -1,132 +1,58 @@
-wit_bindgen::generate!({
-    path: "../../../wit",
-    world: "llm-extension",
-    generate_all,
-});
+//! Native OpenRouter LLM provider.
+//!
+//! Ports the WASM `llm-openrouter` extension to a native Rust module using
+//! `reqwest` for HTTP and `futures_util::StreamExt` for SSE streaming.
 
-use std::cell::RefCell;
+use anyhow::{Context as _, bail};
+use futures_util::StreamExt;
+use tokio::sync::RwLock;
 
-use exports::ur::extension::extension::Guest as ExtGuest;
-use exports::ur::extension::llm_provider::{
-    CompletionStream, Guest as LlmGuest, GuestCompletionStream,
+use crate::types::{
+    Completion, CompletionChunk, ConfigSetting, Message, MessagePart, ModelDescriptor,
+    SettingBoolean, SettingDescriptor, SettingInteger, SettingNumber, SettingSchema, SettingString,
+    SettingValue, TextPart, ToolCall, ToolChoice, ToolDescriptor, ToolResult, Usage,
 };
-use ur::extension::types::{
-    CompletionChunk, ConfigEntry, ConfigSetting, ExtensionCapabilities, Message, MessagePart,
-    ModelDescriptor, SettingBoolean, SettingDescriptor, SettingInteger, SettingNumber,
-    SettingSchema, SettingString, SettingValue, ToolCall, ToolChoice, ToolDescriptor, Usage,
-};
-use wasi::http::outgoing_handler;
-use wasi::http::types::{Fields, IncomingBody, Method, OutgoingBody, OutgoingRequest, Scheme};
-use wasi::io::streams::StreamError;
 
-// ── Thread-local state ──────────────────────────────────────────────
+// ── Provider struct ─────────────────────────────────────────────────
 
-thread_local! {
-    static API_KEY: RefCell<Option<String>> = const { RefCell::new(None) };
-    static CACHED_CATALOG: RefCell<Option<Vec<CatalogModel>>> = const { RefCell::new(None) };
+pub struct OpenRouterProvider {
+    api_key: String,
+    client: reqwest::Client,
+    /// Cached model catalog fetched from OpenRouter.
+    cached_catalog: RwLock<Option<Vec<CatalogModel>>>,
+    cached_settings: RwLock<Option<Vec<SettingDescriptor>>>,
 }
 
-fn get_api_key() -> Result<String, String> {
-    API_KEY.with(|k| {
-        k.borrow().clone().ok_or_else(|| {
-            "No API key for provider 'openrouter'. Set one with: ur config set-key openrouter"
-                .into()
-        })
-    })
-}
+impl OpenRouterProvider {
+    pub fn new(api_key: String) -> Self {
+        Self {
+            api_key,
+            client: reqwest::Client::new(),
+            cached_catalog: RwLock::new(None),
+            cached_settings: RwLock::new(None),
+        }
+    }
 
-struct LlmOpenRouter;
+    pub fn provider_id(&self) -> &str {
+        "openrouter"
+    }
 
-// ── Extension lifecycle ─────────────────────────────────────────────
-
-impl ExtGuest for LlmOpenRouter {
-    fn init(config: Vec<ConfigEntry>) -> Result<(), String> {
-        for entry in config {
-            if entry.key == "api_key" {
-                API_KEY.with(|k| *k.borrow_mut() = Some(entry.value));
+    pub async fn list_models(&self) -> Vec<ModelDescriptor> {
+        // Return cached descriptors if available.
+        {
+            let cache = self.cached_catalog.read().await;
+            if let Some(catalog) = cache.as_ref() {
+                let mut descriptors: Vec<ModelDescriptor> =
+                    catalog.iter().map(catalog_model_to_descriptor).collect();
+                let default_idx = pick_default_index(&descriptors);
+                if let Some(idx) = default_idx {
+                    descriptors[idx].is_default = true;
+                }
+                return descriptors;
             }
         }
-        Ok(())
-    }
 
-    fn call_tool(_name: String, _args_json: String) -> Result<String, String> {
-        Err("no tools implemented".into())
-    }
-
-    fn id() -> String {
-        "llm-openrouter".into()
-    }
-
-    fn name() -> String {
-        "OpenRouter".into()
-    }
-
-    fn list_tools() -> Vec<ToolDescriptor> {
-        vec![]
-    }
-
-    fn list_settings() -> Vec<SettingDescriptor> {
-        let mut settings = vec![SettingDescriptor {
-            key: "api_key".into(),
-            name: "API Key".into(),
-            description: "OpenRouter API key".into(),
-            schema: SettingSchema::String(SettingString {
-                default_val: String::new(),
-            }),
-            secret: true,
-            readonly: false,
-        }];
-
-        // Use cached catalog if available (populated by list_models).
-        CACHED_CATALOG.with(|c| {
-            if let Some(catalog) = c.borrow().as_ref() {
-                for m in catalog {
-                    settings.extend(catalog_model_settings(m));
-                }
-            }
-        });
-
-        settings
-    }
-
-    fn declare_capabilities() -> ExtensionCapabilities {
-        ExtensionCapabilities::NETWORK
-    }
-}
-
-// ── LLM provider ────────────────────────────────────────────────────
-
-struct OpenRouterStream {
-    inner: RefCell<StreamState>,
-}
-
-struct StreamState {
-    buffer: String,
-    pos: usize,
-    done: bool,
-    body_stream: Option<wasi::io::streams::InputStream>,
-    _incoming_body: Option<IncomingBody>,
-    // Accumulate tool call deltas across chunks.
-    pending_tool_calls: Vec<PendingToolCall>,
-}
-
-#[derive(Clone)]
-struct PendingToolCall {
-    index: u32,
-    id: String,
-    name: String,
-    arguments: String,
-}
-
-impl LlmGuest for LlmOpenRouter {
-    type CompletionStream = OpenRouterStream;
-
-    fn provider_id() -> String {
-        "openrouter".into()
-    }
-
-    fn list_models() -> Vec<ModelDescriptor> {
-        let catalog = match fetch_catalog() {
+        let catalog = match self.fetch_catalog().await {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("openrouter: failed to fetch catalog: {e}");
@@ -143,77 +69,229 @@ impl LlmGuest for LlmOpenRouter {
             descriptors[idx].is_default = true;
         }
 
-        CACHED_CATALOG.with(|c| *c.borrow_mut() = Some(catalog));
+        // Cache the catalog and derived settings.
+        let mut settings = vec![SettingDescriptor {
+            key: "api_key".into(),
+            name: "API Key".into(),
+            description: "OpenRouter API key".into(),
+            schema: SettingSchema::String(SettingString {
+                default_val: String::new(),
+            }),
+            secret: true,
+            readonly: false,
+        }];
+        for m in &catalog {
+            settings.extend(catalog_model_settings(m));
+        }
+
+        *self.cached_settings.write().await = Some(settings);
+        *self.cached_catalog.write().await = Some(catalog);
 
         descriptors
     }
 
-    fn complete(
-        messages: Vec<Message>,
-        model: String,
-        settings: Vec<ConfigSetting>,
-        tools: Vec<ToolDescriptor>,
-        tool_choice: Option<ToolChoice>,
-    ) -> Result<CompletionStream, String> {
-        let api_key = get_api_key()?;
-        let body = build_request_body(&model, &messages, &settings, &tools, tool_choice.as_ref());
+    pub async fn list_settings(&self) -> Vec<SettingDescriptor> {
+        // Ensure catalog is fetched (populates cached_settings as a side effect).
+        {
+            let cache = self.cached_settings.read().await;
+            if let Some(settings) = cache.as_ref() {
+                return settings.clone();
+            }
+        }
 
-        let (incoming_body, body_stream) =
-            http_post_streaming(&api_key, "/api/v1/chat/completions", &body)?;
+        // Force a catalog fetch to populate settings.
+        let _ = self.list_models().await;
 
-        Ok(CompletionStream::new(OpenRouterStream {
-            inner: RefCell::new(StreamState {
-                buffer: String::new(),
-                pos: 0,
-                done: false,
-                body_stream: Some(body_stream),
-                _incoming_body: Some(incoming_body),
-                pending_tool_calls: Vec::new(),
-            }),
-        }))
+        let cache = self.cached_settings.read().await;
+        cache.clone().unwrap_or_else(|| {
+            vec![SettingDescriptor {
+                key: "api_key".into(),
+                name: "API Key".into(),
+                description: "OpenRouter API key".into(),
+                schema: SettingSchema::String(SettingString {
+                    default_val: String::new(),
+                }),
+                secret: true,
+                readonly: false,
+            }]
+        })
+    }
+
+    async fn complete_async(
+        &self,
+        messages: &[Message],
+        model_id: &str,
+        settings: &[ConfigSetting],
+        tools: &[ToolDescriptor],
+        tool_choice: Option<&ToolChoice>,
+        on_chunk: &mut dyn FnMut(CompletionChunk),
+    ) -> anyhow::Result<Completion> {
+        let body = build_request_body(model_id, messages, settings, tools, tool_choice);
+
+        let response = self
+            .client
+            .post("https://openrouter.ai/api/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .context("OpenRouter HTTP request failed")?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let err_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| String::from("<unreadable>"));
+            bail!("OpenRouter API error: HTTP {status}: {err_text}");
+        }
+
+        // Stream the SSE response.
+        let mut stream = response.bytes_stream();
+        let mut sse_state = SseState {
+            buffer: String::new(),
+            pos: 0,
+            pending_tool_calls: Vec::new(),
+        };
+
+        let mut accumulated_parts: Vec<MessagePart> = Vec::new();
+        let mut final_usage: Option<Usage> = None;
+
+        while let Some(chunk_result) = stream.next().await {
+            let bytes = chunk_result.context("error reading SSE stream")?;
+            let text = String::from_utf8_lossy(&bytes);
+            sse_state.buffer.push_str(&text);
+
+            while let Some(chunk) = try_parse_sse_event(&mut sse_state) {
+                // Track usage from the last chunk that carries it.
+                if chunk.usage.is_some() {
+                    final_usage = chunk.usage.clone();
+                }
+
+                // Accumulate parts for the final Completion message.
+                for part in &chunk.delta_parts {
+                    accumulate_part(&mut accumulated_parts, part);
+                }
+
+                on_chunk(chunk);
+            }
+        }
+
+        // Drain any remaining buffered events after stream ends.
+        while let Some(chunk) = try_parse_sse_event(&mut sse_state) {
+            if chunk.usage.is_some() {
+                final_usage = chunk.usage.clone();
+            }
+            for part in &chunk.delta_parts {
+                accumulate_part(&mut accumulated_parts, part);
+            }
+            on_chunk(chunk);
+        }
+
+        Ok(Completion {
+            message: Message {
+                role: "assistant".into(),
+                parts: accumulated_parts,
+            },
+            usage: final_usage,
+        })
+    }
+
+    /// Fetches the model catalog from OpenRouter's API.
+    async fn fetch_catalog(&self) -> anyhow::Result<Vec<CatalogModel>> {
+        let response = self
+            .client
+            .get("https://openrouter.ai/api/v1/models?supported_parameters=tools&output_modalities=text")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .context("failed to fetch OpenRouter model catalog")?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let err_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| String::from("<unreadable>"));
+            bail!("OpenRouter API error: HTTP {status}: {err_text}");
+        }
+
+        let body = response
+            .text()
+            .await
+            .context("failed to read catalog response body")?;
+        let catalog_response: CatalogResponse =
+            serde_json::from_str(&body).context("failed to parse catalog JSON")?;
+
+        let mut filtered: Vec<CatalogModel> = catalog_response
+            .data
+            .into_iter()
+            .filter(is_usable_model)
+            .collect();
+
+        filtered.sort_by(|a, b| a.id.cmp(&b.id));
+
+        Ok(filtered)
     }
 }
 
-impl GuestCompletionStream for OpenRouterStream {
-    fn next(&self) -> Option<CompletionChunk> {
-        let mut state = self.inner.borrow_mut();
-
-        if state.done {
-            return None;
-        }
-
-        loop {
-            if let Some(chunk) = try_parse_sse_event(&mut state) {
-                return Some(chunk);
-            }
-
-            let stream = state.body_stream.as_ref()?;
-            match stream.blocking_read(65536) {
-                Ok(bytes) => {
-                    if bytes.is_empty() {
-                        state.done = true;
-                        return None;
-                    }
-                    let text = String::from_utf8_lossy(&bytes);
-                    state.buffer.push_str(&text);
-                }
-                Err(StreamError::Closed) => {
-                    state.done = true;
-                    return try_parse_sse_event(&mut state);
-                }
-                Err(StreamError::LastOperationFailed(e)) => {
-                    eprintln!("stream read error: {}", e.to_debug_string());
-                    state.done = true;
-                    return None;
-                }
-            }
-        }
+impl super::LlmProvider for OpenRouterProvider {
+    fn provider_id(&self) -> &str {
+        "openrouter"
     }
+
+    fn list_models(&self) -> Vec<ModelDescriptor> {
+        let handle = tokio::runtime::Handle::current();
+        handle.block_on(self.list_models())
+    }
+
+    fn list_settings(&self) -> Vec<SettingDescriptor> {
+        let handle = tokio::runtime::Handle::current();
+        handle.block_on(self.list_settings())
+    }
+
+    fn complete(
+        &self,
+        messages: &[Message],
+        model_id: &str,
+        settings: &[ConfigSetting],
+        tools: &[ToolDescriptor],
+        tool_choice: Option<&ToolChoice>,
+        on_chunk: &mut dyn FnMut(CompletionChunk),
+    ) -> anyhow::Result<Completion> {
+        let handle = tokio::runtime::Handle::current();
+        handle.block_on(self.complete_async(
+            messages,
+            model_id,
+            settings,
+            tools,
+            tool_choice,
+            on_chunk,
+        ))
+    }
+}
+
+// ── SSE streaming state ─────────────────────────────────────────────
+
+struct SseState {
+    buffer: String,
+    pos: usize,
+    pending_tool_calls: Vec<PendingToolCall>,
+}
+
+#[derive(Clone)]
+struct PendingToolCall {
+    index: u32,
+    id: String,
+    name: String,
+    arguments: String,
 }
 
 // ── SSE parsing ─────────────────────────────────────────────────────
 
-fn try_parse_sse_event(state: &mut StreamState) -> Option<CompletionChunk> {
+fn try_parse_sse_event(state: &mut SseState) -> Option<CompletionChunk> {
     loop {
         let remaining = &state.buffer[state.pos..];
         let (consumed_len, event) = next_complete_sse_event(remaining)?;
@@ -252,7 +330,7 @@ fn next_complete_sse_event(buffer: &str) -> Option<(usize, String)> {
     None
 }
 
-fn trim_consumed_buffer(state: &mut StreamState) {
+fn trim_consumed_buffer(state: &mut SseState) {
     if state.pos == 0 {
         return;
     }
@@ -264,7 +342,7 @@ fn trim_consumed_buffer(state: &mut StreamState) {
 fn parse_sse_event(
     event: &str,
     pending_tool_calls: &mut Vec<PendingToolCall>,
-) -> Result<Option<CompletionChunk>, String> {
+) -> anyhow::Result<Option<CompletionChunk>> {
     let mut data_lines = Vec::new();
 
     for raw_line in event.lines() {
@@ -305,7 +383,6 @@ fn parse_sse_event(
                 .collect();
             return Ok(Some(CompletionChunk {
                 delta_parts: parts,
-                finish_reason: Some("tool_calls".into()),
                 usage: None,
             }));
         }
@@ -318,9 +395,8 @@ fn parse_sse_event(
 fn parse_sse_chunk(
     json_str: &str,
     pending_tool_calls: &mut Vec<PendingToolCall>,
-) -> Result<CompletionChunk, String> {
-    let response: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| format!("invalid SSE JSON: {e}"))?;
+) -> anyhow::Result<CompletionChunk> {
+    let response: serde_json::Value = serde_json::from_str(json_str).context("invalid SSE JSON")?;
 
     // Check for mid-stream error events.
     if let Some(error) = response.get("error") {
@@ -328,30 +404,28 @@ fn parse_sse_chunk(
             .get("message")
             .and_then(|m| m.as_str())
             .unwrap_or("unknown error");
-        return Err(format!("OpenRouter streaming error: {msg}"));
+        bail!("OpenRouter streaming error: {msg}");
     }
 
     let choices = response
         .get("choices")
         .and_then(|c| c.as_array())
-        .ok_or_else(|| "missing choices in SSE chunk".to_string())?;
-    let choice = choices
-        .first()
-        .ok_or_else(|| "empty choices in SSE chunk".to_string())?;
-    let delta = choice
-        .get("delta")
-        .ok_or_else(|| "missing delta in SSE chunk".to_string())?;
+        .context("missing choices in SSE chunk")?;
+    let choice = choices.first().context("empty choices in SSE chunk")?;
+    let delta = choice.get("delta").context("missing delta in SSE chunk")?;
 
     let mut delta_parts = Vec::new();
 
     // Text content.
-    if let Some(content) = delta.get("content").and_then(|c| c.as_str())
-        && !content.is_empty()
-    {
-        delta_parts.push(MessagePart::Text(content.to_string()));
+    if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+        if !content.is_empty() {
+            delta_parts.push(MessagePart::Text(TextPart {
+                text: content.to_string(),
+            }));
+        }
     }
 
-    // Tool call deltas — accumulate across chunks.
+    // Tool call deltas -- accumulate across chunks.
     if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
         for tc_delta in tool_calls {
             let index = u32::try_from(
@@ -407,23 +481,14 @@ fn parse_sse_chunk(
         }
     });
 
-    let finish_reason = choice
-        .get("finish_reason")
-        .and_then(|r| r.as_str())
-        .map(String::from);
-
     let usage = response.get("usage").and_then(parse_usage);
 
-    Ok(CompletionChunk {
-        delta_parts,
-        finish_reason,
-        usage,
-    })
+    Ok(CompletionChunk { delta_parts, usage })
 }
 
-// ── Catalog fetch ───────────────────────────────────────────────────
+// ── Catalog types ───────────────────────────────────────────────────
 
-/// Raw model entry from the `OpenRouter` `GET /api/v1/models` response.
+/// Raw model entry from the OpenRouter `GET /api/v1/models` response.
 #[derive(serde::Deserialize, Clone)]
 struct CatalogModel {
     id: String,
@@ -469,23 +534,7 @@ struct CatalogResponse {
     data: Vec<CatalogModel>,
 }
 
-fn fetch_catalog() -> Result<Vec<CatalogModel>, String> {
-    let api_key = get_api_key()?;
-    let bytes = http_get(
-        &api_key,
-        "/api/v1/models?supported_parameters=tools&output_modalities=text",
-    )?;
-    let body = String::from_utf8(bytes).map_err(|e| format!("invalid UTF-8: {e}"))?;
-    let response: CatalogResponse =
-        serde_json::from_str(&body).map_err(|e| format!("failed to parse catalog: {e}"))?;
-
-    let mut filtered: Vec<CatalogModel> =
-        response.data.into_iter().filter(is_usable_model).collect();
-
-    filtered.sort_by(|a, b| a.id.cmp(&b.id));
-
-    Ok(filtered)
-}
+// ── Catalog filtering ───────────────────────────────────────────────
 
 fn is_usable_model(m: &CatalogModel) -> bool {
     if m.id.is_empty() || m.name.is_empty() {
@@ -536,6 +585,8 @@ fn catalog_model_to_descriptor(m: &CatalogModel) -> ModelDescriptor {
         is_default: false,
     }
 }
+
+// ── Per-model settings ──────────────────────────────────────────────
 
 /// Builds the full dotted-key settings namespace for a catalog model.
 fn catalog_model_settings(m: &CatalogModel) -> Vec<SettingDescriptor> {
@@ -893,14 +944,14 @@ fn message_to_openai(msg: &Message) -> serde_json::Value {
     };
 
     // Tool result messages.
-    if role == "tool"
-        && let Some(MessagePart::ToolResult(tr)) = msg.parts.first()
-    {
-        return serde_json::json!({
-            "role": "tool",
-            "tool_call_id": tr.tool_call_id,
-            "content": tr.content,
-        });
+    if role == "tool" {
+        if let Some(MessagePart::ToolResult(tr)) = msg.parts.first() {
+            return serde_json::json!({
+                "role": "tool",
+                "tool_call_id": tr.tool_call_id,
+                "content": tr.content,
+            });
+        }
     }
 
     // Assistant messages with tool calls.
@@ -953,7 +1004,7 @@ fn extract_text(msg: &Message) -> String {
     msg.parts
         .iter()
         .filter_map(|p| match p {
-            MessagePart::Text(s) => Some(s.as_str()),
+            MessagePart::Text(t) => Some(t.text.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>()
@@ -962,179 +1013,36 @@ fn extract_text(msg: &Message) -> String {
 
 fn parse_usage(usage: &serde_json::Value) -> Option<Usage> {
     Some(Usage {
-        input_tokens: u32::try_from(usage.get("prompt_tokens")?.as_u64()?).ok()?,
-        output_tokens: u32::try_from(usage.get("completion_tokens")?.as_u64()?).ok()?,
+        prompt_tokens: u32::try_from(usage.get("prompt_tokens")?.as_u64()?).ok()?,
+        completion_tokens: u32::try_from(usage.get("completion_tokens")?.as_u64()?).ok()?,
     })
 }
 
-// ── WASI HTTP helpers ───────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────
 
-fn http_get(api_key: &str, path: &str) -> Result<Vec<u8>, String> {
-    let headers = Fields::from_list(&[
-        (
-            "authorization".into(),
-            format!("Bearer {api_key}").into_bytes(),
-        ),
-        ("content-type".into(), b"application/json".to_vec()),
-    ])
-    .map_err(|error| format!("failed to create headers: {error:?}"))?;
-
-    let request = OutgoingRequest::new(headers);
-    request
-        .set_method(&Method::Get)
-        .map_err(|()| "failed to set method")?;
-    request
-        .set_scheme(Some(&Scheme::Https))
-        .map_err(|()| "failed to set scheme")?;
-    request
-        .set_authority(Some("openrouter.ai"))
-        .map_err(|()| "failed to set authority")?;
-    request
-        .set_path_with_query(Some(path))
-        .map_err(|()| "failed to set path")?;
-
-    let future_response =
-        outgoing_handler::handle(request, None).map_err(|e| format!("request error: {e:?}"))?;
-
-    let pollable = future_response.subscribe();
-    pollable.block();
-
-    let response = future_response
-        .get()
-        .ok_or("response not ready")?
-        .map_err(|()| "response already consumed")?
-        .map_err(|e| format!("HTTP error: {e:?}"))?;
-
-    let status = response.status();
-    if !(200..300).contains(&status) {
-        if let Ok(body) = response.consume()
-            && let Ok(stream) = body.stream()
-        {
-            let mut err_bytes = Vec::new();
-            loop {
-                match stream.blocking_read(65536) {
-                    Ok(bytes) if bytes.is_empty() => break,
-                    Ok(bytes) => err_bytes.extend_from_slice(&bytes),
-                    Err(_) => break,
-                }
-            }
-            let err_text = String::from_utf8_lossy(&err_bytes);
-            return Err(format!("OpenRouter API error: HTTP {status}: {err_text}"));
-        }
-        return Err(format!("OpenRouter API error: HTTP {status}"));
-    }
-
-    let incoming_body = response
-        .consume()
-        .map_err(|()| "failed to consume response body".to_string())?;
-    let body_stream = incoming_body
-        .stream()
-        .map_err(|()| "failed to get response stream".to_string())?;
-
-    let mut result = Vec::new();
-    loop {
-        match body_stream.blocking_read(65536) {
-            Ok(bytes) => {
-                if bytes.is_empty() {
-                    break;
-                }
-                result.extend_from_slice(&bytes);
-            }
-            Err(StreamError::Closed) => break,
-            Err(StreamError::LastOperationFailed(e)) => {
-                return Err(format!("read error: {}", e.to_debug_string()));
+/// Accumulates a delta part into the running list for the final message.
+/// Consecutive text parts are merged into a single `TextPart`.
+fn accumulate_part(parts: &mut Vec<MessagePart>, delta: &MessagePart) {
+    match delta {
+        MessagePart::Text(t) => {
+            if let Some(MessagePart::Text(last)) = parts.last_mut() {
+                last.text.push_str(&t.text);
+            } else {
+                parts.push(MessagePart::Text(TextPart {
+                    text: t.text.clone(),
+                }));
             }
         }
+        MessagePart::ToolCall(tc) => {
+            parts.push(MessagePart::ToolCall(tc.clone()));
+        }
+        MessagePart::ToolResult(tr) => {
+            parts.push(MessagePart::ToolResult(tr.clone()));
+        }
     }
-
-    drop(body_stream);
-    drop(incoming_body);
-
-    Ok(result)
 }
 
-fn http_post_streaming(
-    api_key: &str,
-    path: &str,
-    body: &str,
-) -> Result<(IncomingBody, wasi::io::streams::InputStream), String> {
-    let headers = Fields::from_list(&[
-        (
-            "authorization".into(),
-            format!("Bearer {api_key}").into_bytes(),
-        ),
-        ("content-type".into(), b"application/json".to_vec()),
-    ])
-    .map_err(|error| format!("failed to create headers: {error:?}"))?;
-
-    let request = OutgoingRequest::new(headers);
-    request
-        .set_method(&Method::Post)
-        .map_err(|()| "failed to set method")?;
-    request
-        .set_scheme(Some(&Scheme::Https))
-        .map_err(|()| "failed to set scheme")?;
-    request
-        .set_authority(Some("openrouter.ai"))
-        .map_err(|()| "failed to set authority")?;
-    request
-        .set_path_with_query(Some(path))
-        .map_err(|()| "failed to set path")?;
-
-    let outgoing_body = request
-        .body()
-        .map_err(|()| "failed to get request body".to_string())?;
-    let out_stream = outgoing_body
-        .write()
-        .map_err(|()| "failed to get output stream".to_string())?;
-    out_stream
-        .blocking_write_and_flush(body.as_bytes())
-        .map_err(|e| format!("write error: {e:?}"))?;
-    drop(out_stream);
-    OutgoingBody::finish(outgoing_body, None).map_err(|e| format!("body finish error: {e:?}"))?;
-
-    let future_response =
-        outgoing_handler::handle(request, None).map_err(|e| format!("request error: {e:?}"))?;
-
-    let pollable = future_response.subscribe();
-    pollable.block();
-
-    let response = future_response
-        .get()
-        .ok_or("response not ready")?
-        .map_err(|()| "response already consumed")?
-        .map_err(|e| format!("HTTP error: {e:?}"))?;
-
-    let status = response.status();
-    if !(200..300).contains(&status) {
-        if let Ok(body) = response.consume()
-            && let Ok(stream) = body.stream()
-        {
-            let mut err_bytes = Vec::new();
-            loop {
-                match stream.blocking_read(65536) {
-                    Ok(bytes) if bytes.is_empty() => break,
-                    Ok(bytes) => err_bytes.extend_from_slice(&bytes),
-                    Err(_) => break,
-                }
-            }
-            let err_text = String::from_utf8_lossy(&err_bytes);
-            return Err(format!("OpenRouter API error: HTTP {status}: {err_text}"));
-        }
-        return Err(format!("OpenRouter API error: HTTP {status}"));
-    }
-
-    let incoming_body = response
-        .consume()
-        .map_err(|()| "failed to consume response body".to_string())?;
-    let body_stream = incoming_body
-        .stream()
-        .map_err(|()| "failed to get response stream".to_string())?;
-
-    Ok((incoming_body, body_stream))
-}
-
-export!(LlmOpenRouter);
+// ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -1235,42 +1143,6 @@ mod tests {
         assert!(!is_usable_model(&m));
     }
 
-    // ── ModelDescriptor mapping tests ───────────────────────────────
-
-    #[test]
-    fn catalog_model_maps_context_windows() {
-        let m = base_catalog_model();
-        let desc = catalog_model_to_descriptor(&m);
-        assert_eq!(desc.context_window_in, 128_000);
-        assert_eq!(desc.context_window_out, 4096);
-    }
-
-    #[test]
-    fn catalog_model_maps_pricing() {
-        let m = base_catalog_model();
-        let desc = catalog_model_to_descriptor(&m);
-        assert_eq!(desc.cost_in, 150);
-        assert_eq!(desc.cost_out, 600);
-    }
-
-    #[test]
-    fn catalog_model_builds_capability_driven_settings() {
-        let m = base_catalog_model();
-        let desc = catalog_model_to_descriptor(&m);
-        let keys: Vec<&str> = desc.settings.iter().map(|s| s.key.as_str()).collect();
-        assert!(keys.contains(&"max_output_tokens"));
-        assert!(keys.contains(&"temperature"));
-        assert!(!keys.contains(&"top_p")); // Not in supported_parameters.
-    }
-
-    #[test]
-    fn catalog_model_fallback_context_out() {
-        let mut m = base_catalog_model();
-        m.top_provider = None;
-        let desc = catalog_model_to_descriptor(&m);
-        assert_eq!(desc.context_window_out, 4096); // Conservative fallback.
-    }
-
     // ── Default model selection tests ───────────────────────────────
 
     fn desc(id: &str) -> ModelDescriptor {
@@ -1279,12 +1151,6 @@ mod tests {
             name: id.into(),
             description: String::new(),
             is_default: false,
-            settings: vec![],
-            context_window_in: 128_000,
-            context_window_out: 4096,
-            knowledge_cutoff: "unknown".into(),
-            cost_in: 0,
-            cost_out: 0,
         }
     }
 
@@ -1314,10 +1180,7 @@ mod tests {
 
     #[test]
     fn build_request_body_includes_model_and_provider_require() {
-        let messages = vec![Message {
-            role: "user".into(),
-            parts: vec![MessagePart::Text("Hello".into())],
-        }];
+        let messages = vec![Message::text("user", "Hello")];
         let body = build_request_body("openai/gpt-4o-mini", &messages, &[], &[], None);
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(json["model"], "openai/gpt-4o-mini");
@@ -1327,10 +1190,7 @@ mod tests {
 
     #[test]
     fn build_request_body_maps_settings() {
-        let messages = vec![Message {
-            role: "user".into(),
-            parts: vec![MessagePart::Text("Hi".into())],
-        }];
+        let messages = vec![Message::text("user", "Hi")];
         let settings = vec![
             ConfigSetting {
                 key: "temperature".into(),
@@ -1351,7 +1211,7 @@ mod tests {
     fn message_to_openai_tool_result() {
         let msg = Message {
             role: "tool".into(),
-            parts: vec![MessagePart::ToolResult(ur::extension::types::ToolResult {
+            parts: vec![MessagePart::ToolResult(ToolResult {
                 tool_call_id: "call-1".into(),
                 tool_name: "get_weather".into(),
                 content: "{\"temp\":72}".into(),
@@ -1367,7 +1227,7 @@ mod tests {
     fn message_to_openai_assistant_tool_calls() {
         let msg = Message {
             role: "assistant".into(),
-            parts: vec![MessagePart::ToolCall(ur::extension::types::ToolCall {
+            parts: vec![MessagePart::ToolCall(ToolCall {
                 id: "call-1".into(),
                 name: "get_weather".into(),
                 arguments_json: "{\"city\":\"Paris\"}".into(),
@@ -1392,37 +1252,70 @@ mod tests {
         .to_string()
     }
 
-    fn stream_state(buffer: &str) -> StreamState {
-        StreamState {
-            buffer: buffer.into(),
-            pos: 0,
-            done: false,
-            body_stream: None,
-            _incoming_body: None,
-            pending_tool_calls: Vec::new(),
+    #[test]
+    fn parse_sse_event_text_content() {
+        let event = format!("data: {}\n", text_chunk_json("Hello"));
+        let mut pending = Vec::new();
+        let chunk = parse_sse_event(&event, &mut pending).unwrap().unwrap();
+        assert_eq!(chunk.delta_parts.len(), 1);
+        match &chunk.delta_parts[0] {
+            MessagePart::Text(t) => assert_eq!(t.text, "Hello"),
+            _ => panic!("expected text part"),
         }
     }
 
     #[test]
-    fn sse_ignores_comment_lines() {
-        let json = text_chunk_json("Hello");
-        let mut state = stream_state(&format!(": OPENROUTER PROCESSING\ndata: {json}\n\n"));
-        let chunk = try_parse_sse_event(&mut state).expect("SSE chunk");
-        assert!(matches!(
-            &chunk.delta_parts[0],
-            MessagePart::Text(text) if text == "Hello"
-        ));
+    fn parse_sse_event_done_with_pending_tool_calls() {
+        let mut pending = vec![PendingToolCall {
+            index: 0,
+            id: "call-1".into(),
+            name: "get_weather".into(),
+            arguments: "{\"city\":\"Paris\"}".into(),
+        }];
+        let chunk = parse_sse_event("data: [DONE]\n", &mut pending)
+            .unwrap()
+            .unwrap();
+        assert_eq!(chunk.delta_parts.len(), 1);
+        match &chunk.delta_parts[0] {
+            MessagePart::ToolCall(tc) => {
+                assert_eq!(tc.id, "call-1");
+                assert_eq!(tc.name, "get_weather");
+                assert_eq!(tc.arguments_json, "{\"city\":\"Paris\"}");
+            }
+            _ => panic!("expected tool call part"),
+        }
     }
 
     #[test]
-    fn sse_accumulates_tool_call_deltas() {
-        let first = serde_json::json!({
+    fn parse_sse_event_skips_comments() {
+        let event = ": OPENROUTER PROCESSING\n";
+        let mut pending = Vec::new();
+        let result = parse_sse_event(event, &mut pending).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_sse_event_done_no_pending() {
+        let mut pending = Vec::new();
+        let result = parse_sse_event("data: [DONE]\n", &mut pending).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn tool_call_delta_accumulation() {
+        let mut pending = Vec::new();
+
+        // First chunk: tool call start with partial args.
+        let chunk1 = serde_json::json!({
             "choices": [{
                 "delta": {
                     "tool_calls": [{
                         "index": 0,
                         "id": "call-1",
-                        "function": {"name": "get_weather", "arguments": "{\"ci"}
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": "{\"city\":"
+                        }
                     }]
                 },
                 "finish_reason": null
@@ -1430,76 +1323,135 @@ mod tests {
         })
         .to_string();
 
-        let second = serde_json::json!({
+        let result1 = parse_sse_chunk(&chunk1, &mut pending).unwrap();
+        // Arguments are not valid JSON yet, so no tool call emitted.
+        assert!(result1.delta_parts.is_empty());
+        assert_eq!(pending.len(), 1);
+
+        // Second chunk: completes the arguments.
+        let chunk2 = serde_json::json!({
             "choices": [{
                 "delta": {
                     "tool_calls": [{
                         "index": 0,
-                        "function": {"arguments": "ty\":\"Paris\"}"}
+                        "function": {
+                            "arguments": "\"Paris\"}"
+                        }
                     }]
                 },
-                "finish_reason": "tool_calls"
+                "finish_reason": null
             }]
         })
         .to_string();
 
-        let mut state = stream_state(&format!("data: {first}\n\ndata: {second}\n\n"));
-
-        let first_chunk = try_parse_sse_event(&mut state).expect("first chunk");
-        // First chunk should have no emitted parts (accumulating).
-        assert!(first_chunk.delta_parts.is_empty());
-
-        let second_chunk = try_parse_sse_event(&mut state).expect("second chunk");
-        // Second chunk should emit the completed tool call.
-        assert_eq!(second_chunk.delta_parts.len(), 1);
-        let tc = match &second_chunk.delta_parts[0] {
-            MessagePart::ToolCall(tc) => tc,
-            _ => panic!("expected tool call"),
-        };
-        assert_eq!(tc.id, "call-1");
-        assert_eq!(tc.name, "get_weather");
-        assert_eq!(tc.arguments_json, "{\"city\":\"Paris\"}");
-    }
-
-    #[test]
-    fn sse_handles_done_marker() {
-        let mut pending = Vec::new();
-        let result = parse_sse_event("data: [DONE]", &mut pending).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn sse_handles_mid_stream_error() {
-        let error_event = serde_json::json!({
-            "error": {
-                "message": "Model overloaded"
+        let result2 = parse_sse_chunk(&chunk2, &mut pending).unwrap();
+        // Now arguments are valid JSON, tool call should be emitted.
+        assert_eq!(result2.delta_parts.len(), 1);
+        match &result2.delta_parts[0] {
+            MessagePart::ToolCall(tc) => {
+                assert_eq!(tc.name, "get_weather");
+                assert_eq!(tc.arguments_json, "{\"city\":\"Paris\"}");
             }
-        })
-        .to_string();
-        let mut pending = Vec::new();
-        let result = parse_sse_event(&format!("data: {error_event}"), &mut pending);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Model overloaded"));
+            _ => panic!("expected tool call"),
+        }
+        assert!(pending.is_empty());
     }
 
     #[test]
-    fn sse_text_chunks_stream_correctly() {
-        let first = text_chunk_json("Hello");
-        let second = text_chunk_json(" world");
-        let mut state = stream_state(&format!("data: {first}\n\ndata: {second}\n\n"));
-
-        let c1 = try_parse_sse_event(&mut state).expect("first");
-        let c2 = try_parse_sse_event(&mut state).expect("second");
-
-        assert!(matches!(&c1.delta_parts[0], MessagePart::Text(t) if t == "Hello"));
-        assert!(matches!(&c2.delta_parts[0], MessagePart::Text(t) if t == " world"));
+    fn next_complete_sse_event_basic() {
+        let buffer = "data: hello\n\ndata: world\n\n";
+        let (consumed, event) = next_complete_sse_event(buffer).unwrap();
+        assert_eq!(event, "data: hello\n");
+        let (consumed2, event2) = next_complete_sse_event(&buffer[consumed..]).unwrap();
+        assert_eq!(event2, "data: world\n");
+        assert_eq!(consumed + consumed2, buffer.len());
     }
 
     #[test]
-    fn sse_handles_crlf() {
-        let json = text_chunk_json("Hi");
-        let mut state = stream_state(&format!("data: {json}\r\n\r\n"));
-        let chunk = try_parse_sse_event(&mut state).expect("CRLF chunk");
-        assert!(matches!(&chunk.delta_parts[0], MessagePart::Text(t) if t == "Hi"));
+    fn next_complete_sse_event_incomplete() {
+        let buffer = "data: partial";
+        assert!(next_complete_sse_event(buffer).is_none());
+    }
+
+    #[test]
+    fn accumulate_part_merges_text() {
+        let mut parts = Vec::new();
+        accumulate_part(
+            &mut parts,
+            &MessagePart::Text(TextPart {
+                text: "Hello".into(),
+            }),
+        );
+        accumulate_part(
+            &mut parts,
+            &MessagePart::Text(TextPart {
+                text: " world".into(),
+            }),
+        );
+        assert_eq!(parts.len(), 1);
+        match &parts[0] {
+            MessagePart::Text(t) => assert_eq!(t.text, "Hello world"),
+            _ => panic!("expected text"),
+        }
+    }
+
+    #[test]
+    fn accumulate_part_tool_call_breaks_text_merge() {
+        let mut parts = Vec::new();
+        accumulate_part(
+            &mut parts,
+            &MessagePart::Text(TextPart {
+                text: "Hello".into(),
+            }),
+        );
+        accumulate_part(
+            &mut parts,
+            &MessagePart::ToolCall(ToolCall {
+                id: "call-1".into(),
+                name: "test".into(),
+                arguments_json: "{}".into(),
+                provider_metadata_json: String::new(),
+            }),
+        );
+        accumulate_part(
+            &mut parts,
+            &MessagePart::Text(TextPart {
+                text: " world".into(),
+            }),
+        );
+        assert_eq!(parts.len(), 3);
+    }
+
+    #[test]
+    fn extract_text_from_message() {
+        let msg = Message {
+            role: "assistant".into(),
+            parts: vec![
+                MessagePart::Text(TextPart {
+                    text: "Hello ".into(),
+                }),
+                MessagePart::Text(TextPart {
+                    text: "world".into(),
+                }),
+            ],
+        };
+        assert_eq!(extract_text(&msg), "Hello world");
+    }
+
+    #[test]
+    fn parse_usage_from_json() {
+        let json = serde_json::json!({
+            "prompt_tokens": 100,
+            "completion_tokens": 50
+        });
+        let usage = parse_usage(&json).unwrap();
+        assert_eq!(usage.prompt_tokens, 100);
+        assert_eq!(usage.completion_tokens, 50);
+    }
+
+    #[test]
+    fn parse_usage_missing_field_returns_none() {
+        let json = serde_json::json!({"prompt_tokens": 100});
+        assert!(parse_usage(&json).is_none());
     }
 }

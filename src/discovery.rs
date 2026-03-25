@@ -1,15 +1,11 @@
-//! Three-tier extension discovery via WASM component inspection.
+//! Three-tier extension discovery via `extension.toml` inspection.
 
 use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use sha2::{Digest, Sha256};
 use tracing::{debug, info, warn};
-use wasmtime::Engine;
-
-use crate::extension_host::{self, ExtensionInstance, LoadOptions, wit_types};
 
 /// Which directory tier an extension was discovered in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,40 +30,17 @@ impl fmt::Display for SourceTier {
 pub struct DiscoveredExtension {
     pub id: String,
     pub name: String,
-    pub slot: Option<String>,
     pub source: SourceTier,
-    pub wasm_path: PathBuf,
-    pub checksum: String,
-    pub capabilities: wit_types::ExtensionCapabilities,
+    pub dir_path: PathBuf,
+    pub capabilities: Vec<String>,
 }
 
-/// Computes a SHA-256 checksum of a file.
+/// Scans all three tiers for directories containing `extension.toml`.
 ///
 /// # Errors
 ///
-/// Returns an error if the file cannot be read.
-pub fn compute_checksum(path: &Path) -> Result<String> {
-    let file = std::fs::File::open(path).with_context(|| format!("reading {}", path.display()))?;
-    let mut reader = std::io::BufReader::new(file);
-    let mut hasher = Sha256::new();
-    std::io::copy(&mut reader, &mut hasher)
-        .with_context(|| format!("hashing {}", path.display()))?;
-    let hash = hasher.finalize();
-    Ok(format!("sha256:{hash:x}"))
-}
-
-/// Scans all three tiers for `.wasm` files, compiles each, inspects
-/// exports for slot detection, and instantiates to query identity.
-///
-/// # Errors
-///
-/// Returns an error on duplicate extension IDs, unknown slot names,
-/// or WASM loading failures.
-pub fn discover(
-    engine: &Engine,
-    ur_root: &Path,
-    workspace: &Path,
-) -> Result<Vec<DiscoveredExtension>> {
+/// Returns an error on duplicate extension IDs or manifest parse failures.
+pub fn discover(ur_root: &Path, workspace: &Path) -> Result<Vec<DiscoveredExtension>> {
     let mut extensions = Vec::new();
     let mut seen_ids = HashSet::new();
 
@@ -83,7 +56,6 @@ pub fn discover(
             continue;
         }
 
-        // Each immediate subdirectory is an extension.
         let entries =
             std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))?;
 
@@ -94,17 +66,17 @@ pub fn discover(
                 continue;
             }
 
-            let Some(wasm_path) = find_wasm_file(&ext_dir)? else {
-                warn!(dir = %ext_dir.display(), "no .wasm file found in extension directory");
+            let manifest_path = ext_dir.join("extension.toml");
+            if !manifest_path.is_file() {
+                warn!(dir = %ext_dir.display(), "no extension.toml found");
                 continue;
-            };
+            }
 
-            let ext = load_discovered(engine, &wasm_path, *tier)?;
+            let ext = parse_extension_dir(&ext_dir, &manifest_path, *tier)?;
             debug!(
                 id = %ext.id,
                 name = %ext.name,
                 tier = %tier,
-                slot = ext.slot.as_deref().unwrap_or("(none)"),
                 "discovered extension"
             );
 
@@ -120,87 +92,52 @@ pub fn discover(
     Ok(extensions)
 }
 
-/// Recursively locates the `.wasm` file inside an extension directory.
-///
-/// Returns `Ok(Some(path))` when exactly one `.wasm` file exists,
-/// `Ok(None)` when none are found, and `Err` when multiple candidates
-/// would make the choice ambiguous.
-fn find_wasm_file(ext_dir: &Path) -> Result<Option<PathBuf>> {
-    let mut candidates = Vec::new();
-    collect_wasm_files(ext_dir, &mut candidates);
-    match candidates.len() {
-        0 => Ok(None),
-        1 => Ok(Some(candidates.remove(0))),
-        _ => bail!(
-            "multiple .wasm files in {}: {}",
-            ext_dir.display(),
-            candidates
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    }
-}
-
-/// Collects all `.wasm` files under `dir`, recursing into subdirectories.
-fn collect_wasm_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_wasm_files(&path, out);
-        } else if path.extension().is_some_and(|e| e == "wasm") && path.is_file() {
-            out.push(path);
-        }
-    }
-}
-
-/// Compiles a WASM component, detects its slot, instantiates to query identity
-/// and declared capabilities.
-fn load_discovered(
-    engine: &Engine,
-    wasm_path: &Path,
+/// Parses an extension directory's `extension.toml` manifest.
+fn parse_extension_dir(
+    ext_dir: &Path,
+    manifest_path: &Path,
     source: SourceTier,
 ) -> Result<DiscoveredExtension> {
-    let checksum = compute_checksum(wasm_path)
-        .with_context(|| format!("checksum for {}", wasm_path.display()))?;
+    let contents = std::fs::read_to_string(manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
 
-    let abs_path = std::fs::canonicalize(wasm_path)
-        .with_context(|| format!("canonicalizing {}", wasm_path.display()))?;
+    let doc: toml::Table = toml::from_str(&contents)
+        .with_context(|| format!("parsing {}", manifest_path.display()))?;
 
-    // Load with all capabilities linked (discovery needs to call
-    // declare_capabilities before we know what to restrict).
-    let (mut instance, component) =
-        ExtensionInstance::load_returning_component(engine, &abs_path, &LoadOptions::default())
-            .map_err(|e| anyhow::anyhow!("loading {}: {e}", wasm_path.display()))?;
+    let ext_table = doc
+        .get("extension")
+        .and_then(|v| v.as_table())
+        .ok_or_else(|| {
+            anyhow::anyhow!("[extension] table missing in {}", manifest_path.display())
+        })?;
 
-    let detected_slot = instance.slot_name().map(str::to_owned);
+    let id = ext_table
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("extension.id missing in {}", manifest_path.display()))?
+        .to_owned();
 
-    let id = instance
-        .id()
-        .map_err(|e| anyhow::anyhow!("calling id() on {}: {e}", wasm_path.display()))?;
-    let name = instance
-        .name()
-        .map_err(|e| anyhow::anyhow!("calling name() on {}: {e}", wasm_path.display()))?;
-    let capabilities = instance.declare_capabilities().map_err(|e| {
-        anyhow::anyhow!(
-            "calling declare_capabilities() on {}: {e}",
-            wasm_path.display()
-        )
-    })?;
+    let name = ext_table
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&id)
+        .to_owned();
 
-    extension_host::validate_capabilities(engine, &component, capabilities, &id);
+    let capabilities = ext_table
+        .get("capabilities")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
 
     Ok(DiscoveredExtension {
         id,
         name,
-        slot: detected_slot,
         source,
-        wasm_path: abs_path,
-        checksum,
+        dir_path: ext_dir.to_owned(),
         capabilities,
     })
 }

@@ -1,93 +1,37 @@
 //! Model role management: provider queries and role resolution.
-//!
-//! Providers declare their available models via the WIT `llm-provider`
-//! interface. This module collects those declarations and resolves
-//! user-configured role mappings.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use anyhow::{Result, bail};
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::config::UserConfig;
-use crate::extension_host::{self, wit_types};
-use crate::manifest;
+use crate::providers::LlmProvider;
+use crate::types::ModelDescriptor;
 
 /// Provider ID → declared models, ordered alphabetically by provider.
-pub type ProviderModels = BTreeMap<String, Vec<wit_types::ModelDescriptor>>;
+pub type ProviderModels = BTreeMap<String, Vec<ModelDescriptor>>;
 
-/// Queries all enabled LLM providers for their declared provider ID and models.
-///
-/// # Errors
-///
-/// Returns an error if a provider extension fails to load or initialise.
-pub fn collect_provider_models(
-    engine: &wasmtime::Engine,
-    manifest: &manifest::WorkspaceManifest,
-) -> Result<ProviderModels> {
+/// Collects provider models from all registered LLM providers.
+pub fn collect_provider_models(providers: &[&dyn LlmProvider]) -> ProviderModels {
     let mut result = BTreeMap::new();
-    for entry in &manifest.extensions {
-        if !entry.enabled || entry.slot.as_deref() != Some(crate::slot::LLM_PROVIDER) {
-            continue;
-        }
-        let path = Path::new(&entry.wasm_path);
-        let opts = extension_host::LoadOptions::for_entry(entry);
-        // Probe with empty init to discover provider ID, then re-load
-        // with real credentials so list_models() can make authenticated calls.
-        let mut probe = extension_host::ExtensionInstance::load(engine, path, &opts)
-            .map_err(|e| anyhow::anyhow!("loading {}: {e}", entry.id))?;
-        let probe_init = probe
-            .init(&[])
-            .map_err(|e| anyhow::anyhow!("init {}: {e}", entry.id))?;
-        if probe_init.is_err() {
-            continue;
-        }
-        let Ok(Ok(provider_id)) = probe.provider_id() else {
-            continue;
-        };
-        drop(probe);
-
-        let init_config = crate::provider::init_config(&provider_id);
-        let mut instance = extension_host::ExtensionInstance::load(engine, path, &opts)
-            .map_err(|e| anyhow::anyhow!("loading {}: {e}", entry.id))?;
-        let init_result = instance
-            .init(&init_config)
-            .map_err(|e| anyhow::anyhow!("init {}: {e}", entry.id))?;
-        if let Err(e) = init_result {
-            tracing::warn!(extension = %entry.id, error = %e, "init failed");
-            continue;
-        }
-        let provider_id = instance
-            .provider_id()?
-            .map_err(|e| anyhow::anyhow!("{}: provider-id failed: {e}", entry.id))?;
-        match instance.list_models()? {
-            Ok(models) => {
-                debug!(
-                    provider = %provider_id,
-                    models = models.len(),
-                    "collected models from provider"
-                );
-                result.insert(provider_id, models);
-            }
-            Err(e) => tracing::warn!(extension = %entry.id, error = %e, "list-models failed"),
+    for provider in providers {
+        let models = provider.list_models();
+        if !models.is_empty() {
+            result.insert(provider.provider_id().to_owned(), models);
         }
     }
     info!(
         providers = result.len(),
         "provider model collection complete"
     );
-    Ok(result)
+    result
 }
 
 /// Resolves a role to `(provider_id, model_id)`.
 ///
 /// Tries the requested role, falls back to `"default"`, then falls back
 /// to the first provider's default model.
-///
-/// # Errors
-///
-/// Returns an error if no LLM providers are available.
 pub fn resolve_role(
     config: &UserConfig,
     role: &str,
@@ -117,7 +61,7 @@ pub fn find_descriptor<'a>(
     provider_models: &'a ProviderModels,
     provider_id: &str,
     model_id: &str,
-) -> Option<&'a wit_types::ModelDescriptor> {
+) -> Option<&'a ModelDescriptor> {
     provider_models
         .get(provider_id)
         .and_then(|models| models.iter().find(|m| m.id == model_id))
@@ -127,8 +71,8 @@ pub fn find_descriptor<'a>(
 mod tests {
     use super::*;
 
-    fn descriptor(id: &str, is_default: bool) -> wit_types::ModelDescriptor {
-        wit_types::ModelDescriptor {
+    fn descriptor(id: &str, is_default: bool) -> ModelDescriptor {
+        ModelDescriptor {
             id: id.into(),
             name: id.into(),
             description: String::new(),
@@ -198,11 +142,5 @@ mod tests {
     fn find_descriptor_unknown_provider() {
         let pm = sample_providers();
         assert!(find_descriptor(&pm, "google", "gemini").is_none());
-    }
-
-    #[test]
-    fn find_descriptor_unknown_model_in_known_provider() {
-        let pm = sample_providers();
-        assert!(find_descriptor(&pm, "anthropic", "nonexistent").is_none());
     }
 }

@@ -10,15 +10,15 @@ pub mod app;
 pub mod cli;
 pub mod config;
 pub mod discovery;
-pub mod extension_host;
 pub mod extension_settings;
 pub mod keyring;
 pub mod logging;
 pub mod manifest;
 pub mod model;
 pub mod provider;
+pub mod providers;
 pub mod session;
-pub mod slot;
+pub mod types;
 pub mod workspace;
 
 /// Returns the user's home directory from `$HOME`.

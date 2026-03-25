@@ -33,7 +33,6 @@ pub struct Message {
 }
 
 /// All mutable state for a running TUI session.
-#[derive(Debug)]
 pub struct App {
     /// Current interaction mode.
     pub mode: Mode,
@@ -183,12 +182,7 @@ fn format_extensions(entries: &[ManifestEntry]) -> String {
             out.push('\n');
         }
         let status = if e.enabled { "enabled" } else { "disabled" };
-        let slot = e.slot.as_deref().unwrap_or("(none)");
-        let _ = write!(
-            out,
-            "[{status}] {} \u{2014} {} (slot: {slot})",
-            e.id, e.name
-        );
+        let _ = write!(out, "[{status}] {} \u{2014} {}", e.id, e.name);
     }
     out
 }

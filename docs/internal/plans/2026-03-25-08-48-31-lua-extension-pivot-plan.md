@@ -134,8 +134,8 @@ capability. Phase 6 proves it all works.
 
 ### Phase 1: Spike — validate mlua assumptions
 
-- [ ] Add `mlua` dependency: `cargo add mlua --features luau,async,send,serde,macros`
-- [ ] Create `src/lua_spike.rs` (temporary) that validates:
+- [x] Add `mlua` dependency: `cargo add mlua --features luau,async,send,serde,macros`
+- [x] Create `src/lua_spike.rs` (temporary) that validates:
   - Sandboxed VM creation with `Lua::sandbox(true)`
   - Custom `require("ur")` returning a host-injected table
   - Registering a sync Rust function callable from Lua
@@ -143,8 +143,8 @@ capability. Phase 6 proves it all works.
   - Memory limit enforcement (`set_memory_limit`)
   - Interrupt-based execution timeout (`set_interrupt`)
   - Serde round-trip of Lua tables to/from Rust types
-- [ ] Run spike as a test; confirm all assertions pass
-- [ ] Delete `src/lua_spike.rs` after validation
+- [x] Run spike as a test; confirm all assertions pass
+- [x] Delete `src/lua_spike.rs` after validation
 
 ### Phase 2: Remove WASM infrastructure
 
