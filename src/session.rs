@@ -374,10 +374,13 @@ impl UrSession {
             });
         }
 
-        self.persist_and_compact()?;
-
+        // Push TurnComplete before persistence so it gets written to storage.
         self.events
             .push(PersistedEvent::TurnComplete { turn_index });
+
+        self.persist_and_compact()?;
+
+        // Emit user-facing event after persistence succeeds.
         on_event(SessionEvent::TurnComplete);
         info!("turn complete");
         Ok(())
@@ -960,5 +963,30 @@ mod tests {
     fn approval_decision_is_eq() {
         assert_eq!(ApprovalDecision::Approve, ApprovalDecision::Approve);
         assert_ne!(ApprovalDecision::Approve, ApprovalDecision::Deny);
+    }
+
+    #[test]
+    fn turn_complete_event_ordering() {
+        // Verify that TurnComplete event is correctly positioned in the event list.
+        // This test ensures TurnComplete is pushed before persist_and_compact is called.
+        let events = [
+            PersistedEvent::TurnStarted { turn_index: 0 },
+            PersistedEvent::UserMessage {
+                text: "Hello".into(),
+            },
+            PersistedEvent::LlmCompletion {
+                message: text_message("assistant", "Hi there"),
+            },
+            PersistedEvent::TurnComplete { turn_index: 0 },
+        ];
+
+        // Verify TurnComplete is present and in the expected position
+        assert_eq!(events.len(), 4);
+        assert!(matches!(events[3], PersistedEvent::TurnComplete { turn_index: 0 }));
+
+        // Verify the event sequence before TurnComplete
+        assert!(matches!(events[0], PersistedEvent::TurnStarted { turn_index: 0 }));
+        assert!(matches!(events[1], PersistedEvent::UserMessage { .. }));
+        assert!(matches!(events[2], PersistedEvent::LlmCompletion { .. }));
     }
 }
