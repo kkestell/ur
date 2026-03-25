@@ -6,7 +6,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
+use tracing::warn;
+
 use crate::config::{self, UserConfig};
+use crate::lua_host::LuaExtension;
 use crate::manifest::{self, ManifestEntry, WorkspaceManifest};
 use crate::model::{self, ProviderModels};
 use crate::provider;
@@ -14,7 +17,7 @@ use crate::providers::compaction::StubCompactionProvider;
 use crate::providers::session_jsonl::JsonlSessionProvider;
 use crate::providers::{CompactionProvider, LlmProvider, SessionProvider};
 use crate::session::UrSession;
-use crate::types::{ModelDescriptor, ToolDescriptor};
+use crate::types::{ExtensionCapabilities, ToolDescriptor};
 
 /// A role mapping entry.
 #[derive(Debug)]
@@ -38,6 +41,8 @@ pub struct UrWorkspace {
     manifest: WorkspaceManifest,
     config: UserConfig,
     llm_providers: Vec<Arc<dyn LlmProvider>>,
+    /// Loaded Lua extensions.
+    lua_extensions: Vec<Arc<LuaExtension>>,
 }
 
 impl UrWorkspace {
@@ -62,12 +67,33 @@ impl UrWorkspace {
             ));
         }
 
+        // Load enabled Lua extensions.
+        let mut lua_extensions = Vec::new();
+        let ext_config = serde_json::Value::Object(serde_json::Map::new());
+        for entry in &manifest.extensions {
+            if !entry.enabled {
+                continue;
+            }
+            let caps = ExtensionCapabilities::from_strings(&entry.capabilities);
+            match LuaExtension::load(
+                Path::new(&entry.dir_path),
+                &entry.id,
+                &entry.name,
+                &caps,
+                &ext_config,
+            ) {
+                Ok(ext) => lua_extensions.push(Arc::new(ext)),
+                Err(e) => warn!(id = %entry.id, error = %e, "failed to load Lua extension"),
+            }
+        }
+
         Self {
             ur_root,
             workspace_path,
             manifest,
             config,
             llm_providers,
+            lua_extensions,
         }
     }
 
@@ -112,6 +138,11 @@ impl UrWorkspace {
 
     pub fn find_extension(&self, id: &str) -> Result<&ManifestEntry> {
         manifest::find_entry(&self.manifest, id)
+    }
+
+    /// Returns the loaded Lua extension for the given ID, if loaded.
+    pub fn lua_extension(&self, id: &str) -> Option<&Arc<LuaExtension>> {
+        self.lua_extensions.iter().find(|e| e.id == id)
     }
 
     // --- Role management ---
@@ -177,13 +208,29 @@ impl UrWorkspace {
             Arc::new(JsonlSessionProvider::new(&sessions_dir));
         let compaction_provider: Arc<dyn CompactionProvider> = Arc::new(StubCompactionProvider);
 
+        // Collect tool handlers from Lua extensions.
+        let mut tool_handlers: Vec<(
+            ToolDescriptor,
+            Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
+        )> = Vec::new();
+        for ext in &self.lua_extensions {
+            for desc in ext.tool_descriptors() {
+                let ext_clone = ext.clone();
+                let tool_name = desc.name.clone();
+                tool_handlers.push((
+                    desc,
+                    Arc::new(move |args: &str| ext_clone.call_tool(&tool_name, args)),
+                ));
+            }
+        }
+
         UrSession::open(
             self.llm_providers.clone(),
             session_provider,
             compaction_provider,
             self.config.clone(),
             session_id,
-            Vec::new(), // no tool handlers yet, Lua extensions will add them
+            tool_handlers,
         )
     }
 

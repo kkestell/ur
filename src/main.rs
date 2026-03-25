@@ -66,6 +66,23 @@ fn handle_extension(ws: &mut UrWorkspace, action: &ExtensionAction) -> Result<()
         ExtensionAction::Inspect { id } => {
             let entry = ws.find_extension(id)?;
             cli::print_inspect(entry);
+            // Show tools and hooks if the extension is loaded.
+            if let Some(ext) = ws.lua_extension(id) {
+                let tools = ext.tool_descriptors();
+                if !tools.is_empty() {
+                    println!("tools:");
+                    for t in &tools {
+                        println!("  - {} \u{2014} {}", t.name, t.description);
+                    }
+                }
+                let hooks = ext.hook_names();
+                if !hooks.is_empty() {
+                    println!("hooks:");
+                    for h in &hooks {
+                        println!("  - {h}");
+                    }
+                }
+            }
         }
     }
     Ok(())
