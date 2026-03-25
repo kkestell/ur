@@ -1,6 +1,7 @@
-//! Run command integration tests.
+//! Tool-dispatch tests for extension capabilities.
 //!
-//! Tests for turn execution, tool dispatch, and async network capability.
+//! Tests the Lua host API (tool handlers, async HTTP, etc.) by loading
+//! extensions directly — no CLI involved.
 
 use std::io::Write;
 use std::sync::Arc;
@@ -20,7 +21,6 @@ fn spawn_http_server(request_count: usize) -> std::net::SocketAddr {
     std::thread::spawn(move || {
         for _ in 0..request_count {
             if let Ok((mut stream, _)) = listener.accept() {
-                // Read the request (drain the input so the client doesn't hang).
                 let mut buf = [0u8; 1024];
                 let _ = std::io::Read::read(&mut stream, &mut buf);
 
@@ -101,7 +101,6 @@ async fn lua_tool_handler_can_call_http_get() {
 /// Proves that HTTP errors are propagated correctly back to Lua.
 #[tokio::test(flavor = "multi_thread")]
 async fn lua_tool_handler_http_get_propagates_status_codes() {
-    // Server that responds with 404.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let addr = listener.local_addr().expect("addr");
 
@@ -145,10 +144,9 @@ async fn lua_tool_handler_http_get_propagates_status_codes() {
     assert_eq!(parsed["status"], 404, "HTTP status should be 404");
 }
 
-/// Proves that the test extension's `http_status` tool works end-to-end
-/// (exercises the same code path as a real session tool dispatch).
+/// Proves that the test extension's `http_status` tool works end-to-end.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_extension_http_status_tool() {
+async fn http_status_tool() {
     let addr = spawn_http_server(1);
     let url = format!("http://{addr}/status-check");
 
@@ -170,7 +168,6 @@ async fn test_extension_http_status_tool() {
     )
     .unwrap();
 
-    // Verify the http_status tool is registered.
     let descriptors = ext.tool_descriptors();
     assert!(
         descriptors.iter().any(|d| d.name == "http_status"),

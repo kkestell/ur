@@ -10,7 +10,6 @@ mod extension;
 mod google;
 mod openrouter;
 mod role;
-mod run;
 
 use assert_cmd::Command;
 use std::path::PathBuf;
