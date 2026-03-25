@@ -1,9 +1,7 @@
 # Ur
 
-Ur is an agentic coding assistant with a tiny Rust core and a rich extension system. 
+Ur is an agentic coding assistant with a lean Rust core and a Lua extension system.
 
-The core handles the agent loop and extension hosting. Everything else — LLM providers, tools, session storage, context — is an extension.
+The core handles the agent loop, LLM providers, session storage, and compaction. Extensions add tools and hooks via sandboxed Lua scripts.
 
-Extensions are WebAssembly components running in wasmtime. They're sandboxed with deny-by-default permissions: no filesystem or network access unless explicitly declared. 
-
-Extensions can be written in any language that compiles to the WASM Component Model, using typed bindings generated from a WIT API.
+Extensions run in isolated Luau VMs with deny-by-default permissions: no filesystem or network access unless explicitly declared in `extension.toml`. Each VM is memory-limited (64 MB) and instruction-budgeted.
