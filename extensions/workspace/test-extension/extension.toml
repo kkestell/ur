@@ -1,0 +1,4 @@
+[extension]
+id = "test-extension"
+name = "Test Extension"
+capabilities = ["network"]

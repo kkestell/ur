@@ -13,6 +13,14 @@ use crate::lua_host::{RegisteredHook, RegisteredTool};
 use crate::types::{ExtensionCapabilities, ToolDescriptor};
 
 /// Builds the `ur` module table for a Lua extension.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+///
+/// # Panics
+///
+/// Panics if a mutex is poisoned.
 pub fn build_ur_module(
     lua: &Lua,
     capabilities: &ExtensionCapabilities,
@@ -34,13 +42,13 @@ pub fn build_ur_module(
     ur.set("config", config_table)?;
 
     // ur.tool(name, spec) — register a tool
-    let tools_clone = tools.clone();
+    let tools_clone = Arc::clone(tools);
     let tool_fn = lua.create_function(move |lua, (name, spec): (String, LuaTable)| {
         let description: String = spec.get("description").unwrap_or_default();
         let parameters: LuaValue = spec.get::<LuaValue>("parameters").unwrap_or(LuaValue::Nil);
         let handler: LuaFunction = spec
             .get("handler")
-            .map_err(|_| LuaError::runtime("tool spec must include a 'handler' function"))?;
+            .map_err(|_err| LuaError::runtime("tool spec must include a 'handler' function"))?;
 
         // Convert parameters to JSON schema string.
         let params_json = if parameters.is_nil() {
@@ -68,7 +76,7 @@ pub fn build_ur_module(
     ur.set("tool", tool_fn)?;
 
     // ur.hook(name, fn) — register a lifecycle hook handler
-    let hooks_clone = hooks.clone();
+    let hooks_clone = Arc::clone(hooks);
     let hook_fn = lua.create_function(move |lua, (name, handler): (String, LuaFunction)| {
         let valid_hooks = [
             "before_completion",
@@ -123,12 +131,12 @@ fn build_http_module(lua: &Lua) -> Result<LuaTable> {
             let client = reqwest::Client::new();
             let mut builder = client.get(&url);
 
-            if let Some(opts) = &opts {
-                if let Ok(headers) = opts.get::<LuaTable>("headers") {
-                    for pair in headers.pairs::<String, String>() {
-                        let (key, value) = pair?;
-                        builder = builder.header(key, value);
-                    }
+            if let Some(opts) = &opts
+                && let Ok(headers) = opts.get::<LuaTable>("headers")
+            {
+                for pair in headers.pairs::<String, String>() {
+                    let (key, value) = pair?;
+                    builder = builder.header(key, value);
                 }
             }
 
@@ -148,12 +156,12 @@ fn build_http_module(lua: &Lua) -> Result<LuaTable> {
             let client = reqwest::Client::new();
             let mut builder = client.post(&url).body(body);
 
-            if let Some(opts) = &opts {
-                if let Ok(headers) = opts.get::<LuaTable>("headers") {
-                    for pair in headers.pairs::<String, String>() {
-                        let (key, value) = pair?;
-                        builder = builder.header(key, value);
-                    }
+            if let Some(opts) = &opts
+                && let Ok(headers) = opts.get::<LuaTable>("headers")
+            {
+                for pair in headers.pairs::<String, String>() {
+                    let (key, value) = pair?;
+                    builder = builder.header(key, value);
                 }
             }
 
@@ -185,7 +193,7 @@ fn build_fs_module(lua: &Lua, can_read: bool, can_write: bool) -> Result<LuaTabl
         let list_fn = lua.create_function(|lua, path: String| {
             let entries: Vec<String> = std::fs::read_dir(&path)
                 .map_err(LuaError::external)?
-                .filter_map(|e| e.ok())
+                .filter_map(std::result::Result::ok)
                 .map(|e| e.file_name().to_string_lossy().into_owned())
                 .collect();
             lua.to_value(&entries)

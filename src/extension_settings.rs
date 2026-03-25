@@ -4,6 +4,7 @@
 //! directly through the provider traits and user config.
 
 /// Simple glob matching: supports `*` wildcard segments.
+#[allow(dead_code, reason = "Will be used by future settings matching code")]
 pub(crate) fn glob_match(pattern: &str, key: &str) -> bool {
     if pattern == "*" {
         return true;

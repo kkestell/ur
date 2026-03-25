@@ -17,11 +17,15 @@ use crate::types::{
 
 /// Trait for LLM completion providers.
 pub trait LlmProvider: Send + Sync {
-    fn provider_id(&self) -> &str;
+    fn provider_id(&self) -> &'static str;
     fn list_models(&self) -> Vec<ModelDescriptor>;
     fn list_settings(&self) -> Vec<SettingDescriptor>;
 
     /// Runs a streaming completion. Calls `on_chunk` for each streamed chunk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     fn complete(
         &self,
         messages: &[Message],
@@ -35,12 +39,26 @@ pub trait LlmProvider: Send + Sync {
 
 /// Trait for session persistence providers.
 pub trait SessionProvider: Send + Sync {
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     fn load_session(&self, session_id: &str) -> Result<Vec<SessionEvent>>;
+
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     fn append_session(&self, session_id: &str, event: &SessionEvent) -> Result<()>;
+
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     fn list_sessions(&self) -> Result<Vec<SessionInfo>>;
 }
 
 /// Trait for message compaction providers.
 pub trait CompactionProvider: Send + Sync {
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     fn compact(&self, messages: &[Message]) -> Result<Vec<Message>>;
 }

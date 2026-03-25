@@ -66,6 +66,10 @@ pub enum HookResult {
 /// Extensions are called in order. Each extension sees the (possibly
 /// modified) context from the previous extension. If a `before_*` hook
 /// returns `{ action = "reject", reason = "..." }`, the chain stops.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn run_hook(
     extensions: &[Arc<LuaExtension>],
     hook: HookPoint,
@@ -105,12 +109,12 @@ pub fn run_hook(
             }
             "modify" => {
                 // Merge modifications into context.
-                if let Some(obj) = result.as_object() {
-                    if let Some(ctx_obj) = context.as_object_mut() {
-                        for (k, v) in obj {
-                            if k != "action" {
-                                ctx_obj.insert(k.clone(), v.clone());
-                            }
+                if let Some(obj) = result.as_object()
+                    && let Some(ctx_obj) = context.as_object_mut()
+                {
+                    for (k, v) in obj {
+                        if k != "action" {
+                            ctx_obj.insert(k.clone(), v.clone());
                         }
                     }
                 }

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use mlua::prelude::*;
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::host_api;
 use crate::types::{ExtensionCapabilities, ToolDescriptor};
@@ -24,6 +24,10 @@ const DEFAULT_MEMORY_LIMIT: usize = 64 * 1024 * 1024;
 const INTERRUPT_BUDGET: u32 = 100_000;
 
 /// A loaded Lua extension with its VM and registered handlers.
+#[expect(
+    missing_debug_implementations,
+    reason = "Lua VM and registry keys do not implement Debug"
+)]
 pub struct LuaExtension {
     pub id: String,
     pub name: String,
@@ -37,6 +41,10 @@ pub struct LuaExtension {
 }
 
 /// A tool registered by a Lua extension.
+#[expect(
+    missing_debug_implementations,
+    reason = "LuaRegistryKey does not implement Debug"
+)]
 pub struct RegisteredTool {
     pub descriptor: ToolDescriptor,
     /// Reference to the Lua handler function.
@@ -44,6 +52,10 @@ pub struct RegisteredTool {
 }
 
 /// A hook registered by a Lua extension.
+#[expect(
+    missing_debug_implementations,
+    reason = "LuaRegistryKey does not implement Debug"
+)]
 pub struct RegisteredHook {
     pub hook_name: String,
     /// Reference to the Lua handler function.
@@ -55,6 +67,14 @@ impl LuaExtension {
     ///
     /// Reads `extension.toml`, creates a sandboxed VM, injects the `ur`
     /// module, and executes `init.lua`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a mutex is poisoned.
     pub fn load(
         dir_path: &Path,
         id: &str,
@@ -77,7 +97,7 @@ impl LuaExtension {
 
         // Set up interrupt for execution timeouts.
         let interrupt_counter = Arc::new(AtomicU32::new(0));
-        let counter_clone = interrupt_counter.clone();
+        let counter_clone = Arc::clone(&interrupt_counter);
         lua.set_interrupt(move |_| {
             let n = counter_clone.fetch_add(1, Ordering::Relaxed);
             if n > INTERRUPT_BUDGET {
@@ -129,6 +149,11 @@ impl LuaExtension {
     }
 
     /// Returns the tool descriptors registered by this extension.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a mutex is poisoned.
+    #[must_use]
     pub fn tool_descriptors(&self) -> Vec<ToolDescriptor> {
         self.tools
             .lock()
@@ -139,6 +164,11 @@ impl LuaExtension {
     }
 
     /// Returns the hook names registered by this extension.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a mutex is poisoned.
+    #[must_use]
     pub fn hook_names(&self) -> Vec<String> {
         self.hooks
             .lock()
@@ -149,6 +179,14 @@ impl LuaExtension {
     }
 
     /// Calls a tool handler registered by this extension.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a mutex is poisoned.
     pub fn call_tool(&self, name: &str, arguments_json: &str) -> Result<String> {
         let handler_key = {
             let tools = self.tools.lock().unwrap();
@@ -186,6 +224,14 @@ impl LuaExtension {
     }
 
     /// Calls a hook handler and returns the result as a JSON value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a mutex is poisoned.
     pub fn call_hook(
         &self,
         hook_name: &str,
@@ -210,6 +256,11 @@ impl LuaExtension {
     }
 
     /// Returns whether this extension has a handler for the given hook.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a mutex is poisoned.
+    #[must_use]
     pub fn has_hook(&self, hook_name: &str) -> bool {
         self.hooks
             .lock()

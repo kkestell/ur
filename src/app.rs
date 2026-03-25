@@ -24,6 +24,10 @@ pub struct UrApp {
 
 impl UrApp {
     /// Creates a new application instance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn new(ur_root: PathBuf) -> Result<Self> {
         info!(ur_root = %ur_root.display(), "app initialized");
         Ok(Self { ur_root })

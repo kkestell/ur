@@ -3,23 +3,25 @@
 //! `UrSession` owns a persisted conversation session and drives the
 //! agent turn state machine.
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use tracing::{debug, info};
 
 use crate::config::UserConfig;
 use crate::hooks::{self, HookPoint, HookResult};
 use crate::lua_host::LuaExtension;
 use crate::model;
-use crate::providers::compaction::StubCompactionProvider;
-use crate::providers::session_jsonl::JsonlSessionProvider;
 use crate::providers::{CompactionProvider, LlmProvider, SessionProvider};
 use crate::types::{
-    self, Completion, CompletionChunk, Message, MessagePart, TextPart, ToolCall, ToolChoice,
-    ToolDescriptor, ToolResult, Usage,
+    self, Completion, CompletionChunk, Message, MessagePart, ToolCall, ToolDescriptor, ToolResult,
 };
+
+/// A tool handler: descriptor paired with its invocation closure.
+type ToolHandler = (
+    ToolDescriptor,
+    Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
+);
 
 /// A structured event emitted during turn execution.
 #[derive(Debug, Clone)]
@@ -95,6 +97,10 @@ pub struct SessionSnapshot {
 }
 
 /// Session-scoped coordinator for turn execution.
+#[expect(
+    missing_debug_implementations,
+    reason = "Contains dyn trait objects and closures that are not Debug"
+)]
 pub struct UrSession {
     llm_providers: Vec<Arc<dyn LlmProvider>>,
     session_provider: Arc<dyn SessionProvider>,
@@ -105,10 +111,7 @@ pub struct UrSession {
     persisted_event_count: usize,
     turn_count: u32,
     /// Tool handlers registered by Lua extensions.
-    tool_handlers: Vec<(
-        ToolDescriptor,
-        Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
-    )>,
+    tool_handlers: Vec<ToolHandler>,
     /// Lua extensions for hook dispatch.
     extensions: Vec<Arc<LuaExtension>>,
 }
@@ -121,10 +124,7 @@ impl UrSession {
         compaction_provider: Arc<dyn CompactionProvider>,
         config: UserConfig,
         session_id: &str,
-        tool_handlers: Vec<(
-            ToolDescriptor,
-            Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
-        )>,
+        tool_handlers: Vec<ToolHandler>,
         extensions: Vec<Arc<LuaExtension>>,
     ) -> Result<Self> {
         let stored_events = session_provider.load_session(session_id)?;
@@ -170,6 +170,10 @@ impl UrSession {
     }
 
     /// Runs a single agent turn with a user message.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn run_turn(
         &mut self,
         user_message: &str,
@@ -189,7 +193,7 @@ impl UrSession {
             &self
                 .llm_providers
                 .iter()
-                .map(|p| p.as_ref())
+                .map(std::convert::AsRef::as_ref)
                 .collect::<Vec<_>>(),
         );
         let (provider_id, model_id) =
@@ -200,8 +204,8 @@ impl UrSession {
             .llm_providers
             .iter()
             .find(|p| p.provider_id() == provider_id)
-            .ok_or_else(|| anyhow::anyhow!("no provider with id \"{provider_id}\""))?
-            .clone();
+            .ok_or_else(|| anyhow::anyhow!("no provider with id \"{provider_id}\""))?;
+        let llm = Arc::clone(llm);
 
         // Collect tools from extensions.
         let tools: Vec<ToolDescriptor> =
@@ -398,7 +402,7 @@ impl UrSession {
                 .tool_handlers
                 .iter()
                 .find(|(d, _)| d.name == tc.name)
-                .map(|(_, h)| h.clone());
+                .map(|(_, h)| Arc::clone(h));
 
             let result_content = if let Some(handler) = handler {
                 match handler(&tc.arguments_json) {

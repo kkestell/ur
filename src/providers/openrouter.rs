@@ -1,4 +1,4 @@
-//! Native OpenRouter LLM provider.
+//! Native `OpenRouter` LLM provider.
 //!
 //! Ports the WASM `llm-openrouter` extension to a native Rust module using
 //! `reqwest` for HTTP and `futures_util::StreamExt` for SSE streaming.
@@ -10,20 +10,25 @@ use tokio::sync::RwLock;
 use crate::types::{
     Completion, CompletionChunk, ConfigSetting, Message, MessagePart, ModelDescriptor,
     SettingBoolean, SettingDescriptor, SettingInteger, SettingNumber, SettingSchema, SettingString,
-    SettingValue, TextPart, ToolCall, ToolChoice, ToolDescriptor, ToolResult, Usage,
+    SettingValue, TextPart, ToolCall, ToolChoice, ToolDescriptor, Usage,
 };
 
 // ── Provider struct ─────────────────────────────────────────────────
 
+#[expect(
+    missing_debug_implementations,
+    reason = "Contains async RwLocks that are not Debug-friendly"
+)]
 pub struct OpenRouterProvider {
     api_key: String,
     client: reqwest::Client,
-    /// Cached model catalog fetched from OpenRouter.
+    /// Cached model catalog fetched from `OpenRouter`.
     cached_catalog: RwLock<Option<Vec<CatalogModel>>>,
     cached_settings: RwLock<Option<Vec<SettingDescriptor>>>,
 }
 
 impl OpenRouterProvider {
+    #[must_use]
     pub fn new(api_key: String) -> Self {
         Self {
             api_key,
@@ -33,7 +38,7 @@ impl OpenRouterProvider {
         }
     }
 
-    pub fn provider_id(&self) -> &str {
+    pub fn provider_id(&self) -> &'static str {
         "openrouter"
     }
 
@@ -166,7 +171,7 @@ impl OpenRouterProvider {
             while let Some(chunk) = try_parse_sse_event(&mut sse_state) {
                 // Track usage from the last chunk that carries it.
                 if chunk.usage.is_some() {
-                    final_usage = chunk.usage.clone();
+                    final_usage.clone_from(&chunk.usage);
                 }
 
                 // Accumulate parts for the final Completion message.
@@ -181,7 +186,7 @@ impl OpenRouterProvider {
         // Drain any remaining buffered events after stream ends.
         while let Some(chunk) = try_parse_sse_event(&mut sse_state) {
             if chunk.usage.is_some() {
-                final_usage = chunk.usage.clone();
+                final_usage.clone_from(&chunk.usage);
             }
             for part in &chunk.delta_parts {
                 accumulate_part(&mut accumulated_parts, part);
@@ -198,7 +203,7 @@ impl OpenRouterProvider {
         })
     }
 
-    /// Fetches the model catalog from OpenRouter's API.
+    /// Fetches the model catalog from `OpenRouter`'s API.
     async fn fetch_catalog(&self) -> anyhow::Result<Vec<CatalogModel>> {
         let response = self
             .client
@@ -238,7 +243,7 @@ impl OpenRouterProvider {
 }
 
 impl super::LlmProvider for OpenRouterProvider {
-    fn provider_id(&self) -> &str {
+    fn provider_id(&self) -> &'static str {
         "openrouter"
     }
 
@@ -417,12 +422,12 @@ fn parse_sse_chunk(
     let mut delta_parts = Vec::new();
 
     // Text content.
-    if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-        if !content.is_empty() {
-            delta_parts.push(MessagePart::Text(TextPart {
-                text: content.to_string(),
-            }));
-        }
+    if let Some(content) = delta.get("content").and_then(|c| c.as_str())
+        && !content.is_empty()
+    {
+        delta_parts.push(MessagePart::Text(TextPart {
+            text: content.to_string(),
+        }));
     }
 
     // Tool call deltas -- accumulate across chunks.
@@ -488,7 +493,7 @@ fn parse_sse_chunk(
 
 // ── Catalog types ───────────────────────────────────────────────────
 
-/// Raw model entry from the OpenRouter `GET /api/v1/models` response.
+/// Raw model entry from the `OpenRouter` `GET /api/v1/models` response.
 #[derive(serde::Deserialize, Clone)]
 struct CatalogModel {
     id: String,
@@ -944,14 +949,14 @@ fn message_to_openai(msg: &Message) -> serde_json::Value {
     };
 
     // Tool result messages.
-    if role == "tool" {
-        if let Some(MessagePart::ToolResult(tr)) = msg.parts.first() {
-            return serde_json::json!({
-                "role": "tool",
-                "tool_call_id": tr.tool_call_id,
-                "content": tr.content,
-            });
-        }
+    if role == "tool"
+        && let Some(MessagePart::ToolResult(tr)) = msg.parts.first()
+    {
+        return serde_json::json!({
+            "role": "tool",
+            "tool_call_id": tr.tool_call_id,
+            "content": tr.content,
+        });
     }
 
     // Assistant messages with tool calls.
@@ -1047,6 +1052,7 @@ fn accumulate_part(parts: &mut Vec<MessagePart>, delta: &MessagePart) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ToolResult;
 
     // ── Pricing conversion tests ────────────────────────────────────
 

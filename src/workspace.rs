@@ -19,6 +19,12 @@ use crate::providers::{CompactionProvider, LlmProvider, SessionProvider};
 use crate::session::UrSession;
 use crate::types::{ExtensionCapabilities, ToolDescriptor};
 
+/// A tool handler: descriptor paired with its invocation closure.
+type ToolHandler = (
+    ToolDescriptor,
+    Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
+);
+
 /// A role mapping entry.
 #[derive(Debug)]
 pub struct RoleEntry {
@@ -35,6 +41,10 @@ pub struct ResolvedRole {
 }
 
 /// Workspace-scoped coordinator.
+#[expect(
+    missing_debug_implementations,
+    reason = "Contains dyn trait objects and Lua extensions that are not Debug"
+)]
 pub struct UrWorkspace {
     ur_root: PathBuf,
     workspace_path: PathBuf,
@@ -124,40 +134,53 @@ impl UrWorkspace {
         &self.manifest.extensions
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn enable_extension(&mut self, id: &str) -> Result<()> {
         manifest::enable(&mut self.manifest, id)?;
         manifest::save_manifest(&self.ur_root, &self.workspace_path, &self.manifest)?;
         Ok(())
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn disable_extension(&mut self, id: &str) -> Result<()> {
         manifest::disable(&mut self.manifest, id)?;
         manifest::save_manifest(&self.ur_root, &self.workspace_path, &self.manifest)?;
         Ok(())
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn find_extension(&self, id: &str) -> Result<&ManifestEntry> {
         manifest::find_entry(&self.manifest, id)
     }
 
     /// Returns the loaded Lua extension for the given ID, if loaded.
+    #[must_use]
     pub fn lua_extension(&self, id: &str) -> Option<&Arc<LuaExtension>> {
         self.lua_extensions.iter().find(|e| e.id == id)
     }
 
     // --- Role management ---
 
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn list_roles(&self) -> Result<Vec<RoleEntry>> {
         let providers = self.provider_models();
         let mut entries = Vec::new();
 
-        if !self.config.roles.contains_key("default") {
-            if let Ok((p, m)) = model::resolve_role(&self.config, "default", &providers) {
-                entries.push(RoleEntry {
-                    role: "default".into(),
-                    model_ref: format!("{p}/{m}"),
-                });
-            }
+        if !self.config.roles.contains_key("default")
+            && let Ok((p, m)) = model::resolve_role(&self.config, "default", &providers)
+        {
+            entries.push(RoleEntry {
+                role: "default".into(),
+                model_ref: format!("{p}/{m}"),
+            });
         }
         for (role, model_ref) in &self.config.roles {
             entries.push(RoleEntry {
@@ -168,6 +191,9 @@ impl UrWorkspace {
         Ok(entries)
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn resolve_role(&self, role: &str) -> Result<ResolvedRole> {
         let providers = self.provider_models();
         let (provider_id, model_id) = model::resolve_role(&self.config, role, &providers)?;
@@ -178,6 +204,9 @@ impl UrWorkspace {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn set_role(&mut self, role: &str, model_ref: &str) -> Result<ResolvedRole> {
         let providers = self.provider_models();
         let (provider_id, model_id) = config::parse_model_ref(model_ref).ok_or_else(|| {
@@ -202,6 +231,9 @@ impl UrWorkspace {
 
     // --- Session access ---
 
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn open_session(&self, session_id: &str) -> Result<UrSession> {
         let sessions_dir = self.sessions_dir();
         let session_provider: Arc<dyn SessionProvider> =
@@ -209,13 +241,10 @@ impl UrWorkspace {
         let compaction_provider: Arc<dyn CompactionProvider> = Arc::new(StubCompactionProvider);
 
         // Collect tool handlers from Lua extensions.
-        let mut tool_handlers: Vec<(
-            ToolDescriptor,
-            Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
-        )> = Vec::new();
+        let mut tool_handlers: Vec<ToolHandler> = Vec::new();
         for ext in &self.lua_extensions {
             for desc in ext.tool_descriptors() {
-                let ext_clone = ext.clone();
+                let ext_clone = Arc::clone(ext);
                 let tool_name = desc.name.clone();
                 tool_handlers.push((
                     desc,
@@ -235,6 +264,9 @@ impl UrWorkspace {
         )
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn list_sessions(&self) -> Result<Vec<crate::types::SessionInfo>> {
         let sessions_dir = self.sessions_dir();
         let provider = JsonlSessionProvider::new(&sessions_dir);
@@ -255,7 +287,7 @@ impl UrWorkspace {
             &self
                 .llm_providers
                 .iter()
-                .map(|p| p.as_ref())
+                .map(std::convert::AsRef::as_ref)
                 .collect::<Vec<_>>(),
         )
     }

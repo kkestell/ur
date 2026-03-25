@@ -11,7 +11,7 @@ use super::LlmProvider;
 use crate::types::{
     Completion, CompletionChunk, ConfigSetting, Message, MessagePart, ModelDescriptor,
     SettingDescriptor, SettingEnum, SettingInteger, SettingSchema, SettingString, SettingValue,
-    TextPart, ToolCall, ToolChoice, ToolDescriptor, ToolResult, Usage,
+    TextPart, ToolCall, ToolChoice, ToolDescriptor, Usage,
 };
 
 // ── Constants ───────────────────────────────────────────────────────
@@ -197,6 +197,7 @@ pub struct GoogleProvider {
 }
 
 impl GoogleProvider {
+    #[must_use]
     pub fn new(api_key: String) -> Self {
         Self {
             api_key,
@@ -206,7 +207,7 @@ impl GoogleProvider {
 }
 
 impl LlmProvider for GoogleProvider {
-    fn provider_id(&self) -> &str {
+    fn provider_id(&self) -> &'static str {
         "google"
     }
 
@@ -289,41 +290,36 @@ impl GoogleProvider {
             sse_buf.push_str(&String::from_utf8_lossy(&bytes));
 
             // Parse as many complete SSE events as we can from the buffer.
-            loop {
-                match next_complete_sse_event(&sse_buf) {
-                    Some((consumed, event_text)) => {
-                        sse_buf.drain(..consumed);
+            while let Some((consumed, event_text)) = next_complete_sse_event(&sse_buf) {
+                sse_buf.drain(..consumed);
 
-                        match parse_sse_event(&event_text) {
-                            Ok(Some(chunk)) => {
-                                accumulate_parts(&mut all_parts, &chunk.delta_parts);
-                                if chunk.usage.is_some() {
-                                    last_usage = chunk.usage.clone();
-                                }
-                                on_chunk(chunk);
-                            }
-                            Ok(None) => {}
-                            Err(error) => {
-                                tracing::warn!("skipping malformed SSE event: {error}");
-                            }
+                match parse_sse_event(&event_text) {
+                    Ok(Some(chunk)) => {
+                        accumulate_parts(&mut all_parts, &chunk.delta_parts);
+                        if chunk.usage.is_some() {
+                            last_usage.clone_from(&chunk.usage);
                         }
+                        on_chunk(chunk);
                     }
-                    None => break,
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::warn!("skipping malformed SSE event: {error}");
+                    }
                 }
             }
         }
 
         // Try to parse any trailing data remaining in the buffer.
-        if !sse_buf.is_empty() {
-            if let Some((consumed, event_text)) = next_complete_sse_event(&sse_buf) {
-                sse_buf.drain(..consumed);
-                if let Ok(Some(chunk)) = parse_sse_event(&event_text) {
-                    accumulate_parts(&mut all_parts, &chunk.delta_parts);
-                    if chunk.usage.is_some() {
-                        last_usage = chunk.usage.clone();
-                    }
-                    on_chunk(chunk);
+        if !sse_buf.is_empty()
+            && let Some((consumed, event_text)) = next_complete_sse_event(&sse_buf)
+        {
+            sse_buf.drain(..consumed);
+            if let Ok(Some(chunk)) = parse_sse_event(&event_text) {
+                accumulate_parts(&mut all_parts, &chunk.delta_parts);
+                if chunk.usage.is_some() {
+                    last_usage.clone_from(&chunk.usage);
                 }
+                on_chunk(chunk);
             }
         }
 
@@ -662,6 +658,7 @@ fn message_to_gemini(msg: &Message) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ToolResult;
 
     fn text_chunk_json(text: &str) -> String {
         serde_json::json!({

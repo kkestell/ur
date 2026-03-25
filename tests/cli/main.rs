@@ -13,7 +13,6 @@ mod role;
 mod run;
 
 use assert_cmd::Command;
-use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 

@@ -32,6 +32,10 @@ pub fn collect_provider_models(providers: &[&dyn LlmProvider]) -> ProviderModels
 ///
 /// Tries the requested role, falls back to `"default"`, then falls back
 /// to the first provider's default model.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn resolve_role(
     config: &UserConfig,
     role: &str,

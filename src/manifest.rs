@@ -45,6 +45,10 @@ pub fn escape_workspace_path(path: &Path) -> String {
 }
 
 /// Loads a manifest from disk, returning `None` if it doesn't exist.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn load_manifest(ur_root: &Path, workspace: &Path) -> Result<Option<WorkspaceManifest>> {
     let path = manifest_dir(ur_root, workspace).join("manifest.json");
     match std::fs::read_to_string(&path) {
@@ -67,6 +71,10 @@ pub fn load_manifest(ur_root: &Path, workspace: &Path) -> Result<Option<Workspac
 }
 
 /// Writes a manifest to disk, creating parent directories as needed.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn save_manifest(ur_root: &Path, workspace: &Path, manifest: &WorkspaceManifest) -> Result<()> {
     let dir = manifest_dir(ur_root, workspace);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -120,6 +128,10 @@ pub fn merge(
 
 /// Discovers extensions, loads or creates the manifest, merges, saves,
 /// and returns the updated manifest.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn scan_and_load(ur_root: &Path, workspace: &Path) -> Result<WorkspaceManifest> {
     info!(workspace = %workspace.display(), "scanning for extensions");
     let discovered = discovery::discover(ur_root, workspace)?;
@@ -134,6 +146,10 @@ pub fn scan_and_load(ur_root: &Path, workspace: &Path) -> Result<WorkspaceManife
 // --- State transitions ---
 
 /// Enables an extension by ID.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn enable(manifest: &mut WorkspaceManifest, id: &str) -> Result<()> {
     let idx = find_entry_index(manifest, id)?;
 
@@ -146,6 +162,10 @@ pub fn enable(manifest: &mut WorkspaceManifest, id: &str) -> Result<()> {
 }
 
 /// Disables an extension by ID.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn disable(manifest: &mut WorkspaceManifest, id: &str) -> Result<()> {
     let idx = find_entry_index(manifest, id)?;
 
@@ -158,6 +178,10 @@ pub fn disable(manifest: &mut WorkspaceManifest, id: &str) -> Result<()> {
 }
 
 /// Finds an extension entry by id.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn find_entry<'a>(manifest: &'a WorkspaceManifest, id: &str) -> Result<&'a ManifestEntry> {
     manifest
         .extensions

@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use crate::types::{
-    ConfigSetting, SettingBoolean, SettingDescriptor, SettingEnum, SettingInteger, SettingNumber,
-    SettingSchema, SettingString, SettingValue,
+    ConfigSetting, SettingDescriptor, SettingEnum, SettingInteger, SettingNumber, SettingSchema,
+    SettingValue,
 };
 
 /// Top-level user configuration.
@@ -40,6 +40,10 @@ impl UserConfig {
     /// Loads config from `{ur_root}/config.toml`.
     ///
     /// Returns `Default` if the file does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn load(ur_root: &Path) -> Result<Self> {
         let path = ur_root.join("config.toml");
         match std::fs::read_to_string(&path) {
@@ -62,6 +66,10 @@ impl UserConfig {
     }
 
     /// Saves config to `{ur_root}/config.toml`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn save(&self, ur_root: &Path) -> Result<()> {
         std::fs::create_dir_all(ur_root)?;
         let contents = toml::to_string_pretty(self)?;
@@ -77,6 +85,10 @@ impl UserConfig {
     }
 
     /// Returns provider-specific settings for a model as typed `ConfigSetting` values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn settings_for(
         &self,
         extension_id: &str,
@@ -150,6 +162,10 @@ pub(crate) fn validate_number(n: f64, schema: &SettingNumber, key: &str) -> Resu
 }
 
 /// Parses a CLI string value into a TOML value according to the setting's schema.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn parse_setting_value(raw: &str, schema: &SettingSchema, key: &str) -> Result<toml::Value> {
     match schema {
         SettingSchema::Integer(int_schema) => {
@@ -251,6 +267,7 @@ pub fn schema_type_name(schema: &SettingSchema) -> &'static str {
     }
 }
 
+#[expect(dead_code, reason = "Will be used by future CLI display code")]
 pub(crate) fn format_setting_value(val: &SettingValue) -> String {
     match val {
         SettingValue::Integer(n) => n.to_string(),

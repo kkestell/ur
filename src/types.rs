@@ -234,6 +234,7 @@ pub struct ExtensionCapabilities {
 
 impl ExtensionCapabilities {
     /// Parses capability strings from an extension manifest.
+    #[must_use]
     pub fn from_strings(caps: &[String]) -> Self {
         let mut result = Self::default();
         for cap in caps {
@@ -248,6 +249,7 @@ impl ExtensionCapabilities {
     }
 
     /// Returns capability strings for serialization.
+    #[must_use]
     pub fn to_strings(&self) -> Vec<String> {
         let mut result = Vec::new();
         if self.network {
@@ -267,6 +269,7 @@ impl ExtensionCapabilities {
 
 impl Message {
     /// Creates a text-only message.
+    #[must_use]
     pub fn text(role: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
             role: role.into(),
@@ -277,6 +280,7 @@ impl Message {
 
 impl MessagePart {
     /// Returns the text content if this is a text part.
+    #[must_use]
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Self::Text(t) => Some(&t.text),
