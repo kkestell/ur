@@ -9,6 +9,7 @@ use anyhow::Result;
 use tracing::warn;
 
 use crate::config::{self, UserConfig};
+use crate::host_api::HostProviders;
 use crate::lua_host::LuaExtension;
 use crate::manifest::{self, ManifestEntry, WorkspaceManifest};
 use crate::model::{self, ProviderModels};
@@ -16,7 +17,7 @@ use crate::provider;
 use crate::providers::compaction::StubCompactionProvider;
 use crate::providers::session_jsonl::JsonlSessionProvider;
 use crate::providers::{CompactionProvider, LlmProvider, SessionProvider};
-use crate::session::UrSession;
+use crate::session::{SessionDeps, UrSession};
 use crate::types::{ExtensionCapabilities, ToolDescriptor};
 
 /// A tool handler: descriptor paired with its invocation closure.
@@ -51,6 +52,7 @@ pub struct UrWorkspace {
     manifest: WorkspaceManifest,
     config: UserConfig,
     llm_providers: Vec<Arc<dyn LlmProvider>>,
+    session_provider: Arc<dyn SessionProvider>,
     /// Loaded Lua extensions.
     lua_extensions: Vec<Arc<LuaExtension>>,
 }
@@ -59,7 +61,7 @@ impl UrWorkspace {
     pub(crate) fn new(
         ur_root: PathBuf,
         workspace_path: PathBuf,
-        manifest: WorkspaceManifest,
+        mut manifest: WorkspaceManifest,
         config: UserConfig,
     ) -> Self {
         // Instantiate native LLM providers based on available API keys.
@@ -77,13 +79,29 @@ impl UrWorkspace {
             ));
         }
 
+        // Build session provider for extensions that need ur.session.*.
+        let sessions_dir = manifest::manifest_dir(&ur_root, &workspace_path).join("sessions");
+        let session_provider: Arc<dyn SessionProvider> =
+            Arc::new(JsonlSessionProvider::new(&sessions_dir));
+
+        // Build host providers for the ur module.
+        let host_providers = HostProviders {
+            llm_providers: llm_providers.clone(),
+            session_provider: Some(Arc::clone(&session_provider)),
+        };
+
         // Load enabled Lua extensions.
         let mut lua_extensions = Vec::new();
-        let ext_config = serde_json::Value::Object(serde_json::Map::new());
         for entry in &manifest.extensions {
             if !entry.enabled {
                 continue;
             }
+            // Resolve per-extension config from user config, or empty table.
+            let ext_config = config.extensions.get(&entry.id).map_or_else(
+                || serde_json::Value::Object(serde_json::Map::new()),
+                |m| serde_json::to_value(m).unwrap_or_default(),
+            );
+
             let caps = ExtensionCapabilities::from_strings(&entry.capabilities);
             match LuaExtension::load(
                 Path::new(&entry.dir_path),
@@ -91,10 +109,22 @@ impl UrWorkspace {
                 &entry.name,
                 &caps,
                 &ext_config,
+                &host_providers,
             ) {
                 Ok(ext) => lua_extensions.push(Arc::new(ext)),
                 Err(e) => warn!(id = %entry.id, error = %e, "failed to load Lua extension"),
             }
+        }
+
+        // Populate hook ordering for newly loaded extensions.
+        for ext in &lua_extensions {
+            for hook_name in ext.hook_names() {
+                manifest::ensure_hook_ordering(&mut manifest, &hook_name, &ext.id);
+            }
+        }
+        // Persist updated ordering.
+        if let Err(e) = manifest::save_manifest(&ur_root, &workspace_path, &manifest) {
+            warn!(error = %e, "failed to save manifest with hook ordering");
         }
 
         Self {
@@ -103,6 +133,7 @@ impl UrWorkspace {
             manifest,
             config,
             llm_providers,
+            session_provider,
             lua_extensions,
         }
     }
@@ -235,9 +266,6 @@ impl UrWorkspace {
     ///
     /// Returns an error if the operation fails.
     pub fn open_session(&self, session_id: &str) -> Result<UrSession> {
-        let sessions_dir = self.sessions_dir();
-        let session_provider: Arc<dyn SessionProvider> =
-            Arc::new(JsonlSessionProvider::new(&sessions_dir));
         let compaction_provider: Arc<dyn CompactionProvider> = Arc::new(StubCompactionProvider);
 
         // Collect tool handlers from Lua extensions.
@@ -254,13 +282,16 @@ impl UrWorkspace {
         }
 
         UrSession::open(
-            self.llm_providers.clone(),
-            session_provider,
-            compaction_provider,
-            self.config.clone(),
+            SessionDeps {
+                llm_providers: self.llm_providers.clone(),
+                session_provider: Arc::clone(&self.session_provider),
+                compaction_provider,
+                config: self.config.clone(),
+                manifest: self.manifest.clone(),
+                tool_handlers,
+                extensions: self.lua_extensions.clone(),
+            },
             session_id,
-            tool_handlers,
-            self.lua_extensions.clone(),
         )
     }
 
@@ -268,18 +299,12 @@ impl UrWorkspace {
     ///
     /// Returns an error if the operation fails.
     pub fn list_sessions(&self) -> Result<Vec<crate::types::SessionInfo>> {
-        let sessions_dir = self.sessions_dir();
-        let provider = JsonlSessionProvider::new(&sessions_dir);
-        provider.list_sessions()
+        self.session_provider.list_sessions()
     }
 
     #[must_use]
     pub fn roles(&self) -> &BTreeMap<String, String> {
         &self.config.roles
-    }
-
-    fn sessions_dir(&self) -> PathBuf {
-        manifest::manifest_dir(&self.ur_root, &self.workspace_path).join("sessions")
     }
 
     fn provider_models(&self) -> ProviderModels {

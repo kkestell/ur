@@ -10,7 +10,22 @@ use mlua::prelude::*;
 use tracing::info;
 
 use crate::lua_host::{RegisteredHook, RegisteredTool};
+use crate::providers::{LlmProvider, SessionProvider};
 use crate::types::{ExtensionCapabilities, ToolDescriptor};
+
+/// Optional provider references injected into the `ur` module.
+///
+/// These are `None` during early load (before providers are ready) and
+/// populated once the workspace has finished initialization.
+#[expect(
+    missing_debug_implementations,
+    reason = "Contains dyn trait objects that are not Debug"
+)]
+#[derive(Clone, Default)]
+pub struct HostProviders {
+    pub llm_providers: Vec<Arc<dyn LlmProvider>>,
+    pub session_provider: Option<Arc<dyn SessionProvider>>,
+}
 
 /// Builds the `ur` module table for a Lua extension.
 ///
@@ -27,6 +42,7 @@ pub fn build_ur_module(
     config: &serde_json::Value,
     tools: &Arc<Mutex<Vec<RegisteredTool>>>,
     hooks: &Arc<Mutex<Vec<RegisteredHook>>>,
+    providers: &HostProviders,
 ) -> Result<LuaTable> {
     let ur = lua.create_table()?;
 
@@ -108,6 +124,18 @@ pub fn build_ur_module(
     })?;
     ur.set("hook", hook_fn)?;
 
+    // ur.complete(messages, opts) — always available, calls native LLM (no hooks).
+    if !providers.llm_providers.is_empty() {
+        let complete_fn = build_complete_fn(lua, &providers.llm_providers)?;
+        ur.set("complete", complete_fn)?;
+    }
+
+    // ur.session — read-only session access (always available if provider exists).
+    if let Some(session_provider) = &providers.session_provider {
+        let session = build_session_module(lua, session_provider)?;
+        ur.set("session", session)?;
+    }
+
     // Capability-gated APIs.
     if capabilities.network {
         let http = build_http_module(lua)?;
@@ -120,6 +148,90 @@ pub fn build_ur_module(
     }
 
     Ok(ur)
+}
+
+/// Builds the `ur.complete()` function for raw LLM completion (no hooks).
+fn build_complete_fn(lua: &Lua, llm_providers: &[Arc<dyn LlmProvider>]) -> Result<LuaFunction> {
+    let llm_providers = llm_providers.to_vec();
+    let complete_fn = lua.create_function(
+        move |lua, (messages_val, opts): (LuaValue, Option<LuaTable>)| {
+            let messages_json: serde_json::Value = lua.from_value(messages_val)?;
+            let messages: Vec<crate::types::Message> =
+                serde_json::from_value(messages_json).map_err(LuaError::external)?;
+
+            let model_id: String = opts
+                .as_ref()
+                .and_then(|o| o.get::<String>("model").ok())
+                .unwrap_or_default();
+            let provider_id: String = opts
+                .as_ref()
+                .and_then(|o| o.get::<String>("provider").ok())
+                .unwrap_or_default();
+
+            // Find matching provider, or use the first one.
+            let llm = if provider_id.is_empty() {
+                llm_providers
+                    .first()
+                    .ok_or_else(|| LuaError::runtime("no LLM providers available"))?
+            } else {
+                llm_providers
+                    .iter()
+                    .find(|p| p.provider_id() == provider_id)
+                    .ok_or_else(|| {
+                        LuaError::runtime(format!("provider '{provider_id}' not found"))
+                    })?
+            };
+
+            let effective_model = if model_id.is_empty() {
+                llm.list_models()
+                    .first()
+                    .map(|m| m.id.clone())
+                    .unwrap_or_default()
+            } else {
+                model_id
+            };
+
+            let mut result_parts = Vec::new();
+            llm.complete(&messages, &effective_model, &[], &[], None, &mut |chunk| {
+                for dp in &chunk.delta_parts {
+                    if let crate::types::MessagePart::Text(tp) = dp {
+                        result_parts.push(tp.text.clone());
+                    }
+                }
+            })
+            .map_err(LuaError::external)?;
+
+            let text: String = result_parts.concat();
+            lua.create_string(&text)
+        },
+    )?;
+    Ok(complete_fn)
+}
+
+/// Builds the `ur.session` sub-module for read-only session access.
+fn build_session_module(
+    lua: &Lua,
+    session_provider: &Arc<dyn SessionProvider>,
+) -> Result<LuaTable> {
+    let session = lua.create_table()?;
+
+    let sp = Arc::clone(session_provider);
+    let load_fn = lua.create_function(move |lua, session_id: String| {
+        let events = sp.load_session(&session_id).map_err(LuaError::external)?;
+        let json = serde_json::to_value(&events).map_err(LuaError::external)?;
+        lua.to_value(&json)
+    })?;
+    session.set("load", load_fn)?;
+
+    let sp = Arc::clone(session_provider);
+    let list_fn = lua.create_function(move |lua, ()| {
+        let sessions = sp.list_sessions().map_err(LuaError::external)?;
+        let json = serde_json::to_value(&sessions).map_err(LuaError::external)?;
+        lua.to_value(&json)
+    })?;
+    session.set("list", list_fn)?;
+
+    Ok(session)
 }
 
 /// Builds the `ur.http` sub-module (gated on `network` capability).

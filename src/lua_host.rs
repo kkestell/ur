@@ -14,7 +14,7 @@ use anyhow::Result;
 use mlua::prelude::*;
 use tracing::info;
 
-use crate::host_api;
+use crate::host_api::{self, HostProviders};
 use crate::types::{ExtensionCapabilities, ToolDescriptor};
 
 /// Default memory limit per VM: 64MB.
@@ -81,6 +81,7 @@ impl LuaExtension {
         name: &str,
         capabilities: &ExtensionCapabilities,
         config: &serde_json::Value,
+        providers: &HostProviders,
     ) -> Result<Self> {
         let init_path = dir_path.join("init.lua");
         anyhow::ensure!(
@@ -111,10 +112,27 @@ impl LuaExtension {
         let hooks: Arc<Mutex<Vec<RegisteredHook>>> = Arc::new(Mutex::new(Vec::new()));
 
         // Build and inject the `ur` module.
-        let ur_module = host_api::build_ur_module(&lua, capabilities, config, &tools, &hooks)?;
+        let ur_module =
+            host_api::build_ur_module(&lua, capabilities, config, &tools, &hooks, providers)?;
         lua.globals()
             .set("ur", ur_module)
             .map_err(|e| anyhow::anyhow!("failed to inject ur module: {e}"))?;
+
+        // Register custom `require` so `local ur = require("ur")` works.
+        // In sandbox mode the built-in require is disabled, so we provide
+        // a minimal one that only resolves "ur".
+        let require_fn = lua.create_function(|lua, name: String| {
+            if name == "ur" {
+                lua.globals().get::<LuaValue>("ur")
+            } else {
+                Err(LuaError::runtime(format!(
+                    "module '{name}' not found (only 'ur' is available)"
+                )))
+            }
+        })?;
+        lua.globals()
+            .set("require", require_fn)
+            .map_err(|e| anyhow::anyhow!("failed to inject require: {e}"))?;
 
         // Execute init.lua.
         let init_source = std::fs::read_to_string(&init_path)

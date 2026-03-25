@@ -1,5 +1,6 @@
 //! Workspace manifest: persistence, merge, and state transitions.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -13,6 +14,13 @@ use crate::discovery::{self, DiscoveredExtension, SourceTier};
 pub struct WorkspaceManifest {
     pub workspace: String,
     pub extensions: Vec<ManifestEntry>,
+    /// Per-hook-point extension ordering.
+    ///
+    /// Keys are hook names (e.g. `"before_completion"`), values are ordered
+    /// extension IDs. Extensions not in a list are appended at the end.
+    /// Disabled extensions stay in position but are skipped at runtime.
+    #[serde(default)]
+    pub hook_ordering: BTreeMap<String, Vec<String>>,
 }
 
 /// A single extension's persisted state.
@@ -97,9 +105,11 @@ pub fn merge(
     discovered: Vec<DiscoveredExtension>,
     workspace: &Path,
 ) -> WorkspaceManifest {
-    let old_entries: Vec<ManifestEntry> = existing.map(|m| m.extensions).unwrap_or_default();
+    let (old_entries, old_hook_ordering) = existing
+        .map(|m| (m.extensions, m.hook_ordering))
+        .unwrap_or_default();
 
-    let extensions = discovered
+    let extensions: Vec<ManifestEntry> = discovered
         .into_iter()
         .map(|ext| {
             let enabled = old_entries
@@ -118,9 +128,63 @@ pub fn merge(
         })
         .collect();
 
+    // Preserve existing hook ordering, pruning removed extensions.
+    let discovered_ids: Vec<&str> = extensions.iter().map(|e| e.id.as_str()).collect();
+    let hook_ordering: BTreeMap<String, Vec<String>> = old_hook_ordering
+        .into_iter()
+        .map(|(hook, ids)| {
+            let pruned: Vec<String> = ids
+                .into_iter()
+                .filter(|id| discovered_ids.contains(&id.as_str()))
+                .collect();
+            (hook, pruned)
+        })
+        .collect();
+
     WorkspaceManifest {
         workspace: workspace.to_string_lossy().into_owned(),
         extensions,
+        hook_ordering,
+    }
+}
+
+/// Ensures an extension is present in the ordering for a hook point.
+///
+/// If the extension is not already in the ordering, it is appended to
+/// the end. Call this after discovering which hooks an extension
+/// registered.
+pub fn ensure_hook_ordering(manifest: &mut WorkspaceManifest, hook_name: &str, ext_id: &str) {
+    let ordering = manifest
+        .hook_ordering
+        .entry(hook_name.to_owned())
+        .or_default();
+    if !ordering.iter().any(|id| id == ext_id) {
+        ordering.push(ext_id.to_owned());
+    }
+}
+
+/// Returns the ordered list of extension IDs for a hook point.
+///
+/// Extensions not in the persisted ordering are appended at the end.
+#[must_use]
+pub fn hook_order<'a>(manifest: &'a WorkspaceManifest, hook_name: &str) -> Vec<&'a str> {
+    let all_ids: Vec<&str> = manifest.extensions.iter().map(|e| e.id.as_str()).collect();
+
+    if let Some(ordering) = manifest.hook_ordering.get(hook_name) {
+        let mut result: Vec<&str> = ordering
+            .iter()
+            .filter(|id| all_ids.contains(&id.as_str()))
+            .map(String::as_str)
+            .collect();
+        // Append any extensions not yet in the ordering.
+        for id in &all_ids {
+            if !result.contains(id) {
+                result.push(id);
+            }
+        }
+        result
+    } else {
+        all_ids
     }
 }
 
@@ -228,6 +292,7 @@ mod tests {
         WorkspaceManifest {
             workspace: "/test".to_owned(),
             extensions: entries,
+            hook_ordering: BTreeMap::new(),
         }
     }
 
@@ -332,5 +397,93 @@ mod tests {
     fn escape_workspace_path_replaces_slashes() {
         let escaped = escape_workspace_path(Path::new("/foo/bar/baz"));
         assert_eq!(escaped, "foo_bar_baz");
+    }
+
+    // --- hook ordering tests ---
+
+    #[test]
+    fn ensure_hook_ordering_appends_new_extension() {
+        let mut m = manifest(vec![entry("a", "system", true), entry("b", "user", true)]);
+        ensure_hook_ordering(&mut m, "before_completion", "a");
+        ensure_hook_ordering(&mut m, "before_completion", "b");
+
+        let ordering = m.hook_ordering.get("before_completion").unwrap();
+        assert_eq!(ordering, &["a", "b"]);
+    }
+
+    #[test]
+    fn ensure_hook_ordering_does_not_duplicate() {
+        let mut m = manifest(vec![entry("a", "system", true)]);
+        ensure_hook_ordering(&mut m, "before_tool", "a");
+        ensure_hook_ordering(&mut m, "before_tool", "a");
+
+        let ordering = m.hook_ordering.get("before_tool").unwrap();
+        assert_eq!(ordering, &["a"]);
+    }
+
+    #[test]
+    fn hook_order_uses_persisted_ordering() {
+        let mut m = manifest(vec![
+            entry("a", "system", true),
+            entry("b", "user", true),
+            entry("c", "workspace", true),
+        ]);
+        // Persisted order: c, a (b is not in the ordering yet).
+        m.hook_ordering.insert(
+            "before_tool".to_owned(),
+            vec!["c".to_owned(), "a".to_owned()],
+        );
+
+        let order = hook_order(&m, "before_tool");
+        // c first, then a, then b (appended since not in ordering).
+        assert_eq!(order, vec!["c", "a", "b"]);
+    }
+
+    #[test]
+    fn hook_order_defaults_to_extension_order() {
+        let m = manifest(vec![entry("x", "system", true), entry("y", "user", true)]);
+
+        let order = hook_order(&m, "before_completion");
+        assert_eq!(order, vec!["x", "y"]);
+    }
+
+    #[test]
+    fn merge_preserves_hook_ordering() {
+        let mut existing = manifest(vec![entry("a", "system", true), entry("b", "user", true)]);
+        existing.hook_ordering.insert(
+            "before_tool".to_owned(),
+            vec!["b".to_owned(), "a".to_owned()],
+        );
+
+        let result = merge(
+            Some(existing),
+            vec![
+                discovered("a", SourceTier::System),
+                discovered("b", SourceTier::User),
+            ],
+            Path::new("/test"),
+        );
+
+        let ordering = result.hook_ordering.get("before_tool").unwrap();
+        assert_eq!(ordering, &["b", "a"]);
+    }
+
+    #[test]
+    fn merge_prunes_removed_extensions_from_hook_ordering() {
+        let mut existing = manifest(vec![entry("a", "system", true), entry("b", "user", true)]);
+        existing.hook_ordering.insert(
+            "before_tool".to_owned(),
+            vec!["b".to_owned(), "a".to_owned()],
+        );
+
+        // Only "a" is rediscovered; "b" is gone.
+        let result = merge(
+            Some(existing),
+            vec![discovered("a", SourceTier::System)],
+            Path::new("/test"),
+        );
+
+        let ordering = result.hook_ordering.get("before_tool").unwrap();
+        assert_eq!(ordering, &["a"]);
     }
 }

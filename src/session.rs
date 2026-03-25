@@ -11,6 +11,7 @@ use tracing::{debug, info};
 use crate::config::UserConfig;
 use crate::hooks::{self, HookPoint, HookResult};
 use crate::lua_host::LuaExtension;
+use crate::manifest::{self, WorkspaceManifest};
 use crate::model;
 use crate::providers::{CompactionProvider, LlmProvider, SessionProvider};
 use crate::types::{
@@ -22,6 +23,17 @@ type ToolHandler = (
     ToolDescriptor,
     Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
 );
+
+/// Bundled dependencies for constructing a session.
+pub(crate) struct SessionDeps {
+    pub llm_providers: Vec<Arc<dyn LlmProvider>>,
+    pub session_provider: Arc<dyn SessionProvider>,
+    pub compaction_provider: Arc<dyn CompactionProvider>,
+    pub config: UserConfig,
+    pub manifest: WorkspaceManifest,
+    pub tool_handlers: Vec<ToolHandler>,
+    pub extensions: Vec<Arc<LuaExtension>>,
+}
 
 /// A structured event emitted during turn execution.
 #[derive(Debug, Clone)]
@@ -106,6 +118,7 @@ pub struct UrSession {
     session_provider: Arc<dyn SessionProvider>,
     compaction_provider: Arc<dyn CompactionProvider>,
     config: UserConfig,
+    manifest: WorkspaceManifest,
     session_id: String,
     events: Vec<PersistedEvent>,
     persisted_event_count: usize,
@@ -118,16 +131,19 @@ pub struct UrSession {
 
 impl UrSession {
     /// Creates a session by loading existing events from the session provider.
-    pub(crate) fn open(
-        llm_providers: Vec<Arc<dyn LlmProvider>>,
-        session_provider: Arc<dyn SessionProvider>,
-        compaction_provider: Arc<dyn CompactionProvider>,
-        config: UserConfig,
-        session_id: &str,
-        tool_handlers: Vec<ToolHandler>,
-        extensions: Vec<Arc<LuaExtension>>,
-    ) -> Result<Self> {
-        let stored_events = session_provider.load_session(session_id)?;
+    pub(crate) fn open(deps: SessionDeps, session_id: &str) -> Result<Self> {
+        // before_session_load hook — can reject.
+        let hook_ctx = serde_json::json!({ "session_id": session_id });
+        if let HookResult::Rejected(reason) = dispatch_hook(
+            &deps.extensions,
+            &deps.manifest,
+            HookPoint::BeforeSessionLoad,
+            hook_ctx,
+        )? {
+            anyhow::bail!("session load rejected: {reason}");
+        }
+
+        let stored_events = deps.session_provider.load_session(session_id)?;
         let events: Vec<PersistedEvent> = stored_events
             .into_iter()
             .map(types_event_to_persisted)
@@ -145,17 +161,30 @@ impl UrSession {
             "session loaded"
         );
 
+        // after_session_load hook — can mutate messages (observability).
+        let hook_ctx = serde_json::json!({
+            "session_id": session_id,
+            "event_count": persisted_event_count,
+        });
+        let _after_ctx = dispatch_hook(
+            &deps.extensions,
+            &deps.manifest,
+            HookPoint::AfterSessionLoad,
+            hook_ctx,
+        )?;
+
         Ok(Self {
-            llm_providers,
-            session_provider,
-            compaction_provider,
-            config,
+            llm_providers: deps.llm_providers,
+            session_provider: deps.session_provider,
+            compaction_provider: deps.compaction_provider,
+            config: deps.config,
+            manifest: deps.manifest,
             session_id: session_id.to_owned(),
             events,
             persisted_event_count,
             turn_count: 0,
-            tool_handlers,
-            extensions,
+            tool_handlers: deps.tool_handlers,
+            extensions: deps.extensions,
         })
     }
 
@@ -174,6 +203,10 @@ impl UrSession {
     /// # Errors
     ///
     /// Returns an error if the operation fails.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Core turn loop; splitting hurts readability"
+    )]
     pub fn run_turn(
         &mut self,
         user_message: &str,
@@ -196,7 +229,7 @@ impl UrSession {
                 .map(std::convert::AsRef::as_ref)
                 .collect::<Vec<_>>(),
         );
-        let (provider_id, model_id) =
+        let (provider_id, mut model_id) =
             model::resolve_role(&self.config, "default", &provider_models)?;
         info!(%provider_id, %model_id, "resolved role \"default\"");
 
@@ -217,18 +250,33 @@ impl UrSession {
             self.config
                 .settings_for(llm.provider_id(), &model_id, &descriptors)?;
 
-        // before_completion hook
+        // before_completion hook — can mutate messages, model, settings, tools; can reject.
         let hook_ctx = serde_json::json!({
             "model": model_id,
             "provider": provider_id,
+            "tool_count": tools.len(),
         });
-        if let HookResult::Rejected(reason) =
-            hooks::run_hook(&self.extensions, HookPoint::BeforeCompletion, hook_ctx)?
-        {
-            on_event(SessionEvent::TurnError(format!(
-                "completion rejected: {reason}"
-            )));
-            return Ok(());
+        match dispatch_hook(
+            &self.extensions,
+            &self.manifest,
+            HookPoint::BeforeCompletion,
+            hook_ctx,
+        )? {
+            HookResult::Rejected(reason) => {
+                on_event(SessionEvent::TurnError(format!(
+                    "completion rejected: {reason}"
+                )));
+                return Ok(());
+            }
+            HookResult::Pass(ctx) => {
+                // Apply mutations: hooks can override model selection.
+                if let Some(m) = ctx.get("model").and_then(|v| v.as_str())
+                    && m != model_id
+                {
+                    info!(original = %model_id, overridden = %m, "hook overrode model");
+                    m.clone_into(&mut model_id);
+                }
+            }
         }
 
         // First LLM completion.
@@ -243,12 +291,18 @@ impl UrSession {
             &mut on_event,
         )?;
 
-        // after_completion hook
+        // after_completion hook — can mutate the response.
         let hook_ctx = serde_json::json!({
             "model": model_id,
             "provider": provider_id,
+            "response": serde_json::to_value(&completion.message).unwrap_or_default(),
         });
-        let _ = hooks::run_hook(&self.extensions, HookPoint::AfterCompletion, hook_ctx);
+        let _after_ctx = dispatch_hook(
+            &self.extensions,
+            &self.manifest,
+            HookPoint::AfterCompletion,
+            hook_ctx,
+        )?;
 
         let tool_calls = extract_tool_calls(&completion.message);
         if tool_calls.is_empty() {
@@ -370,15 +424,19 @@ impl UrSession {
         for tc in tool_calls {
             info!(tool = %tc.name, "dispatching tool");
 
-            // before_tool hook
+            // before_tool hook — can mutate args; can reject.
             let hook_ctx = serde_json::json!({
                 "tool_name": tc.name,
                 "arguments": tc.arguments_json,
                 "call_id": tc.id,
             });
-            if let HookResult::Rejected(reason) =
-                hooks::run_hook(&self.extensions, HookPoint::BeforeTool, hook_ctx)?
-            {
+            let before_tool_result = dispatch_hook(
+                &self.extensions,
+                &self.manifest,
+                HookPoint::BeforeTool,
+                hook_ctx,
+            )?;
+            if let HookResult::Rejected(reason) = before_tool_result {
                 let result_content = format!("Error: tool rejected by extension: {reason}");
                 on_event(SessionEvent::ToolResult {
                     tool_call_id: tc.id.clone(),
@@ -397,6 +455,14 @@ impl UrSession {
                     .push(PersistedEvent::ToolResult { message: msg });
                 continue;
             }
+            // Apply mutations: hooks can override arguments.
+            let effective_args = match before_tool_result {
+                HookResult::Pass(ctx) => ctx
+                    .get("arguments")
+                    .and_then(|v| v.as_str())
+                    .map_or_else(|| tc.arguments_json.clone(), String::from),
+                HookResult::Rejected(_) => unreachable!(),
+            };
 
             let handler = self
                 .tool_handlers
@@ -405,7 +471,7 @@ impl UrSession {
                 .map(|(_, h)| Arc::clone(h));
 
             let result_content = if let Some(handler) = handler {
-                match handler(&tc.arguments_json) {
+                match handler(&effective_args) {
                     Ok(result) => result,
                     Err(e) => format!("Error: {e}"),
                 }
@@ -413,13 +479,25 @@ impl UrSession {
                 format!("Error: no handler for tool {:?}", tc.name)
             };
 
-            // after_tool hook
+            // after_tool hook — can mutate result.
             let hook_ctx = serde_json::json!({
                 "tool_name": tc.name,
                 "call_id": tc.id,
                 "result": result_content,
             });
-            let _ = hooks::run_hook(&self.extensions, HookPoint::AfterTool, hook_ctx);
+            let result_content = match dispatch_hook(
+                &self.extensions,
+                &self.manifest,
+                HookPoint::AfterTool,
+                hook_ctx,
+            )? {
+                HookResult::Pass(ctx) => ctx
+                    .get("result")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+                    .unwrap_or(result_content),
+                HookResult::Rejected(_) => result_content, // after hooks can't reject
+            };
 
             debug!(tool = %tc.name, %result_content, "tool result");
 
@@ -451,6 +529,21 @@ impl UrSession {
             "appending events to session"
         );
         for event in new_events {
+            // before_session_append hook — can mutate the event or reject.
+            let hook_ctx = serde_json::json!({
+                "session_id": self.session_id,
+                "event_type": format!("{event:?}").split_once(' ').map_or("unknown", |p| p.0),
+            });
+            if let HookResult::Rejected(reason) = dispatch_hook(
+                &self.extensions,
+                &self.manifest,
+                HookPoint::BeforeSessionAppend,
+                hook_ctx,
+            )? {
+                debug!(reason = %reason, "session append rejected by hook, skipping event");
+                continue;
+            }
+
             let types_event = persisted_to_types_event(event);
             self.session_provider
                 .append_session(&self.session_id, &types_event)?;
@@ -459,6 +552,24 @@ impl UrSession {
 
         let messages = self.messages_for_llm();
         info!(count = messages.len(), "compacting messages");
+
+        // before_compaction hook — can mutate messages or reject.
+        let hook_ctx = serde_json::json!({
+            "message_count": messages.len(),
+        });
+        match dispatch_hook(
+            &self.extensions,
+            &self.manifest,
+            HookPoint::BeforeCompaction,
+            hook_ctx,
+        )? {
+            HookResult::Rejected(reason) => {
+                debug!(reason = %reason, "compaction rejected by hook, skipping");
+                return Ok(());
+            }
+            HookResult::Pass(_) => {}
+        }
+
         let compacted = self.compaction_provider.compact(&messages)?;
         info!(
             count = compacted.len(),
@@ -469,6 +580,18 @@ impl UrSession {
             },
             "compaction complete"
         );
+
+        // after_compaction hook — observability.
+        let hook_ctx = serde_json::json!({
+            "original_count": messages.len(),
+            "compacted_count": compacted.len(),
+        });
+        let _after_ctx = dispatch_hook(
+            &self.extensions,
+            &self.manifest,
+            HookPoint::AfterCompaction,
+            hook_ctx,
+        )?;
 
         Ok(())
     }
@@ -488,6 +611,18 @@ fn extract_tool_calls(msg: &Message) -> Vec<&ToolCall> {
             _ => None,
         })
         .collect()
+}
+
+/// Dispatches a hook with manifest-based ordering.
+fn dispatch_hook(
+    extensions: &[Arc<LuaExtension>],
+    manifest: &WorkspaceManifest,
+    hook: HookPoint,
+    context: serde_json::Value,
+) -> Result<HookResult> {
+    let order = manifest::hook_order(manifest, hook.as_str());
+    let order_refs: Vec<&str> = order.clone();
+    hooks::run_hook_ordered(extensions, hook, context, Some(&order_refs))
 }
 
 fn stream_completion(

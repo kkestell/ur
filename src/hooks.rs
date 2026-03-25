@@ -26,7 +26,8 @@ pub enum HookPoint {
 }
 
 impl HookPoint {
-    fn as_str(self) -> &'static str {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::BeforeCompletion => "before_completion",
             Self::AfterCompletion => "after_completion",
@@ -63,9 +64,10 @@ pub enum HookResult {
 
 /// Runs a hook chain across all extensions that registered for it.
 ///
-/// Extensions are called in order. Each extension sees the (possibly
-/// modified) context from the previous extension. If a `before_*` hook
-/// returns `{ action = "reject", reason = "..." }`, the chain stops.
+/// Extensions are called in manifest-defined order for this hook point.
+/// Each extension sees the (possibly modified) context from the previous
+/// extension. If a `before_*` hook returns `{ action = "reject", reason = "..." }`,
+/// the chain stops.
 ///
 /// # Errors
 ///
@@ -73,11 +75,47 @@ pub enum HookResult {
 pub fn run_hook(
     extensions: &[Arc<LuaExtension>],
     hook: HookPoint,
+    context: serde_json::Value,
+) -> Result<HookResult> {
+    run_hook_ordered(extensions, hook, context, None)
+}
+
+/// Runs a hook chain with explicit ordering from the manifest.
+///
+/// If `ordering` is provided, extensions are called in that order.
+/// Extensions not in the ordering are called after all ordered ones.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn run_hook_ordered(
+    extensions: &[Arc<LuaExtension>],
+    hook: HookPoint,
     mut context: serde_json::Value,
+    ordering: Option<&[&str]>,
 ) -> Result<HookResult> {
     let hook_name = hook.as_str();
 
-    for ext in extensions {
+    // Build the execution order.
+    let ordered_extensions: Vec<&Arc<LuaExtension>> = if let Some(order) = ordering {
+        let mut ordered: Vec<&Arc<LuaExtension>> = Vec::new();
+        for id in order {
+            if let Some(ext) = extensions.iter().find(|e| e.id == *id) {
+                ordered.push(ext);
+            }
+        }
+        // Append any extensions not in the ordering.
+        for ext in extensions {
+            if !ordered.iter().any(|e| e.id == ext.id) {
+                ordered.push(ext);
+            }
+        }
+        ordered
+    } else {
+        extensions.iter().collect()
+    };
+
+    for ext in ordered_extensions {
         if !ext.has_hook(hook_name) {
             continue;
         }
@@ -152,4 +190,161 @@ pub fn run_hook(
     }
 
     Ok(HookResult::Pass(context))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host_api::HostProviders;
+    use crate::types::ExtensionCapabilities;
+    use std::io::Write;
+
+    /// Creates a temp extension dir with the given init.lua source.
+    fn temp_extension(lua_source: &str) -> (tempfile::TempDir, Arc<LuaExtension>) {
+        let dir = tempfile::tempdir().unwrap();
+        let init_path = dir.path().join("init.lua");
+        let mut f = std::fs::File::create(&init_path).unwrap();
+        f.write_all(lua_source.as_bytes()).unwrap();
+        let ext = LuaExtension::load(
+            dir.path(),
+            "test-ext",
+            "Test Extension",
+            &ExtensionCapabilities::default(),
+            &serde_json::json!({}),
+            &HostProviders::default(),
+        )
+        .unwrap();
+        (dir, Arc::new(ext))
+    }
+
+    #[test]
+    fn hook_pass_returns_context_unchanged() {
+        let (_dir, ext) = temp_extension(
+            r#"
+            ur.hook("before_completion", function(ctx)
+                return { action = "pass" }
+            end)
+            "#,
+        );
+        let ctx = serde_json::json!({ "model": "test-model" });
+        let result = run_hook(&[ext], HookPoint::BeforeCompletion, ctx).unwrap();
+        match result {
+            HookResult::Pass(v) => {
+                assert_eq!(v["model"], "test-model");
+            }
+            HookResult::Rejected(_) => panic!("should not reject"),
+        }
+    }
+
+    #[test]
+    fn hook_modify_merges_into_context() {
+        let (_dir, ext) = temp_extension(
+            r#"
+            ur.hook("before_completion", function(ctx)
+                return { action = "modify", model = "overridden-model" }
+            end)
+            "#,
+        );
+        let ctx = serde_json::json!({ "model": "original", "extra": 42 });
+        let result = run_hook(&[ext], HookPoint::BeforeCompletion, ctx).unwrap();
+        match result {
+            HookResult::Pass(v) => {
+                assert_eq!(v["model"], "overridden-model");
+                assert_eq!(v["extra"], 42); // preserved
+            }
+            HookResult::Rejected(_) => panic!("should not reject"),
+        }
+    }
+
+    #[test]
+    fn hook_reject_stops_chain() {
+        let (_dir, ext) = temp_extension(
+            r#"
+            ur.hook("before_tool", function(ctx)
+                return { action = "reject", reason = "forbidden" }
+            end)
+            "#,
+        );
+        let ctx = serde_json::json!({ "tool_name": "test" });
+        let result = run_hook(&[ext], HookPoint::BeforeTool, ctx).unwrap();
+        match result {
+            HookResult::Rejected(reason) => {
+                assert_eq!(reason, "forbidden");
+            }
+            HookResult::Pass(_) => panic!("should reject"),
+        }
+    }
+
+    #[test]
+    fn after_hook_cannot_reject() {
+        let (_dir, ext) = temp_extension(
+            r#"
+            ur.hook("after_completion", function(ctx)
+                return { action = "reject", reason = "nope" }
+            end)
+            "#,
+        );
+        let ctx = serde_json::json!({ "model": "test" });
+        let result = run_hook(&[ext], HookPoint::AfterCompletion, ctx).unwrap();
+        // Should be pass, not rejected.
+        assert!(matches!(result, HookResult::Pass(_)));
+    }
+
+    #[test]
+    fn ordered_dispatch_respects_ordering() {
+        let (_dir_a, ext_a) = temp_extension(
+            r#"
+            ur.hook("before_completion", function(ctx)
+                return { action = "modify", order = (ctx.order or "") .. "A" }
+            end)
+            "#,
+        );
+        // Need a second temp dir with a different extension id.
+        let dir_b = tempfile::tempdir().unwrap();
+        let init_path = dir_b.path().join("init.lua");
+        std::fs::write(
+            &init_path,
+            r#"
+            ur.hook("before_completion", function(ctx)
+                return { action = "modify", order = (ctx.order or "") .. "B" }
+            end)
+            "#,
+        )
+        .unwrap();
+        let ext_b = Arc::new(
+            LuaExtension::load(
+                dir_b.path(),
+                "ext-b",
+                "Ext B",
+                &ExtensionCapabilities::default(),
+                &serde_json::json!({}),
+                &HostProviders::default(),
+            )
+            .unwrap(),
+        );
+
+        let extensions = vec![ext_a, ext_b];
+
+        // Default order: A then B.
+        let ctx = serde_json::json!({});
+        let result = run_hook_ordered(&extensions, HookPoint::BeforeCompletion, ctx, None).unwrap();
+        match &result {
+            HookResult::Pass(v) => assert_eq!(v["order"], "AB"),
+            HookResult::Rejected(_) => panic!("expected pass"),
+        }
+
+        // Reversed order: B then A.
+        let ctx = serde_json::json!({});
+        let result = run_hook_ordered(
+            &extensions,
+            HookPoint::BeforeCompletion,
+            ctx,
+            Some(&["ext-b", "test-ext"]),
+        )
+        .unwrap();
+        match &result {
+            HookResult::Pass(v) => assert_eq!(v["order"], "BA"),
+            HookResult::Rejected(_) => panic!("expected pass"),
+        }
+    }
 }
