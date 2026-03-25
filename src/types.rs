@@ -8,14 +8,14 @@ use serde::{Deserialize, Serialize};
 // ── Messages ────────────────────────────────────────────────────────
 
 /// A conversation message with a role and content parts.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     pub role: String,
     pub parts: Vec<MessagePart>,
 }
 
 /// A piece of a message: text, tool call, or tool result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MessagePart {
     Text(TextPart),
@@ -24,13 +24,13 @@ pub enum MessagePart {
 }
 
 /// Wrapper for text content in a message part.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TextPart {
     pub text: String,
 }
 
 /// An LLM-issued tool invocation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
     pub name: String,
@@ -41,7 +41,7 @@ pub struct ToolCall {
 }
 
 /// The result of executing a tool.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolResult {
     pub tool_call_id: String,
     pub tool_name: String,

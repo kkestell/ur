@@ -688,7 +688,9 @@ impl UrSession {
         };
 
         // Apply compacted messages: rebuild events and persist.
-        if final_compacted.len() != messages.len() {
+        // Always apply when content differs — hooks may edit messages without
+        // changing the count.
+        if final_compacted != messages {
             debug!(
                 original = messages.len(),
                 compacted = final_compacted.len(),
