@@ -175,13 +175,14 @@ impl UrSession {
         )? {
             HookResult::Pass(ctx) => {
                 // Deserialize and apply messages mutation if provided
-                if let Some(messages_val) = ctx.get("messages") {
-                    if let Ok(_mutated_messages) = serde_json::from_value::<Vec<Message>>(messages_val.clone()) {
-                        // Rebuild events from mutated messages (lossy: only captures message-derived events)
-                        // For now, we just validate the mutation succeeded but don't apply it since
-                        // the event structure contains more than just messages.
-                        debug!("hook mutated session messages (not applied - lossy conversion)");
-                    }
+                if let Some(messages_val) = ctx.get("messages")
+                    && let Ok(_mutated_messages) =
+                        serde_json::from_value::<Vec<Message>>(messages_val.clone())
+                {
+                    // Rebuild events from mutated messages (lossy: only captures message-derived events)
+                    // For now, we just validate the mutation succeeded but don't apply it since
+                    // the event structure contains more than just messages.
+                    debug!("hook mutated session messages (not applied - lossy conversion)");
                 }
             }
             HookResult::Rejected(_) => {} // after hooks can't reject
@@ -322,11 +323,12 @@ impl UrSession {
         )? {
             HookResult::Pass(ctx) => {
                 // Deserialize and apply response mutation if provided
-                if let Some(response_val) = ctx.get("response") {
-                    if let Ok(mutated_message) = serde_json::from_value::<Message>(response_val.clone()) {
-                        debug!("hook modified completion response");
-                        completion.message = mutated_message;
-                    }
+                if let Some(response_val) = ctx.get("response")
+                    && let Ok(mutated_message) =
+                        serde_json::from_value::<Message>(response_val.clone())
+                {
+                    debug!("hook modified completion response");
+                    completion.message = mutated_message;
                 }
             }
             HookResult::Rejected(_) => {} // after hooks can't reject
@@ -552,6 +554,7 @@ impl UrSession {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines, reason = "hook dispatch adds substantial code")]
     fn persist_and_compact(&mut self) -> Result<()> {
         let new_events = &self.events[self.persisted_event_count..];
         debug!(
@@ -579,7 +582,9 @@ impl UrSession {
                 HookResult::Pass(ctx) => {
                     // Deserialize and apply event mutation if provided
                     if let Some(event_val) = ctx.get("event") {
-                        if let Ok(mutated_event) = serde_json::from_value::<types::SessionEvent>(event_val.clone()) {
+                        if let Ok(mutated_event) =
+                            serde_json::from_value::<types::SessionEvent>(event_val.clone())
+                        {
                             debug!("hook mutated session event");
                             mutated_event
                         } else {
@@ -616,7 +621,9 @@ impl UrSession {
             HookResult::Pass(ctx) => {
                 // Deserialize and apply messages mutation if provided
                 if let Some(messages_val) = ctx.get("messages") {
-                    if let Ok(mutated_messages) = serde_json::from_value::<Vec<Message>>(messages_val.clone()) {
+                    if let Ok(mutated_messages) =
+                        serde_json::from_value::<Vec<Message>>(messages_val.clone())
+                    {
                         debug!("hook mutated messages before compaction");
                         mutated_messages
                     } else {
@@ -653,7 +660,9 @@ impl UrSession {
             HookResult::Pass(ctx) => {
                 // Deserialize and apply compacted mutation if provided
                 if let Some(compacted_val) = ctx.get("compacted") {
-                    if let Ok(mutated_compacted) = serde_json::from_value::<Vec<Message>>(compacted_val.clone()) {
+                    if let Ok(mutated_compacted) =
+                        serde_json::from_value::<Vec<Message>>(compacted_val.clone())
+                    {
                         debug!("hook mutated compacted messages");
                         mutated_compacted
                     } else {
@@ -678,13 +687,12 @@ impl UrSession {
 fn format_setting_value(val: &types::SettingValue) -> serde_json::Value {
     match val {
         types::SettingValue::Integer(i) => serde_json::Value::Number((*i).into()),
-        types::SettingValue::Enumeration(s) => serde_json::Value::String(s.clone()),
-        types::SettingValue::Boolean(b) => serde_json::Value::Bool(*b),
-        types::SettingValue::Number(n) => {
-            serde_json::Number::from_f64(*n).map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null)
+        types::SettingValue::Enumeration(s) | types::SettingValue::String(s) => {
+            serde_json::Value::String(s.clone())
         }
-        types::SettingValue::String(s) => serde_json::Value::String(s.clone()),
+        types::SettingValue::Boolean(b) => serde_json::Value::Bool(*b),
+        types::SettingValue::Number(n) => serde_json::Number::from_f64(*n)
+            .map_or(serde_json::Value::Null, serde_json::Value::Number),
     }
 }
 
@@ -982,10 +990,16 @@ mod tests {
 
         // Verify TurnComplete is present and in the expected position
         assert_eq!(events.len(), 4);
-        assert!(matches!(events[3], PersistedEvent::TurnComplete { turn_index: 0 }));
+        assert!(matches!(
+            events[3],
+            PersistedEvent::TurnComplete { turn_index: 0 }
+        ));
 
         // Verify the event sequence before TurnComplete
-        assert!(matches!(events[0], PersistedEvent::TurnStarted { turn_index: 0 }));
+        assert!(matches!(
+            events[0],
+            PersistedEvent::TurnStarted { turn_index: 0 }
+        ));
         assert!(matches!(events[1], PersistedEvent::UserMessage { .. }));
         assert!(matches!(events[2], PersistedEvent::LlmCompletion { .. }));
     }

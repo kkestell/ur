@@ -217,8 +217,8 @@ mod tests {
         (dir, Arc::new(ext))
     }
 
-    #[test]
-    fn hook_pass_returns_context_unchanged() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hook_pass_returns_context_unchanged() {
         let (_dir, ext) = temp_extension(
             r#"
             ur.hook("before_completion", function(ctx)
@@ -236,8 +236,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn hook_modify_merges_into_context() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hook_modify_merges_into_context() {
         let (_dir, ext) = temp_extension(
             r#"
             ur.hook("before_completion", function(ctx)
@@ -256,8 +256,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn hook_reject_stops_chain() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hook_reject_stops_chain() {
         let (_dir, ext) = temp_extension(
             r#"
             ur.hook("before_tool", function(ctx)
@@ -275,8 +275,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn after_hook_cannot_reject() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn after_hook_cannot_reject() {
         let (_dir, ext) = temp_extension(
             r#"
             ur.hook("after_completion", function(ctx)
@@ -290,8 +290,8 @@ mod tests {
         assert!(matches!(result, HookResult::Pass(_)));
     }
 
-    #[test]
-    fn ordered_dispatch_respects_ordering() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ordered_dispatch_respects_ordering() {
         let (_dir_a, ext_a) = temp_extension(
             r#"
             ur.hook("before_completion", function(ctx)
