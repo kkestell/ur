@@ -17,6 +17,8 @@ HOST_BINARY := $(HOST_BINARY_DIR)/ur
 HOST_BINARY_TUI := $(HOST_BINARY_DIR)/ur-tui
 
 BINDIR ?= $(HOME)/.local/bin
+UR_ROOT ?= $(HOME)/.ur
+SYSTEM_EXTENSIONS := extensions/system
 
 .PHONY: \
 	build \
@@ -57,6 +59,10 @@ install:
 	@mkdir -p "$(BINDIR)"
 	cp "$(HOST_BINARY)" "$(BINDIR)/ur"
 	cp "$(HOST_BINARY_TUI)" "$(BINDIR)/ur-tui"
+	@if [ -d "$(SYSTEM_EXTENSIONS)" ]; then \
+		mkdir -p "$(UR_ROOT)/extensions/system"; \
+		cp -r $(SYSTEM_EXTENSIONS)/* "$(UR_ROOT)/extensions/system/"; \
+	fi
 
 uninstall:
 	rm -f "$(BINDIR)/ur" "$(BINDIR)/ur-tui"
