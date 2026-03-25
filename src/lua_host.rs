@@ -226,8 +226,9 @@ impl LuaExtension {
             })
             .unwrap_or(LuaValue::Nil);
 
-        let result: LuaValue = handler_key
-            .call(args)
+        // Use call_async with block_on to allow Lua coroutines (async functions) to execute.
+        let result: LuaValue = tokio::runtime::Handle::current()
+            .block_on(handler_key.call_async(args))
             .map_err(|e| anyhow::anyhow!("calling tool handler {name}: {e}"))?;
 
         // Convert result to string.
@@ -265,8 +266,9 @@ impl LuaExtension {
         };
 
         let ctx_lua: LuaValue = self.lua.to_value(context)?;
-        let result: LuaValue = handler_key
-            .call(ctx_lua)
+        // Use call_async with block_on to allow Lua coroutines (async functions) to execute.
+        let result: LuaValue = tokio::runtime::Handle::current()
+            .block_on(handler_key.call_async(ctx_lua))
             .map_err(|e| anyhow::anyhow!("calling hook handler {hook_name}: {e}"))?;
 
         let result_json: serde_json::Value = self.lua.from_value(result)?;

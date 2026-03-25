@@ -22,6 +22,36 @@ ur.tool("echo", {
     end,
 })
 
+-- Register the http_status tool: calls ur.http.get and returns the status code.
+ur.tool("http_status", {
+    description = "Fetch a URL and return the HTTP status code",
+    parameters = {
+        type = "object",
+        properties = {
+            url = { type = "string", description = "The URL to fetch" },
+        },
+    },
+    handler = function(args)
+        ur.log("http_status tool called with url=" .. tostring(args.url or ""))
+        local url = args.url
+        if not url then
+            return { status = 0, error = "no url provided" }
+        end
+
+        local success, response = pcall(function()
+            return ur.http.get(url)
+        end)
+
+        if not success then
+            ur.log("http_status: request failed: " .. tostring(response))
+            return { status = 0, error = tostring(response) }
+        end
+
+        ur.log("http_status: request succeeded, status=" .. tostring(response.status))
+        return { status = response.status, content_length = #(response.content or "") }
+    end,
+})
+
 -- Register all 9 lifecycle hooks.
 -- Hooks exercise mutation where applicable to validate that the host
 -- applies returned modifications.

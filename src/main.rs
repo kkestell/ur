@@ -14,7 +14,8 @@ use ur::workspace::UrWorkspace;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Cli::parse();
 
     let ur_root = ur::resolve_ur_root();
