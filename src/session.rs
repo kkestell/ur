@@ -167,26 +167,26 @@ impl UrSession {
             "session_id": session_id,
             "messages": serde_json::to_value(&messages).unwrap_or_default(),
         });
-        match dispatch_hook(
+        let events = match dispatch_hook(
             &deps.extensions,
             &deps.manifest,
             HookPoint::AfterSessionLoad,
             hook_ctx,
         )? {
             HookResult::Pass(ctx) => {
-                // Deserialize and apply messages mutation if provided
                 if let Some(messages_val) = ctx.get("messages")
-                    && let Ok(_mutated_messages) =
+                    && let Ok(mutated_messages) =
                         serde_json::from_value::<Vec<Message>>(messages_val.clone())
                 {
-                    // Rebuild events from mutated messages (lossy: only captures message-derived events)
-                    // For now, we just validate the mutation succeeded but don't apply it since
-                    // the event structure contains more than just messages.
-                    debug!("hook mutated session messages (not applied - lossy conversion)");
+                    debug!("applying hook-mutated session messages");
+                    apply_message_mutations(events, &mutated_messages)
+                } else {
+                    events
                 }
             }
-            HookResult::Rejected(_) => {} // after hooks can't reject
-        }
+            HookResult::Rejected(_) => events, // after hooks can't reject
+        };
+        let persisted_event_count = events.len();
 
         Ok(Self {
             llm_providers: deps.llm_providers,
@@ -276,7 +276,7 @@ impl UrSession {
             })).collect::<Vec<_>>(),
             "tools": serde_json::to_value(&tools).unwrap_or_default(),
         });
-        match dispatch_hook(
+        let (messages, config_settings, tools) = match dispatch_hook(
             &self.extensions,
             &self.manifest,
             HookPoint::BeforeCompletion,
@@ -294,11 +294,23 @@ impl UrSession {
                     info!(original = %model_id, overridden = %m, "hook overrode model");
                     model_id.clone_from(&m.to_string());
                 }
+                let messages = ctx
+                    .get("messages")
+                    .and_then(|v| serde_json::from_value::<Vec<Message>>(v.clone()).ok())
+                    .unwrap_or(messages);
+                let config_settings = ctx
+                    .get("settings")
+                    .and_then(parse_settings_from_json)
+                    .unwrap_or(config_settings);
+                let tools = ctx
+                    .get("tools")
+                    .and_then(|v| serde_json::from_value::<Vec<ToolDescriptor>>(v.clone()).ok())
+                    .unwrap_or(tools);
+                (messages, config_settings, tools)
             }
-        }
+        };
 
         // First LLM completion.
-        let messages = self.messages_for_llm();
         info!(messages = messages.len(), "calling LLM streaming");
         let mut completion = stream_completion(
             &*llm,
@@ -675,14 +687,99 @@ impl UrSession {
             HookResult::Rejected(_) => compacted, // after hooks can't reject
         };
 
-        // Note: we don't currently persist the final_compacted result, just validate the hook can mutate it
-        let _ = final_compacted;
+        // Apply compacted messages: rebuild events and persist.
+        if final_compacted.len() != messages.len() {
+            debug!(
+                original = messages.len(),
+                compacted = final_compacted.len(),
+                "applying compaction to session state"
+            );
+            self.events =
+                apply_message_mutations(std::mem::take(&mut self.events), &final_compacted);
+            // Persist the compacted state, replacing the old session file.
+            let types_events: Vec<types::SessionEvent> =
+                self.events.iter().map(persisted_to_types_event).collect();
+            self.session_provider
+                .replace_session(&self.session_id, &types_events)?;
+            self.persisted_event_count = self.events.len();
+        }
 
         Ok(())
     }
 }
 
 // --- Helpers ---
+
+/// Replaces message-bearing events with mutated messages, preserving non-message events.
+///
+/// Walks through events in order. For each `UserMessage`, `LlmCompletion`, or `ToolResult`,
+/// consumes the next message from `mutated_messages`. Non-message events are preserved as-is.
+fn apply_message_mutations(
+    events: Vec<PersistedEvent>,
+    mutated_messages: &[Message],
+) -> Vec<PersistedEvent> {
+    let mut msg_idx = 0;
+    events
+        .into_iter()
+        .map(|event| {
+            if msg_idx >= mutated_messages.len() {
+                return event;
+            }
+            match event {
+                PersistedEvent::UserMessage { .. } => {
+                    let msg = &mutated_messages[msg_idx];
+                    msg_idx += 1;
+                    PersistedEvent::UserMessage {
+                        text: extract_text(msg),
+                    }
+                }
+                PersistedEvent::LlmCompletion { .. } => {
+                    let msg = &mutated_messages[msg_idx];
+                    msg_idx += 1;
+                    PersistedEvent::LlmCompletion {
+                        message: msg.clone(),
+                    }
+                }
+                PersistedEvent::ToolResult { .. } => {
+                    let msg = &mutated_messages[msg_idx];
+                    msg_idx += 1;
+                    PersistedEvent::ToolResult {
+                        message: msg.clone(),
+                    }
+                }
+                other => other,
+            }
+        })
+        .collect()
+}
+
+fn parse_settings_from_json(val: &serde_json::Value) -> Option<Vec<types::ConfigSetting>> {
+    let arr = val.as_array()?;
+    let mut settings = Vec::new();
+    for item in arr {
+        let key = item.get("key")?.as_str()?.to_owned();
+        let value = item.get("value")?;
+        let setting_value = match value {
+            serde_json::Value::Bool(b) => types::SettingValue::Boolean(*b),
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    types::SettingValue::Integer(i)
+                } else if let Some(f) = n.as_f64() {
+                    types::SettingValue::Number(f)
+                } else {
+                    continue;
+                }
+            }
+            serde_json::Value::String(s) => types::SettingValue::String(s.clone()),
+            _ => continue,
+        };
+        settings.push(types::ConfigSetting {
+            key,
+            value: setting_value,
+        });
+    }
+    Some(settings)
+}
 
 fn format_setting_value(val: &types::SettingValue) -> serde_json::Value {
     match val {

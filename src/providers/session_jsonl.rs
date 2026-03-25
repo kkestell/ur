@@ -78,6 +78,26 @@ impl SessionProvider for JsonlSessionProvider {
         Ok(())
     }
 
+    fn replace_session(&self, session_id: &str, events: &[SessionEvent]) -> Result<()> {
+        let path = self.session_path(session_id);
+        std::fs::create_dir_all(&self.sessions_dir)
+            .with_context(|| format!("creating {}", self.sessions_dir.display()))?;
+
+        let mut file = std::fs::File::create(&path)
+            .with_context(|| format!("creating {} for replace", path.display()))?;
+
+        for event in events {
+            let json = serde_json::to_string(event)?;
+            writeln!(file, "{json}").with_context(|| format!("writing to {}", path.display()))?;
+        }
+        debug!(
+            session_id,
+            events = events.len(),
+            "replaced session in JSONL"
+        );
+        Ok(())
+    }
+
     fn list_sessions(&self) -> Result<Vec<SessionInfo>> {
         let dir = &self.sessions_dir;
         if !dir.is_dir() {

@@ -49,6 +49,13 @@ pub trait SessionProvider: Send + Sync {
     /// Returns an error if the operation fails.
     fn append_session(&self, session_id: &str, event: &SessionEvent) -> Result<()>;
 
+    /// Replaces all events for a session (used after compaction).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    fn replace_session(&self, session_id: &str, events: &[SessionEvent]) -> Result<()>;
+
     /// # Errors
     ///
     /// Returns an error if the operation fails.
