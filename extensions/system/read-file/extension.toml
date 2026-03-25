@@ -1,0 +1,4 @@
+[extension]
+id = "read-file"
+name = "Read File"
+capabilities = ["fs-read"]
