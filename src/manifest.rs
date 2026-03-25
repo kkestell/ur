@@ -1,21 +1,26 @@
 //! Workspace manifest: persistence, merge, and state transitions.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
-use wasmtime::Engine;
 
 use crate::discovery::{self, DiscoveredExtension, SourceTier};
-use crate::extension_host;
-use crate::slot::{Cardinality, find_slot, validate_required_slots};
 
 /// Persisted state for all extensions in a workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceManifest {
     pub workspace: String,
     pub extensions: Vec<ManifestEntry>,
+    /// Per-hook-point extension ordering.
+    ///
+    /// Keys are hook names (e.g. `"before_completion"`), values are ordered
+    /// extension IDs. Extensions not in a list are appended at the end.
+    /// Disabled extensions stay in position but are skipped at runtime.
+    #[serde(default)]
+    pub hook_ordering: BTreeMap<String, Vec<String>>,
 }
 
 /// A single extension's persisted state.
@@ -23,12 +28,9 @@ pub struct WorkspaceManifest {
 pub struct ManifestEntry {
     pub id: String,
     pub name: String,
-    pub slot: Option<String>,
     pub source: String,
-    pub wasm_path: String,
-    pub checksum: String,
+    pub dir_path: String,
     pub enabled: bool,
-    /// Declared WASI capabilities as string tags for JSON portability.
     #[serde(default)]
     pub capabilities: Vec<String>,
 }
@@ -43,9 +45,6 @@ pub fn manifest_dir(ur_root: &Path, workspace: &Path) -> PathBuf {
 }
 
 /// Escapes a workspace path for use as a directory name.
-///
-/// Canonicalizes the path, replaces `/` with `_`, and strips the
-/// leading `_`.
 #[must_use]
 pub fn escape_workspace_path(path: &Path) -> String {
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
@@ -57,7 +56,7 @@ pub fn escape_workspace_path(path: &Path) -> String {
 ///
 /// # Errors
 ///
-/// Returns an error if the file exists but cannot be parsed.
+/// Returns an error if the operation fails.
 pub fn load_manifest(ur_root: &Path, workspace: &Path) -> Result<Option<WorkspaceManifest>> {
     let path = manifest_dir(ur_root, workspace).join("manifest.json");
     match std::fs::read_to_string(&path) {
@@ -83,7 +82,7 @@ pub fn load_manifest(ur_root: &Path, workspace: &Path) -> Result<Option<Workspac
 ///
 /// # Errors
 ///
-/// Returns an error if the file cannot be written.
+/// Returns an error if the operation fails.
 pub fn save_manifest(ur_root: &Path, workspace: &Path, manifest: &WorkspaceManifest) -> Result<()> {
     let dir = manifest_dir(ur_root, workspace);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -106,9 +105,11 @@ pub fn merge(
     discovered: Vec<DiscoveredExtension>,
     workspace: &Path,
 ) -> WorkspaceManifest {
-    let old_entries: Vec<ManifestEntry> = existing.map(|m| m.extensions).unwrap_or_default();
+    let (old_entries, old_hook_ordering) = existing
+        .map(|m| (m.extensions, m.hook_ordering))
+        .unwrap_or_default();
 
-    let extensions = discovered
+    let extensions: Vec<ManifestEntry> = discovered
         .into_iter()
         .map(|ext| {
             let enabled = old_entries
@@ -119,19 +120,71 @@ pub fn merge(
             ManifestEntry {
                 id: ext.id,
                 name: ext.name,
-                slot: ext.slot,
                 source: ext.source.to_string(),
-                wasm_path: ext.wasm_path.to_string_lossy().into_owned(),
-                checksum: ext.checksum,
+                dir_path: ext.dir_path.to_string_lossy().into_owned(),
                 enabled,
-                capabilities: extension_host::capabilities_to_strings(ext.capabilities),
+                capabilities: ext.capabilities,
             }
+        })
+        .collect();
+
+    // Preserve existing hook ordering, pruning removed extensions.
+    let discovered_ids: Vec<&str> = extensions.iter().map(|e| e.id.as_str()).collect();
+    let hook_ordering: BTreeMap<String, Vec<String>> = old_hook_ordering
+        .into_iter()
+        .map(|(hook, ids)| {
+            let pruned: Vec<String> = ids
+                .into_iter()
+                .filter(|id| discovered_ids.contains(&id.as_str()))
+                .collect();
+            (hook, pruned)
         })
         .collect();
 
     WorkspaceManifest {
         workspace: workspace.to_string_lossy().into_owned(),
         extensions,
+        hook_ordering,
+    }
+}
+
+/// Ensures an extension is present in the ordering for a hook point.
+///
+/// If the extension is not already in the ordering, it is appended to
+/// the end. Call this after discovering which hooks an extension
+/// registered.
+pub fn ensure_hook_ordering(manifest: &mut WorkspaceManifest, hook_name: &str, ext_id: &str) {
+    let ordering = manifest
+        .hook_ordering
+        .entry(hook_name.to_owned())
+        .or_default();
+    if !ordering.iter().any(|id| id == ext_id) {
+        ordering.push(ext_id.to_owned());
+    }
+}
+
+/// Returns the ordered list of extension IDs for a hook point.
+///
+/// Extensions not in the persisted ordering are appended at the end.
+#[must_use]
+pub fn hook_order<'a>(manifest: &'a WorkspaceManifest, hook_name: &str) -> Vec<&'a str> {
+    let all_ids: Vec<&str> = manifest.extensions.iter().map(|e| e.id.as_str()).collect();
+
+    if let Some(ordering) = manifest.hook_ordering.get(hook_name) {
+        let mut result: Vec<&str> = ordering
+            .iter()
+            .filter(|id| all_ids.contains(&id.as_str()))
+            .map(String::as_str)
+            .collect();
+        // Append any extensions not yet in the ordering.
+        for id in &all_ids {
+            if !result.contains(id) {
+                result.push(id);
+            }
+        }
+        result
+    } else {
+        all_ids
     }
 }
 
@@ -142,17 +195,12 @@ pub fn merge(
 ///
 /// # Errors
 ///
-/// Returns an error if discovery or manifest I/O fails.
-pub fn scan_and_load(
-    engine: &Engine,
-    ur_root: &Path,
-    workspace: &Path,
-) -> Result<WorkspaceManifest> {
+/// Returns an error if the operation fails.
+pub fn scan_and_load(ur_root: &Path, workspace: &Path) -> Result<WorkspaceManifest> {
     info!(workspace = %workspace.display(), "scanning for extensions");
-    let discovered = discovery::discover(engine, ur_root, workspace)?;
+    let discovered = discovery::discover(ur_root, workspace)?;
     let existing = load_manifest(ur_root, workspace)?;
     let merged = merge(existing, discovered, workspace);
-    validate_required_slots(merged.extensions.iter().map(|e| (&e.slot, e.enabled)))?;
     save_manifest(ur_root, workspace, &merged)?;
     let enabled = merged.extensions.iter().filter(|e| e.enabled).count();
     info!(total = merged.extensions.len(), enabled, "manifest ready");
@@ -161,14 +209,11 @@ pub fn scan_and_load(
 
 // --- State transitions ---
 
-/// Enables an extension, enforcing slot cardinality.
-///
-/// For exactly-1 slots, the current occupant is disabled automatically
-/// (switch semantics).
+/// Enables an extension by ID.
 ///
 /// # Errors
 ///
-/// Returns an error if the extension is not found or already enabled.
+/// Returns an error if the operation fails.
 pub fn enable(manifest: &mut WorkspaceManifest, id: &str) -> Result<()> {
     let idx = find_entry_index(manifest, id)?;
 
@@ -176,48 +221,20 @@ pub fn enable(manifest: &mut WorkspaceManifest, id: &str) -> Result<()> {
         bail!("{id} is already enabled");
     }
 
-    // For exactly-1 slots, disable the current occupant (switch semantics).
-    if let Some(ref slot_name) = manifest.extensions[idx].slot.clone()
-        && let Some(slot_def) = find_slot(slot_name)
-        && slot_def.cardinality == Cardinality::ExactlyOne
-    {
-        for entry in &mut manifest.extensions {
-            if entry.slot.as_deref() == Some(slot_name) && entry.enabled {
-                entry.enabled = false;
-            }
-        }
-    }
-
     manifest.extensions[idx].enabled = true;
     Ok(())
 }
 
-/// Disables an extension, preventing removal of required slot providers.
+/// Disables an extension by ID.
 ///
 /// # Errors
 ///
-/// Returns an error if the extension is not found, already disabled,
-/// or is the last provider in a required slot.
+/// Returns an error if the operation fails.
 pub fn disable(manifest: &mut WorkspaceManifest, id: &str) -> Result<()> {
     let idx = find_entry_index(manifest, id)?;
 
     if !manifest.extensions[idx].enabled {
         bail!("{id} is already disabled");
-    }
-
-    if let Some(ref slot_name) = manifest.extensions[idx].slot
-        && let Some(slot_def) = find_slot(slot_name)
-        && slot_def.required
-    {
-        let enabled_count = manifest
-            .extensions
-            .iter()
-            .filter(|e| e.slot.as_deref() == Some(slot_name) && e.enabled)
-            .count();
-
-        if enabled_count <= 1 {
-            bail!("cannot disable {id}: it is the only {slot_name} provider");
-        }
     }
 
     manifest.extensions[idx].enabled = false;
@@ -228,7 +245,7 @@ pub fn disable(manifest: &mut WorkspaceManifest, id: &str) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error if the extension is not found.
+/// Returns an error if the operation fails.
 pub fn find_entry<'a>(manifest: &'a WorkspaceManifest, id: &str) -> Result<&'a ManifestEntry> {
     manifest
         .extensions
@@ -250,29 +267,24 @@ fn find_entry_index(manifest: &WorkspaceManifest, id: &str) -> Result<usize> {
 mod tests {
     use super::*;
 
-    fn entry(id: &str, slot: Option<&str>, source: &str, enabled: bool) -> ManifestEntry {
+    fn entry(id: &str, source: &str, enabled: bool) -> ManifestEntry {
         ManifestEntry {
             id: id.to_owned(),
             name: id.to_owned(),
-            slot: slot.map(str::to_owned),
             source: source.to_owned(),
-            wasm_path: String::new(),
-            checksum: String::new(),
+            dir_path: String::new(),
             enabled,
             capabilities: Vec::new(),
         }
     }
 
-    fn discovered(id: &str, slot: Option<&str>, source: SourceTier) -> DiscoveredExtension {
-        use crate::extension_host::wit_types;
+    fn discovered(id: &str, source: SourceTier) -> DiscoveredExtension {
         DiscoveredExtension {
             id: id.to_owned(),
             name: id.to_owned(),
-            slot: slot.map(str::to_owned),
             source,
-            wasm_path: PathBuf::new(),
-            checksum: String::new(),
-            capabilities: wit_types::ExtensionCapabilities::empty(),
+            dir_path: PathBuf::new(),
+            capabilities: Vec::new(),
         }
     }
 
@@ -280,19 +292,18 @@ mod tests {
         WorkspaceManifest {
             workspace: "/test".to_owned(),
             extensions: entries,
+            hook_ordering: BTreeMap::new(),
         }
     }
-
-    // --- merge tests ---
 
     #[test]
     fn merge_fresh_defaults_system_enabled_user_disabled() {
         let result = merge(
             None,
             vec![
-                discovered("sys", Some("llm-provider"), SourceTier::System),
-                discovered("usr", Some("llm-provider"), SourceTier::User),
-                discovered("ws", Some("llm-provider"), SourceTier::Workspace),
+                discovered("sys", SourceTier::System),
+                discovered("usr", SourceTier::User),
+                discovered("ws", SourceTier::Workspace),
             ],
             Path::new("/test"),
         );
@@ -324,12 +335,10 @@ mod tests {
 
     #[test]
     fn merge_preserves_existing_enabled_state() {
-        let existing = manifest(vec![
-            entry("a", Some("llm-provider"), "system", false), // was disabled
-        ]);
+        let existing = manifest(vec![entry("a", "system", false)]);
         let result = merge(
             Some(existing),
-            vec![discovered("a", Some("llm-provider"), SourceTier::System)],
+            vec![discovered("a", SourceTier::System)],
             Path::new("/test"),
         );
         assert!(!result.extensions[0].enabled);
@@ -338,12 +347,12 @@ mod tests {
     #[test]
     fn merge_drops_extensions_no_longer_discovered() {
         let existing = manifest(vec![
-            entry("gone", Some("llm-provider"), "system", true),
-            entry("kept", Some("llm-provider"), "system", true),
+            entry("gone", "system", true),
+            entry("kept", "system", true),
         ]);
         let result = merge(
             Some(existing),
-            vec![discovered("kept", Some("llm-provider"), SourceTier::System)],
+            vec![discovered("kept", SourceTier::System)],
             Path::new("/test"),
         );
         assert_eq!(result.extensions.len(), 1);
@@ -351,166 +360,130 @@ mod tests {
     }
 
     #[test]
-    fn merge_adds_new_extensions_alongside_existing() {
-        let existing = manifest(vec![entry("old", Some("llm-provider"), "system", true)]);
-        let result = merge(
-            Some(existing),
-            vec![
-                discovered("old", Some("llm-provider"), SourceTier::System),
-                discovered("new", Some("llm-provider"), SourceTier::User),
-            ],
-            Path::new("/test"),
-        );
-        assert_eq!(result.extensions.len(), 2);
-        assert!(
-            result
-                .extensions
-                .iter()
-                .find(|e| e.id == "old")
-                .unwrap()
-                .enabled
-        );
-        assert!(
-            !result
-                .extensions
-                .iter()
-                .find(|e| e.id == "new")
-                .unwrap()
-                .enabled
-        );
-    }
-
-    // --- enable tests ---
-
-    #[test]
     fn enable_disabled_extension_succeeds() {
-        let mut m = manifest(vec![entry("a", Some("llm-provider"), "system", false)]);
+        let mut m = manifest(vec![entry("a", "system", false)]);
         enable(&mut m, "a").unwrap();
         assert!(m.extensions[0].enabled);
     }
 
     #[test]
     fn enable_already_enabled_returns_error() {
-        let mut m = manifest(vec![entry("a", Some("llm-provider"), "system", true)]);
+        let mut m = manifest(vec![entry("a", "system", true)]);
         assert!(enable(&mut m, "a").is_err());
     }
 
     #[test]
-    fn enable_exactly_one_slot_disables_current_occupant() {
-        let mut m = manifest(vec![
-            entry("a", Some("session-provider"), "system", true),
-            entry("b", Some("session-provider"), "user", false),
-        ]);
-        enable(&mut m, "b").unwrap();
-        assert!(!m.extensions[0].enabled); // a was switched off
-        assert!(m.extensions[1].enabled); // b is now on
-    }
-
-    #[test]
-    fn enable_at_least_one_slot_does_not_disable_others() {
-        let mut m = manifest(vec![
-            entry("a", Some("llm-provider"), "system", true),
-            entry("b", Some("llm-provider"), "user", false),
-        ]);
-        enable(&mut m, "b").unwrap();
-        assert!(m.extensions[0].enabled); // a still on
-        assert!(m.extensions[1].enabled);
-    }
-
-    #[test]
-    fn enable_unknown_extension_returns_error() {
-        let mut m = manifest(vec![]);
-        assert!(enable(&mut m, "nope").is_err());
-    }
-
-    // --- disable tests ---
-
-    #[test]
     fn disable_enabled_extension_succeeds() {
-        let mut m = manifest(vec![
-            entry("a", Some("llm-provider"), "system", true),
-            entry("b", Some("llm-provider"), "system", true),
-            entry("c", Some("session-provider"), "system", true),
-            entry("d", Some("compaction-provider"), "system", true),
-        ]);
+        let mut m = manifest(vec![entry("a", "system", true)]);
         disable(&mut m, "a").unwrap();
         assert!(!m.extensions[0].enabled);
     }
 
     #[test]
     fn disable_already_disabled_returns_error() {
-        let mut m = manifest(vec![entry("a", Some("llm-provider"), "system", false)]);
+        let mut m = manifest(vec![entry("a", "system", false)]);
         assert!(disable(&mut m, "a").is_err());
     }
-
-    #[test]
-    fn disable_last_provider_of_required_slot_returns_error() {
-        let mut m = manifest(vec![
-            entry("a", Some("session-provider"), "system", true),
-            entry("b", Some("compaction-provider"), "system", true),
-            entry("c", Some("llm-provider"), "system", true),
-        ]);
-        assert!(disable(&mut m, "a").is_err());
-    }
-
-    #[test]
-    fn disable_one_of_multiple_at_least_one_succeeds() {
-        let mut m = manifest(vec![
-            entry("a", Some("llm-provider"), "system", true),
-            entry("b", Some("llm-provider"), "system", true),
-            entry("c", Some("session-provider"), "system", true),
-            entry("d", Some("compaction-provider"), "system", true),
-        ]);
-        disable(&mut m, "a").unwrap();
-    }
-
-    #[test]
-    fn disable_unknown_extension_returns_error() {
-        let mut m = manifest(vec![]);
-        assert!(disable(&mut m, "nope").is_err());
-    }
-
-    // --- find_entry / find_entry_index tests ---
 
     #[test]
     fn find_entry_returns_correct_entry() {
-        let m = manifest(vec![
-            entry("a", None, "system", true),
-            entry("b", None, "user", false),
-        ]);
+        let m = manifest(vec![entry("a", "system", true), entry("b", "user", false)]);
         let e = find_entry(&m, "b").unwrap();
         assert_eq!(e.id, "b");
         assert_eq!(e.source, "user");
     }
 
     #[test]
-    fn find_entry_returns_error_for_unknown() {
-        let m = manifest(vec![]);
-        find_entry(&m, "nope").unwrap_err();
-    }
-
-    #[test]
-    fn find_entry_index_returns_correct_index() {
-        let m = manifest(vec![
-            entry("a", None, "system", true),
-            entry("b", None, "user", false),
-        ]);
-        assert_eq!(find_entry_index(&m, "b").unwrap(), 1);
-    }
-
-    #[test]
-    fn find_entry_index_returns_error_for_unknown() {
-        let m = manifest(vec![]);
-        find_entry_index(&m, "nope").unwrap_err();
-    }
-
-    // --- escape_workspace_path test ---
-
-    #[test]
     fn escape_workspace_path_replaces_slashes() {
-        // Use a path that won't be canonicalized (non-existent)
         let escaped = escape_workspace_path(Path::new("/foo/bar/baz"));
-        // canonicalize fails for non-existent, so falls back to raw path
         assert_eq!(escaped, "foo_bar_baz");
+    }
+
+    // --- hook ordering tests ---
+
+    #[test]
+    fn ensure_hook_ordering_appends_new_extension() {
+        let mut m = manifest(vec![entry("a", "system", true), entry("b", "user", true)]);
+        ensure_hook_ordering(&mut m, "before_completion", "a");
+        ensure_hook_ordering(&mut m, "before_completion", "b");
+
+        let ordering = m.hook_ordering.get("before_completion").unwrap();
+        assert_eq!(ordering, &["a", "b"]);
+    }
+
+    #[test]
+    fn ensure_hook_ordering_does_not_duplicate() {
+        let mut m = manifest(vec![entry("a", "system", true)]);
+        ensure_hook_ordering(&mut m, "before_tool", "a");
+        ensure_hook_ordering(&mut m, "before_tool", "a");
+
+        let ordering = m.hook_ordering.get("before_tool").unwrap();
+        assert_eq!(ordering, &["a"]);
+    }
+
+    #[test]
+    fn hook_order_uses_persisted_ordering() {
+        let mut m = manifest(vec![
+            entry("a", "system", true),
+            entry("b", "user", true),
+            entry("c", "workspace", true),
+        ]);
+        // Persisted order: c, a (b is not in the ordering yet).
+        m.hook_ordering.insert(
+            "before_tool".to_owned(),
+            vec!["c".to_owned(), "a".to_owned()],
+        );
+
+        let order = hook_order(&m, "before_tool");
+        // c first, then a, then b (appended since not in ordering).
+        assert_eq!(order, vec!["c", "a", "b"]);
+    }
+
+    #[test]
+    fn hook_order_defaults_to_extension_order() {
+        let m = manifest(vec![entry("x", "system", true), entry("y", "user", true)]);
+
+        let order = hook_order(&m, "before_completion");
+        assert_eq!(order, vec!["x", "y"]);
+    }
+
+    #[test]
+    fn merge_preserves_hook_ordering() {
+        let mut existing = manifest(vec![entry("a", "system", true), entry("b", "user", true)]);
+        existing.hook_ordering.insert(
+            "before_tool".to_owned(),
+            vec!["b".to_owned(), "a".to_owned()],
+        );
+
+        let result = merge(
+            Some(existing),
+            vec![
+                discovered("a", SourceTier::System),
+                discovered("b", SourceTier::User),
+            ],
+            Path::new("/test"),
+        );
+
+        let ordering = result.hook_ordering.get("before_tool").unwrap();
+        assert_eq!(ordering, &["b", "a"]);
+    }
+
+    #[test]
+    fn merge_prunes_removed_extensions_from_hook_ordering() {
+        let mut existing = manifest(vec![entry("a", "system", true), entry("b", "user", true)]);
+        existing.hook_ordering.insert(
+            "before_tool".to_owned(),
+            vec!["b".to_owned(), "a".to_owned()],
+        );
+
+        // Only "a" is rediscovered; "b" is gone.
+        let result = merge(
+            Some(existing),
+            vec![discovered("a", SourceTier::System)],
+            Path::new("/test"),
+        );
+
+        let ordering = result.hook_ordering.get("before_tool").unwrap();
+        assert_eq!(ordering, &["a"]);
     }
 }

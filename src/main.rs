@@ -6,15 +6,16 @@ use clap::Parser;
 use mimalloc::MiMalloc;
 
 use ur::app::UrApp;
-use ur::cli::{self, Cli, Command, ExtConfigAction, ExtensionAction, RoleAction};
+use ur::cli::{self, Cli, Command, ExtensionAction, RoleAction};
 use ur::logging;
 use ur::session::{self, SessionEvent};
-use ur::workspace::{SettingGetResult, SettingSetResult, UrWorkspace};
+use ur::workspace::UrWorkspace;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Cli::parse();
 
     let ur_root = ur::resolve_ur_root();
@@ -66,34 +67,24 @@ fn handle_extension(ws: &mut UrWorkspace, action: &ExtensionAction) -> Result<()
         ExtensionAction::Inspect { id } => {
             let entry = ws.find_extension(id)?;
             cli::print_inspect(entry);
+            // Show tools and hooks if the extension is loaded.
+            if let Some(ext) = ws.lua_extension(id) {
+                let tools = ext.tool_descriptors();
+                if !tools.is_empty() {
+                    println!("tools:");
+                    for t in &tools {
+                        println!("  - {} \u{2014} {}", t.name, t.description);
+                    }
+                }
+                let hooks = ext.hook_names();
+                if !hooks.is_empty() {
+                    println!("hooks:");
+                    for h in &hooks {
+                        println!("  - {h}");
+                    }
+                }
+            }
         }
-        ExtensionAction::Config { id, action } => match action {
-            ExtConfigAction::List { pattern } => {
-                let settings = ws.list_extension_settings(id, pattern.as_deref())?;
-                println!("{:<40}{:<10}VALUE", "KEY", "TYPE");
-                for s in &settings {
-                    println!("{:<40}{:<10}{}", s.key, s.type_name, s.value_display);
-                }
-            }
-            ExtConfigAction::Get { key } => match ws.get_extension_setting(id, key)? {
-                SettingGetResult::SecretSet => println!("****"),
-                SettingGetResult::SecretUnset => println!("(not set)"),
-                SettingGetResult::Value(v) => println!("{v}"),
-            },
-            ExtConfigAction::Set { key, value } => {
-                match ws.set_extension_setting(id, key, value.as_deref())? {
-                    SettingSetResult::SecretRequired { name } => {
-                        eprint!("{name}: ");
-                        let secret = rpassword::read_password()?;
-                        ws.store_secret(id, key, &secret)?;
-                        println!("{key} stored securely.");
-                    }
-                    SettingSetResult::Stored { key: k, value: v } => {
-                        println!("{id}: {k} = {v}");
-                    }
-                }
-            }
-        },
     }
     Ok(())
 }

@@ -134,8 +134,8 @@ capability. Phase 6 proves it all works.
 
 ### Phase 1: Spike — validate mlua assumptions
 
-- [ ] Add `mlua` dependency: `cargo add mlua --features luau,async,send,serde,macros`
-- [ ] Create `src/lua_spike.rs` (temporary) that validates:
+- [x] Add `mlua` dependency: `cargo add mlua --features luau,async,send,serde,macros`
+- [x] Create `src/lua_spike.rs` (temporary) that validates:
   - Sandboxed VM creation with `Lua::sandbox(true)`
   - Custom `require("ur")` returning a host-injected table
   - Registering a sync Rust function callable from Lua
@@ -143,70 +143,70 @@ capability. Phase 6 proves it all works.
   - Memory limit enforcement (`set_memory_limit`)
   - Interrupt-based execution timeout (`set_interrupt`)
   - Serde round-trip of Lua tables to/from Rust types
-- [ ] Run spike as a test; confirm all assertions pass
-- [ ] Delete `src/lua_spike.rs` after validation
+- [x] Run spike as a test; confirm all assertions pass
+- [x] Delete `src/lua_spike.rs` after validation
 
 ### Phase 2: Remove WASM infrastructure
 
-- [ ] Delete `wit/` directory (world.wit + deps/)
-- [ ] Delete `extensions/system/llm-google/` (entire crate)
-- [ ] Delete `extensions/system/llm-openrouter/` (entire crate)
-- [ ] Delete `extensions/system/session-jsonl/` (entire crate)
-- [ ] Delete `extensions/system/compaction-llm/` (entire crate)
-- [ ] Delete `extensions/workspace/test-extension/` (entire crate)
-- [ ] Delete `extensions/workspace/llm-test/` (entire crate)
-- [ ] Remove `wasmtime`, `wasmtime-wasi`, `wasmtime-wasi-http` from Cargo.toml: `cargo remove wasmtime wasmtime-wasi wasmtime-wasi-http`
-- [ ] Remove `sha2` if only used for WASM checksums (check first)
-- [ ] Delete `src/extension_host.rs`
-- [ ] Delete `src/slot.rs`
-- [ ] Strip wasmtime engine from `src/app.rs` (`UrApp` no longer owns an engine)
-- [ ] Update `src/lib.rs` — remove `extension_host`, `slot` module declarations
-- [ ] Update Makefile — remove `build-extensions`, `WASM_TARGET`, `BUILTIN_EXTENSION_MANIFESTS`, `TEST_EXTENSION_MANIFESTS`, wasm-related install logic
-- [ ] Ensure `cargo check` passes (will have dead code / missing references — fix compile errors in workspace.rs, session.rs, main.rs, etc. by stubbing or commenting out extension-dependent code paths temporarily)
+- [x] Delete `wit/` directory (world.wit + deps/)
+- [x] Delete `extensions/system/llm-google/` (entire crate)
+- [x] Delete `extensions/system/llm-openrouter/` (entire crate)
+- [x] Delete `extensions/system/session-jsonl/` (entire crate)
+- [x] Delete `extensions/system/compaction-llm/` (entire crate)
+- [x] Delete `extensions/workspace/test-extension/` (entire crate)
+- [x] Delete `extensions/workspace/llm-test/` (entire crate)
+- [x] Remove `wasmtime`, `wasmtime-wasi`, `wasmtime-wasi-http` from Cargo.toml: `cargo remove wasmtime wasmtime-wasi wasmtime-wasi-http`
+- [x] Remove `sha2` if only used for WASM checksums (check first)
+- [x] Delete `src/extension_host.rs`
+- [x] Delete `src/slot.rs`
+- [x] Strip wasmtime engine from `src/app.rs` (`UrApp` no longer owns an engine)
+- [x] Update `src/lib.rs` — remove `extension_host`, `slot` module declarations
+- [x] Update Makefile — remove `build-extensions`, `WASM_TARGET`, `BUILTIN_EXTENSION_MANIFESTS`, `TEST_EXTENSION_MANIFESTS`, wasm-related install logic
+- [x] Ensure `cargo check` passes (will have dead code / missing references — fix compile errors in workspace.rs, session.rs, main.rs, etc. by stubbing or commenting out extension-dependent code paths temporarily)
 
 ### Phase 3: Native Rust providers
 
-- [ ] Define native Rust types for shared domain model (replaces WIT types):
+- [x] Define native Rust types for shared domain model (replaces WIT types):
   - `Message`, `MessagePart` (text, tool-call, tool-result), `Usage`
   - `ToolCall`, `ToolResult`, `ToolDescriptor`, `ToolChoice`
   - `SessionInfo`, `SessionEvent` (9 variants matching WIT)
   - `CompletionChunk`, `ModelDescriptor`
   - `SettingDescriptor`, `SettingSchema`, `SettingValue`
   - Put these in a new `src/types.rs` module
-- [ ] Create `src/providers/mod.rs` with submodules
-- [ ] Create `src/providers/google.rs` — port `llm-google` extension logic to native Rust:
+- [x] Create `src/providers/mod.rs` with submodules
+- [x] Create `src/providers/google.rs` — port `llm-google` extension logic to native Rust:
   - Model catalog (gemini-3-flash-preview, gemini-3.1-pro-preview, gemini-3.1-flash-lite-preview)
   - Per-model settings (thinking_level, max_output_tokens, etc.)
   - Streaming completion via reqwest/hyper (replaces WASI HTTP)
   - API key from config
-- [ ] Create `src/providers/openrouter.rs` — port `llm-openrouter` extension logic to native Rust:
+- [x] Create `src/providers/openrouter.rs` — port `llm-openrouter` extension logic to native Rust:
   - Dynamic catalog from OpenRouter API
   - Per-model dynamic settings
   - Streaming completion
   - API key from config
-- [ ] Create `src/providers/session_jsonl.rs` — port `session-jsonl` logic to native Rust:
+- [x] Create `src/providers/session_jsonl.rs` — port `session-jsonl` logic to native Rust:
   - JSONL file I/O using std::fs (replaces WASI filesystem)
   - Session directory: `~/.ur/sessions/` (or configurable)
   - `load`, `append`, `list` operations
-- [ ] Create `src/providers/compaction.rs` — port `compaction-llm` to native Rust:
+- [x] Create `src/providers/compaction.rs` — port `compaction-llm` to native Rust:
   - Currently a stub (returns messages unchanged) — keep as stub
   - Will later use an LLM provider for actual compaction
-- [ ] Define provider traits: `LlmProvider`, `SessionProvider`, `CompactionProvider`
-- [ ] Update `src/model.rs` to build catalogs from native `LlmProvider` instances instead of WASM extensions
-- [ ] Update `src/session.rs` to call native provider traits instead of `ExtensionInstance` methods
-- [ ] Update `src/workspace.rs` to instantiate and manage native providers
-- [ ] Update `src/config.rs` role resolution to work with native provider catalogs
-- [ ] Adapt `src/extension_settings.rs` for native provider settings (API keys, per-model config)
-- [ ] Ensure `cargo check` passes and the core turn loop works without extensions
+- [x] Define provider traits: `LlmProvider`, `SessionProvider`, `CompactionProvider`
+- [x] Update `src/model.rs` to build catalogs from native `LlmProvider` instances instead of WASM extensions
+- [x] Update `src/session.rs` to call native provider traits instead of `ExtensionInstance` methods
+- [x] Update `src/workspace.rs` to instantiate and manage native providers
+- [x] Update `src/config.rs` role resolution to work with native provider catalogs
+- [x] Adapt `src/extension_settings.rs` for native provider settings (API keys, per-model config)
+- [x] Ensure `cargo check` passes and the core turn loop works without extensions
 
 ### Phase 4: Lua extension runtime
 
-- [ ] Create `src/lua_host.rs` — the Lua extension runtime:
+- [x] Create `src/lua_host.rs` — the Lua extension runtime:
   - `LuaExtension` struct: owns `mlua::Lua` instance, extension metadata
   - `load(path: &Path) -> Result<LuaExtension>` — reads `extension.toml`, creates sandboxed VM, injects `ur` module, executes `init.lua`
   - Per-VM resource limits: `set_memory_limit`, `set_interrupt` for timeout
   - Capability enforcement: only register gated APIs if extension declares the capability
-- [ ] Create `src/host_api.rs` — the `ur` module exposed to Lua:
+- [x] Create `src/host_api.rs` — the `ur` module exposed to Lua:
   - `ur.log(msg)` — always available, routes to tracing
   - `ur.tool(name, spec)` — registers a tool (name, description, parameters, handler fn)
   - `ur.hook(name, fn)` — registers a lifecycle hook handler
@@ -215,24 +215,24 @@ capability. Phase 6 proves it all works.
   - `ur.session.load(id)` / `ur.session.list()` — read-only session access
   - `ur.http.get(url, opts)` / `ur.http.post(url, body, opts)` — gated on `network` capability
   - `ur.fs.read(path)` / `ur.fs.write(path, content)` / `ur.fs.list(path)` — gated on `fs-read` / `fs-write`
-- [ ] Create `src/extension_manifest.rs` — parse `extension.toml`:
+- [x] Create `src/extension_manifest.rs` — parse `extension.toml`:
   - `[extension]` table: `id`, `name`, `capabilities` (list of strings)
   - Validate capability strings against known set: `network`, `fs-read`, `fs-write`
-- [ ] Rewrite `src/discovery.rs`:
+- [x] Rewrite `src/discovery.rs`:
   - Scan 3-tier directories for subdirectories containing `extension.toml`
   - Parse manifest, record id/name/capabilities/source-tier/path
   - No Lua execution during discovery
   - `DiscoveredExtension` struct updated: no wasm_path, no checksum, no slot; add `dir_path`
-- [ ] Simplify `src/manifest.rs`:
+- [x] Simplify `src/manifest.rs`:
   - Remove all slot-related logic (cardinality, switch semantics, slot validation)
   - Keep: workspace manifest persistence, merge logic (new extensions default state), enable/disable
   - Add: hook ordering storage per hook-point
-- [ ] Update `src/workspace.rs`:
+- [x] Update `src/workspace.rs`:
   - Load Lua extensions via `lua_host::load()` for all enabled discovered extensions
   - Collect registered tools across all extensions
   - Provide tool dispatch: route `call_tool(name, args)` to the owning extension's handler
-- [ ] Update `src/lib.rs` — add new module declarations: `lua_host`, `host_api`, `extension_manifest`, `types`, `providers`
-- [ ] Update `src/main.rs` and `src/cli.rs`:
+- [x] Update `src/lib.rs` — add new module declarations: `lua_host`, `host_api`, `extension_manifest`, `types`, `providers`
+- [x] Update `src/main.rs` and `src/cli.rs`:
   - `extension list` — show Lua extensions (id, name, enabled, source tier)
   - `extension enable/disable` — no slot semantics, simple toggle
   - `extension inspect` — show capabilities, registered tools, registered hooks
@@ -240,44 +240,44 @@ capability. Phase 6 proves it all works.
 
 ### Phase 5: Lifecycle hooks
 
-- [ ] Define hook dispatch in `src/lua_host.rs`:
+- [x] Define hook dispatch in `src/lua_host.rs`:
   - `HookPoint` enum: 9 variants matching the brainstorm
   - `HookResult` enum: `Pass`, `Modified(Value)`, `Rejected(String)`
   - `run_hook(point, context) -> HookResult` — iterates extensions in manifest-defined order, chains modifications, short-circuits on reject
-- [ ] Integrate hooks into `src/session.rs` turn loop:
+- [x] Integrate hooks into `src/session.rs` turn loop:
   - `before_completion` / `after_completion` — wrap LLM provider calls
   - `before_tool` / `after_tool` — wrap tool dispatch
   - `before_session_load` / `after_session_load` — wrap session load
   - `before_session_append` — wrap session append
   - `before_compaction` / `after_compaction` — wrap compaction
-- [ ] Hook ordering in manifest:
+- [x] Hook ordering in manifest:
   - Default order: discovery order (system > user > workspace)
   - Persisted per hook-point in workspace manifest
   - New extensions appended to end of each hook chain
   - Disabled extensions preserved in position, skipped at runtime
-- [ ] Rejection semantics: `before_tool` rejection returns a `ToolResult` with error text so the LLM can reason about it. `before_completion` rejection aborts the completion attempt with an error surfaced to the user
+- [x] Rejection semantics: `before_tool` rejection returns a `ToolResult` with error text so the LLM can reason about it. `before_completion` rejection aborts the completion attempt with an error surfaced to the user
 
 ### Phase 6: Test extension and integration tests
 
-- [ ] Create test Lua extension at `extensions/workspace/test-extension/`:
+- [x] Create test Lua extension at `extensions/workspace/test-extension/`:
   - `extension.toml` with `id = "test-extension"`, `capabilities = ["network"]`
   - `init.lua` registering:
     - A tool (`echo`) that returns its input
     - All 9 lifecycle hooks with observable side effects (e.g., logging, modifying context)
-- [ ] Rewrite `tests/cli/extension.rs`:
+- [x] Rewrite `tests/cli/extension.rs`:
   - Discovery: finds Lua extensions across tiers
   - Enable/disable: simple toggle without slot semantics
   - Inspect: shows tools and hooks
   - Tool invocation: `echo` tool works end-to-end
-- [ ] Rewrite `tests/cli/google.rs` and `tests/cli/openrouter.rs` for native providers
-- [ ] Update `tests/cli/role.rs` for native provider model catalogs
-- [ ] Update `tests/cli/run.rs` for the new turn loop with hooks
-- [ ] Update Makefile:
+- [x] Rewrite `tests/cli/google.rs` and `tests/cli/openrouter.rs` for native providers
+- [x] Update `tests/cli/role.rs` for native provider model catalogs
+- [x] Update `tests/cli/run.rs` for the new turn loop with hooks
+- [x] Update Makefile:
   - `build` target: just `cargo build` (no extension build step)
   - `test` target: just `cargo test` (no extension pre-build)
   - `install` target: copy binaries only (no WASM extension install)
   - `check`, `clippy`, `fmt`, `fmt-check`: host-only (no extension manifests loop)
-- [ ] Run `make verify` — all checks pass
+- [x] Run `make verify` — all checks pass
 
 ## Validation
 
