@@ -12,7 +12,7 @@ use tracing::{debug, warn};
 use crate::lua_host::LuaExtension;
 
 /// The 9 lifecycle hook points.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HookPoint {
     BeforeCompletion,
     AfterCompletion,
