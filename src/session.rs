@@ -18,12 +18,6 @@ use crate::types::{
     self, Completion, CompletionChunk, Message, MessagePart, ToolCall, ToolDescriptor, ToolResult,
 };
 
-/// A tool handler: descriptor paired with its invocation closure.
-type ToolHandler = (
-    ToolDescriptor,
-    Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
-);
-
 /// Bundled dependencies for constructing a session.
 pub(crate) struct SessionDeps {
     pub llm_providers: Vec<Arc<LlmProvider>>,
@@ -31,7 +25,6 @@ pub(crate) struct SessionDeps {
     pub compaction_provider: Arc<dyn CompactionProvider>,
     pub config: UserConfig,
     pub manifest: WorkspaceManifest,
-    pub tool_handlers: Vec<ToolHandler>,
     pub extensions: Vec<Arc<LuaExtension>>,
 }
 
@@ -87,9 +80,7 @@ pub struct UrSession {
     events: Vec<types::SessionEvent>,
     persisted_event_count: usize,
     turn_count: u32,
-    /// Tool handlers registered by Lua extensions.
-    tool_handlers: Vec<ToolHandler>,
-    /// Lua extensions for hook dispatch.
+    /// Lua extensions for hook dispatch and tool execution.
     extensions: Vec<Arc<LuaExtension>>,
 }
 
@@ -158,7 +149,6 @@ impl UrSession {
             events,
             persisted_event_count,
             turn_count: 0,
-            tool_handlers: deps.tool_handlers,
             extensions: deps.extensions,
         })
     }
@@ -235,8 +225,11 @@ impl UrSession {
         let llm = Arc::clone(llm);
 
         // Collect tools from extensions.
-        let tools: Vec<ToolDescriptor> =
-            self.tool_handlers.iter().map(|(d, _)| d.clone()).collect();
+        let tools: Vec<ToolDescriptor> = self
+            .extensions
+            .iter()
+            .flat_map(|ext| ext.tool_descriptors())
+            .collect();
 
         // Get settings for this model.
         let descriptors = llm.list_settings().await;
@@ -498,14 +491,13 @@ impl UrSession {
                 HookResult::Rejected(_) => unreachable!(),
             };
 
-            let handler = self
-                .tool_handlers
+            let ext = self
+                .extensions
                 .iter()
-                .find(|(d, _)| d.name == tc.name)
-                .map(|(_, h)| Arc::clone(h));
+                .find(|e| e.tool_descriptors().iter().any(|d| d.name == tc.name));
 
-            let result_content = if let Some(handler) = handler {
-                match handler(&effective_args) {
+            let result_content = if let Some(ext) = ext {
+                match ext.call_tool(&tc.name, &effective_args) {
                     Ok(result) => result,
                     Err(e) => format!("Error: {e}"),
                 }

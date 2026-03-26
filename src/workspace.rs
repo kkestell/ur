@@ -18,13 +18,7 @@ use crate::providers::compaction::StubCompactionProvider;
 use crate::providers::session_jsonl::JsonlSessionProvider;
 use crate::providers::{CompactionProvider, LlmProvider, SessionProvider};
 use crate::session::{SessionDeps, UrSession};
-use crate::types::{ExtensionCapabilities, ToolDescriptor};
-
-/// A tool handler: descriptor paired with its invocation closure.
-type ToolHandler = (
-    ToolDescriptor,
-    Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
-);
+use crate::types::ExtensionCapabilities;
 
 /// A role mapping entry.
 #[derive(Debug)]
@@ -270,19 +264,6 @@ impl UrWorkspace {
     pub fn open_session(&self, session_id: &str) -> Result<UrSession> {
         let compaction_provider: Arc<dyn CompactionProvider> = Arc::new(StubCompactionProvider);
 
-        // Collect tool handlers from Lua extensions.
-        let mut tool_handlers: Vec<ToolHandler> = Vec::new();
-        for ext in &self.lua_extensions {
-            for desc in ext.tool_descriptors() {
-                let ext_clone = Arc::clone(ext);
-                let tool_name = desc.name.clone();
-                tool_handlers.push((
-                    desc,
-                    Arc::new(move |args: &str| ext_clone.call_tool(&tool_name, args)),
-                ));
-            }
-        }
-
         UrSession::open(
             SessionDeps {
                 llm_providers: self.llm_providers.clone(),
@@ -290,7 +271,6 @@ impl UrWorkspace {
                 compaction_provider,
                 config: self.config.clone(),
                 manifest: self.manifest.clone(),
-                tool_handlers,
                 extensions: self.lua_extensions.clone(),
             },
             session_id,
