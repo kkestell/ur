@@ -243,53 +243,64 @@ fn build_session_module(
 fn build_http_module(lua: &Lua) -> Result<LuaTable> {
     let http = lua.create_table()?;
 
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(anyhow::Error::from)?;
+
+    let get_client = client.clone();
     let get_fn =
-        lua.create_async_function(|lua, (url, opts): (String, Option<LuaTable>)| async move {
-            let client = reqwest::Client::new();
-            let mut builder = client.get(&url);
+        lua.create_async_function(move |lua, (url, opts): (String, Option<LuaTable>)| {
+            let client = get_client.clone();
+            async move {
+                let mut builder = client.get(&url);
 
-            if let Some(opts) = &opts
-                && let Ok(headers) = opts.get::<LuaTable>("headers")
-            {
-                for pair in headers.pairs::<String, String>() {
-                    let (key, value) = pair?;
-                    builder = builder.header(key, value);
+                if let Some(opts) = &opts
+                    && let Ok(headers) = opts.get::<LuaTable>("headers")
+                {
+                    for pair in headers.pairs::<String, String>() {
+                        let (key, value) = pair?;
+                        builder = builder.header(key, value);
+                    }
                 }
+
+                let response = builder.send().await.map_err(LuaError::external)?;
+                let status = response.status().as_u16();
+                let body = response.text().await.map_err(LuaError::external)?;
+
+                let result = lua.create_table()?;
+                result.set("status", status)?;
+                result.set("body", body)?;
+                Ok(result)
             }
-
-            let response = builder.send().await.map_err(LuaError::external)?;
-            let status = response.status().as_u16();
-            let body = response.text().await.map_err(LuaError::external)?;
-
-            let result = lua.create_table()?;
-            result.set("status", status)?;
-            result.set("body", body)?;
-            Ok(result)
         })?;
     http.set("get", get_fn)?;
 
+    let post_client = client;
     let post_fn = lua.create_async_function(
-        |lua, (url, body, opts): (String, String, Option<LuaTable>)| async move {
-            let client = reqwest::Client::new();
-            let mut builder = client.post(&url).body(body);
+        move |lua, (url, body, opts): (String, String, Option<LuaTable>)| {
+            let client = post_client.clone();
+            async move {
+                let mut builder = client.post(&url).body(body);
 
-            if let Some(opts) = &opts
-                && let Ok(headers) = opts.get::<LuaTable>("headers")
-            {
-                for pair in headers.pairs::<String, String>() {
-                    let (key, value) = pair?;
-                    builder = builder.header(key, value);
+                if let Some(opts) = &opts
+                    && let Ok(headers) = opts.get::<LuaTable>("headers")
+                {
+                    for pair in headers.pairs::<String, String>() {
+                        let (key, value) = pair?;
+                        builder = builder.header(key, value);
+                    }
                 }
+
+                let response = builder.send().await.map_err(LuaError::external)?;
+                let status = response.status().as_u16();
+                let body = response.text().await.map_err(LuaError::external)?;
+
+                let result = lua.create_table()?;
+                result.set("status", status)?;
+                result.set("body", body)?;
+                Ok(result)
             }
-
-            let response = builder.send().await.map_err(LuaError::external)?;
-            let status = response.status().as_u16();
-            let body = response.text().await.map_err(LuaError::external)?;
-
-            let result = lua.create_table()?;
-            result.set("status", status)?;
-            result.set("body", body)?;
-            Ok(result)
         },
     )?;
     http.set("post", post_fn)?;
