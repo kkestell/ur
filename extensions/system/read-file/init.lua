@@ -3,6 +3,83 @@ local ur = require("ur")
 
 local MAX_BYTES = 128 * 1024 -- 128 KB
 
+local function read_content(path)
+    local ok, content = pcall(ur.fs.read, path)
+
+    if not ok then
+        return nil, tostring(content)
+    end
+
+    return content
+end
+
+local function split_lines(content)
+    local lines = {}
+    local pos = 1
+
+    while pos <= #content do
+        local nl = content:find("\n", pos, true)
+        if nl then
+            lines[#lines + 1] = content:sub(pos, nl)
+            pos = nl + 1
+        else
+            lines[#lines + 1] = content:sub(pos)
+            pos = #content + 1
+        end
+    end
+
+    return lines
+end
+
+local function slice_lines(lines, offset, limit)
+    local start = 1
+    if offset and offset > 1 then
+        start = offset
+    end
+
+    if start > #lines then
+        return {}
+    end
+
+    local finish = #lines
+    if limit and limit > 0 then
+        finish = math.min(start + limit - 1, #lines)
+    end
+
+    local sliced = {}
+    for i = start, finish do
+        sliced[#sliced + 1] = lines[i]
+    end
+
+    return sliced
+end
+
+local function truncate_result(lines)
+    local result = table.concat(lines)
+    if #result <= MAX_BYTES then
+        return result
+    end
+
+    local full_size = #result
+    local truncated = {}
+    local size = 0
+    for _, line in ipairs(lines) do
+        if size + #line > MAX_BYTES then
+            break
+        end
+        truncated[#truncated + 1] = line
+        size = size + #line
+    end
+
+    local truncated_result = table.concat(truncated)
+    return truncated_result
+        .. "\n[truncated — content was "
+        .. full_size
+        .. " bytes, returned first "
+        .. size
+        .. " bytes. Use offset/limit to read in chunks.]"
+end
+
 ur.tool("read_file", {
     description = "Read the contents of a file. Supports optional line-based offset and limit for partial reads.",
     parameters = {
@@ -20,70 +97,14 @@ ur.tool("read_file", {
             return { error = "path is required" }
         end
 
-        local ok, content = pcall(function()
-            return ur.fs.read(path)
-        end)
-
-        if not ok then
-            return { error = tostring(content) }
+        local content, err = read_content(path)
+        if not content then
+            return { error = err }
         end
 
-        -- Split into lines, preserving line endings for faithful reconstruction.
-        local lines = {}
-        local pos = 1
-        while pos <= #content do
-            local nl = content:find("\n", pos, true)
-            if nl then
-                lines[#lines + 1] = content:sub(pos, nl)
-                pos = nl + 1
-            else
-                lines[#lines + 1] = content:sub(pos)
-                pos = #content + 1
-            end
-        end
-
-        -- Apply offset (1-based).
-        local start = 1
-        if args.offset and args.offset > 1 then
-            start = args.offset
-        end
-
-        -- Apply limit.
-        local finish = #lines
-        if args.limit and args.limit > 0 then
-            finish = math.min(start + args.limit - 1, #lines)
-        end
-
-        -- Clamp start.
-        if start > #lines then
-            return { content = "" }
-        end
-
-        -- Reassemble selected lines.
-        local sliced = {}
-        for i = start, finish do
-            sliced[#sliced + 1] = lines[i]
-        end
-        local result = table.concat(sliced)
-
-        -- Truncation guard.
-        if #result > MAX_BYTES then
-            -- Truncate at a line boundary within MAX_BYTES.
-            local full_size = #result
-            local truncated = {}
-            local size = 0
-            for _, line in ipairs(sliced) do
-                if size + #line > MAX_BYTES then
-                    break
-                end
-                truncated[#truncated + 1] = line
-                size = size + #line
-            end
-            result = table.concat(truncated)
-            result = result .. "\n[truncated — content was " .. full_size .. " bytes, returned first " .. #result .. " bytes. Use offset/limit to read in chunks.]"
-        end
-
-        return { content = result }
+        local lines = split_lines(content)
+        local sliced = slice_lines(lines, args.offset, args.limit)
+        return { content = truncate_result(sliced) }
     end,
 })
 

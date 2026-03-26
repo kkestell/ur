@@ -121,15 +121,7 @@ impl LuaExtension {
         // Register custom `require` so `local ur = require("ur")` works.
         // In sandbox mode the built-in require is disabled, so we provide
         // a minimal one that only resolves "ur".
-        let require_fn = lua.create_function(|lua, name: String| {
-            if name == "ur" {
-                lua.globals().get::<LuaValue>("ur")
-            } else {
-                Err(LuaError::runtime(format!(
-                    "module '{name}' not found (only 'ur' is available)"
-                )))
-            }
-        })?;
+        let require_fn = Self::build_require_fn(&lua)?;
         lua.globals()
             .set("require", require_fn)
             .map_err(|e| anyhow::anyhow!("failed to inject require: {e}"))?;
@@ -164,6 +156,61 @@ impl LuaExtension {
             tools,
             hooks,
         })
+    }
+
+    fn build_require_fn(lua: &Lua) -> Result<LuaFunction> {
+        lua.create_function(|lua, name: String| {
+            if name == "ur" {
+                lua.globals().get::<LuaValue>("ur")
+            } else {
+                Err(LuaError::runtime(format!(
+                    "module '{name}' not found (only 'ur' is available)"
+                )))
+            }
+        })
+        .map_err(Into::into)
+    }
+
+    fn find_tool_handler(&self, name: &str) -> Result<LuaFunction> {
+        let tools = self.tools.lock().unwrap();
+        let tool = tools
+            .iter()
+            .find(|tool| tool.descriptor.name == name)
+            .ok_or_else(|| anyhow::anyhow!("tool not found: {name}"))?;
+        Ok(self.lua.registry_value::<LuaFunction>(&tool.handler_key)?)
+    }
+
+    fn find_hook_handler(&self, hook_name: &str) -> Result<LuaFunction> {
+        let hooks = self.hooks.lock().unwrap();
+        let hook = hooks
+            .iter()
+            .find(|hook| hook.hook_name == hook_name)
+            .ok_or_else(|| anyhow::anyhow!("hook not registered: {hook_name}"))?;
+        Ok(self.lua.registry_value::<LuaFunction>(&hook.handler_key)?)
+    }
+
+    fn parse_tool_arguments_or_nil(&self, arguments_json: &str) -> LuaValue {
+        self.lua
+            .load(arguments_json)
+            .eval()
+            .or_else(|_| {
+                // Keep argument handling permissive: if the payload is not valid
+                // Lua or JSON, the tool receives `nil` just as before.
+                let json: serde_json::Value = serde_json::from_str(arguments_json)?;
+                self.lua.to_value(&json).map_err(anyhow::Error::from)
+            })
+            .unwrap_or(LuaValue::Nil)
+    }
+
+    fn call_handler(
+        handler: &LuaFunction,
+        args: LuaValue,
+        error_context: &str,
+    ) -> Result<LuaValue> {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(handler.call_async(args))
+        })
+        .map_err(|e| anyhow::anyhow!("{error_context}: {e}"))
     }
 
     /// Returns the tool descriptors registered by this extension.
@@ -206,32 +253,13 @@ impl LuaExtension {
     ///
     /// Panics if a mutex is poisoned.
     pub fn call_tool(&self, name: &str, arguments_json: &str) -> Result<String> {
-        let handler_key = {
-            let tools = self.tools.lock().unwrap();
-            let tool = tools
-                .iter()
-                .find(|t| t.descriptor.name == name)
-                .ok_or_else(|| anyhow::anyhow!("tool not found: {name}"))?;
-            self.lua.registry_value::<LuaFunction>(&tool.handler_key)?
-        };
-
-        let args: LuaValue = self
-            .lua
-            .load(arguments_json)
-            .eval()
-            .or_else(|_| {
-                // Try parsing as JSON and converting to Lua.
-                let json: serde_json::Value = serde_json::from_str(arguments_json)?;
-                self.lua.to_value(&json).map_err(anyhow::Error::from)
-            })
-            .unwrap_or(LuaValue::Nil);
+        let handler = self.find_tool_handler(name)?;
+        let args = self.parse_tool_arguments_or_nil(arguments_json);
 
         // Use call_async with block_in_place to allow Lua coroutines (async functions) to execute.
         // block_in_place works both in and out of a tokio context.
-        let result: LuaValue = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(handler_key.call_async(args))
-        })
-        .map_err(|e| anyhow::anyhow!("calling tool handler {name}: {e}"))?;
+        let error_context = format!("calling tool handler {name}");
+        let result = Self::call_handler(&handler, args, &error_context)?;
 
         // Convert result to string.
         match result {
@@ -258,22 +286,12 @@ impl LuaExtension {
         hook_name: &str,
         context: &serde_json::Value,
     ) -> Result<serde_json::Value> {
-        let handler_key = {
-            let hooks = self.hooks.lock().unwrap();
-            let hook = hooks
-                .iter()
-                .find(|h| h.hook_name == hook_name)
-                .ok_or_else(|| anyhow::anyhow!("hook not registered: {hook_name}"))?;
-            self.lua.registry_value::<LuaFunction>(&hook.handler_key)?
-        };
-
+        let handler = self.find_hook_handler(hook_name)?;
         let ctx_lua: LuaValue = self.lua.to_value(context)?;
         // Use call_async with block_in_place to allow Lua coroutines (async functions) to execute.
         // block_in_place works both in and out of a tokio context.
-        let result: LuaValue = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(handler_key.call_async(ctx_lua))
-        })
-        .map_err(|e| anyhow::anyhow!("calling hook handler {hook_name}: {e}"))?;
+        let error_context = format!("calling hook handler {hook_name}");
+        let result = Self::call_handler(&handler, ctx_lua, &error_context)?;
 
         let result_json: serde_json::Value = self.lua.from_value(result)?;
         Ok(result_json)

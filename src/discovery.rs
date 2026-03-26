@@ -44,52 +44,55 @@ pub fn discover(ur_root: &Path, workspace: &Path) -> Result<Vec<DiscoveredExtens
     let mut extensions = Vec::new();
     let mut seen_ids = HashSet::new();
 
-    let tiers = [
+    for (dir, tier) in [
         (ur_root.join("extensions/system"), SourceTier::System),
         (ur_root.join("extensions/user"), SourceTier::User),
         (workspace.join(".ur/extensions"), SourceTier::Workspace),
-    ];
-
-    for (dir, tier) in &tiers {
-        if !dir.is_dir() {
-            debug!(tier = %tier, dir = %dir.display(), "skipping missing tier directory");
-            continue;
-        }
-
-        let entries =
-            std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))?;
-
-        for entry in entries {
-            let entry = entry.with_context(|| format!("scanning {}", dir.display()))?;
-            let ext_dir = entry.path();
-            if !ext_dir.is_dir() {
-                continue;
-            }
-
-            let manifest_path = ext_dir.join("extension.toml");
-            if !manifest_path.is_file() {
-                warn!(dir = %ext_dir.display(), "no extension.toml found");
-                continue;
-            }
-
-            let ext = parse_extension_dir(&ext_dir, &manifest_path, *tier)?;
-            debug!(
-                id = %ext.id,
-                name = %ext.name,
-                tier = %tier,
-                "discovered extension"
-            );
-
-            if !seen_ids.insert(ext.id.clone()) {
-                bail!("duplicate extension id: {}", ext.id);
-            }
-
-            extensions.push(ext);
-        }
+    ] {
+        discover_tier(&dir, tier, &mut seen_ids, &mut extensions)?;
     }
 
     info!(count = extensions.len(), "extension discovery complete");
     Ok(extensions)
+}
+
+fn discover_tier(
+    dir: &Path,
+    tier: SourceTier,
+    seen_ids: &mut HashSet<String>,
+    extensions: &mut Vec<DiscoveredExtension>,
+) -> Result<()> {
+    if !dir.is_dir() {
+        debug!(tier = %tier, dir = %dir.display(), "skipping missing tier directory");
+        return Ok(());
+    }
+
+    let entries = std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))?;
+
+    for entry in entries {
+        let entry = entry.with_context(|| format!("scanning {}", dir.display()))?;
+        let ext_dir = entry.path();
+        if !ext_dir.is_dir() {
+            continue;
+        }
+
+        let manifest_path = ext_dir.join("extension.toml");
+        if !manifest_path.is_file() {
+            warn!(dir = %ext_dir.display(), "no extension.toml found");
+            continue;
+        }
+
+        let ext = parse_extension_dir(&ext_dir, &manifest_path, tier)?;
+        debug!(id = %ext.id, name = %ext.name, tier = %tier, "discovered extension");
+
+        if !seen_ids.insert(ext.id.clone()) {
+            bail!("duplicate extension id: {}", ext.id);
+        }
+
+        extensions.push(ext);
+    }
+
+    Ok(())
 }
 
 /// Parses an extension directory's `extension.toml` manifest.

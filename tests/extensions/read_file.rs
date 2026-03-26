@@ -26,6 +26,11 @@ fn load_read_file_extension() -> LuaExtension {
     .unwrap()
 }
 
+fn call_read_file_tool(ext: &LuaExtension, args: serde_json::Value) -> serde_json::Value {
+    let result = ext.call_tool("read_file", &args.to_string()).unwrap();
+    serde_json::from_str(&result).unwrap()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn registers_read_file_tool() {
     let ext = load_read_file_extension();
@@ -44,9 +49,10 @@ async fn returns_file_contents() {
     let file_path = dir.path().join("hello.txt");
     fs::write(&file_path, "hello world\n").unwrap();
 
-    let args = serde_json::json!({ "path": file_path.to_str().unwrap() }).to_string();
-    let result = ext.call_tool("read_file", &args).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let parsed = call_read_file_tool(
+        &ext,
+        serde_json::json!({ "path": file_path.to_str().unwrap() }),
+    );
 
     assert_eq!(parsed["content"], "hello world\n");
 }
@@ -60,14 +66,14 @@ async fn offset_and_limit() {
     fs::write(&file_path, "line1\nline2\nline3\nline4\nline5\n").unwrap();
 
     // Read lines 2-3 (offset=2, limit=2).
-    let args = serde_json::json!({
-        "path": file_path.to_str().unwrap(),
-        "offset": 2,
-        "limit": 2
-    })
-    .to_string();
-    let result = ext.call_tool("read_file", &args).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let parsed = call_read_file_tool(
+        &ext,
+        serde_json::json!({
+            "path": file_path.to_str().unwrap(),
+            "offset": 2,
+            "limit": 2
+        }),
+    );
 
     assert_eq!(parsed["content"], "line2\nline3\n");
 }
@@ -83,9 +89,10 @@ async fn truncates_large_content() {
     let content = line.repeat(2000);
     fs::write(&file_path, &content).unwrap();
 
-    let args = serde_json::json!({ "path": file_path.to_str().unwrap() }).to_string();
-    let result = ext.call_tool("read_file", &args).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let parsed = call_read_file_tool(
+        &ext,
+        serde_json::json!({ "path": file_path.to_str().unwrap() }),
+    );
 
     let text = parsed["content"].as_str().unwrap();
     assert!(
@@ -107,9 +114,7 @@ async fn truncates_large_content() {
 async fn returns_error_for_missing_file() {
     let ext = load_read_file_extension();
 
-    let args = serde_json::json!({ "path": "/nonexistent/file.txt" }).to_string();
-    let result = ext.call_tool("read_file", &args).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let parsed = call_read_file_tool(&ext, serde_json::json!({ "path": "/nonexistent/file.txt" }));
 
     assert!(
         parsed["error"].as_str().is_some(),
