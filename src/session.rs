@@ -793,6 +793,13 @@ fn parse_settings_from_json(val: &serde_json::Value) -> Option<Vec<types::Config
                 }
             }
             serde_json::Value::String(s) => types::SettingValue::String(s.clone()),
+            serde_json::Value::Object(obj) => {
+                if let Some(serde_json::Value::String(s)) = obj.get("__enum") {
+                    types::SettingValue::Enumeration(s.clone())
+                } else {
+                    continue;
+                }
+            }
             _ => continue,
         };
         settings.push(types::ConfigSetting {
@@ -806,9 +813,8 @@ fn parse_settings_from_json(val: &serde_json::Value) -> Option<Vec<types::Config
 fn format_setting_value(val: &types::SettingValue) -> serde_json::Value {
     match val {
         types::SettingValue::Integer(i) => serde_json::Value::Number((*i).into()),
-        types::SettingValue::Enumeration(s) | types::SettingValue::String(s) => {
-            serde_json::Value::String(s.clone())
-        }
+        types::SettingValue::Enumeration(s) => serde_json::json!({ "__enum": s }),
+        types::SettingValue::String(s) => serde_json::Value::String(s.clone()),
         types::SettingValue::Boolean(b) => serde_json::Value::Bool(*b),
         types::SettingValue::Number(n) => serde_json::Number::from_f64(*n)
             .map_or(serde_json::Value::Null, serde_json::Value::Number),
@@ -1122,5 +1128,42 @@ mod tests {
         ));
         assert!(matches!(events[1], PersistedEvent::UserMessage { .. }));
         assert!(matches!(events[2], PersistedEvent::LlmCompletion { .. }));
+    }
+
+    #[test]
+    fn setting_enumeration_round_trips_through_json() {
+        use crate::types::{ConfigSetting, SettingValue};
+
+        let original = [
+            ConfigSetting {
+                key: "thinking_level".into(),
+                value: SettingValue::Enumeration("high".into()),
+            },
+            ConfigSetting {
+                key: "api_key".into(),
+                value: SettingValue::String("secret".into()),
+            },
+            ConfigSetting {
+                key: "max_tokens".into(),
+                value: SettingValue::Integer(1024),
+            },
+        ];
+
+        let json: Vec<serde_json::Value> = original
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "key": s.key,
+                    "value": format_setting_value(&s.value),
+                })
+            })
+            .collect();
+        let json_val = serde_json::Value::Array(json);
+        let parsed = parse_settings_from_json(&json_val).unwrap();
+
+        assert_eq!(parsed.len(), 3);
+        assert!(matches!(&parsed[0].value, SettingValue::Enumeration(s) if s == "high"));
+        assert!(matches!(&parsed[1].value, SettingValue::String(s) if s == "secret"));
+        assert!(matches!(&parsed[2].value, SettingValue::Integer(1024)));
     }
 }
