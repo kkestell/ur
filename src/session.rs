@@ -218,10 +218,6 @@ impl UrSession {
     /// # Errors
     ///
     /// Returns an error if the operation fails.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Core turn loop; splitting hurts readability"
-    )]
     pub async fn run_turn(
         &mut self,
         user_message: &str,
@@ -236,6 +232,29 @@ impl UrSession {
             text: user_message.to_owned(),
         });
 
+        let result = self.run_turn_body(turn_index, &mut on_event).await;
+
+        if let Err(ref e) = result {
+            self.events.push(PersistedEvent::TurnInterrupted {
+                turn_index,
+                reason: e.to_string(),
+            });
+            let _ = self.persist_and_compact();
+            on_event(SessionEvent::TurnError(e.to_string()));
+        }
+
+        result
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Core turn loop; splitting hurts readability"
+    )]
+    async fn run_turn_body(
+        &mut self,
+        turn_index: u32,
+        on_event: &mut (impl FnMut(SessionEvent) -> Option<ApprovalDecision> + Send),
+    ) -> Result<()> {
         // Resolve role and find LLM provider.
         let provider_refs: Vec<&LlmProvider> = self
             .llm_providers
@@ -317,7 +336,7 @@ impl UrSession {
             &model_id,
             &config_settings,
             &tools,
-            &mut on_event,
+            on_event,
         )
         .await?;
 
@@ -365,7 +384,7 @@ impl UrSession {
 
         // Tool dispatch.
         if !tool_calls.is_empty() {
-            self.dispatch_tool_calls(&tool_calls, &mut on_event)?;
+            self.dispatch_tool_calls(&tool_calls, on_event)?;
 
             // Second LLM completion with tool results.
             let messages = self.messages_for_llm();
@@ -379,7 +398,7 @@ impl UrSession {
                 &model_id,
                 &config_settings,
                 &tools,
-                &mut on_event,
+                on_event,
             )
             .await?;
             let text = extract_text(&completion2.message);
