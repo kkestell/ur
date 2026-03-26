@@ -82,7 +82,8 @@ pub struct ToolDescriptor {
 }
 
 /// Controls how the LLM selects tools.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ToolChoice {
     Auto,
     None,

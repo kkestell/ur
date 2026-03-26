@@ -283,8 +283,9 @@ impl UrSession {
             self.config
                 .settings_for(llm.provider_id(), &model_id, &descriptors)?;
 
-        // before_completion hook — can mutate messages, model, settings, tools; can reject.
+        // before_completion hook — can mutate messages, model, settings, tools, tool_choice; can reject.
         let messages = self.messages_for_llm();
+        let tool_choice: Option<types::ToolChoice> = None;
         let hook_ctx = serde_json::json!({
             "messages": serde_json::to_value(&messages).unwrap_or_default(),
             "model": model_id,
@@ -293,8 +294,9 @@ impl UrSession {
                 "value": format_setting_value(&s.value),
             })).collect::<Vec<_>>(),
             "tools": serde_json::to_value(&tools).unwrap_or_default(),
+            "tool_choice": serde_json::to_value(&tool_choice).unwrap_or_default(),
         });
-        let (messages, config_settings, tools) = match dispatch_hook(
+        let (messages, config_settings, tools, tool_choice) = match dispatch_hook(
             &self.extensions,
             &self.manifest,
             HookPoint::BeforeCompletion,
@@ -324,7 +326,11 @@ impl UrSession {
                     .get("tools")
                     .and_then(|v| serde_json::from_value::<Vec<ToolDescriptor>>(v.clone()).ok())
                     .unwrap_or(tools);
-                (messages, config_settings, tools)
+                let tool_choice = ctx
+                    .get("tool_choice")
+                    .and_then(|v| serde_json::from_value::<types::ToolChoice>(v.clone()).ok())
+                    .or(tool_choice);
+                (messages, config_settings, tools, tool_choice)
             }
         };
 
@@ -336,6 +342,7 @@ impl UrSession {
             &model_id,
             &config_settings,
             &tools,
+            tool_choice.as_ref(),
             on_event,
         )
         .await?;
@@ -398,6 +405,7 @@ impl UrSession {
                 &model_id,
                 &config_settings,
                 &tools,
+                tool_choice.as_ref(),
                 on_event,
             )
             .await?;
@@ -853,6 +861,7 @@ async fn stream_completion(
     model_id: &str,
     settings: &[crate::types::ConfigSetting],
     tools: &[ToolDescriptor],
+    tool_choice: Option<&types::ToolChoice>,
     on_event: &mut (impl FnMut(SessionEvent) -> Option<ApprovalDecision> + Send),
 ) -> Result<Completion> {
     let mut parts: Vec<MessagePart> = Vec::new();
@@ -863,7 +872,7 @@ async fn stream_completion(
         model_id,
         settings,
         tools,
-        None,
+        tool_choice,
         &mut |chunk: CompletionChunk| {
             for dp in &chunk.delta_parts {
                 match dp {

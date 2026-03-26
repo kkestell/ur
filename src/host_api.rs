@@ -169,6 +169,10 @@ fn build_complete_fn(lua: &Lua, llm_providers: &[Arc<LlmProvider>]) -> Result<Lu
                     .as_ref()
                     .and_then(|o| o.get::<String>("provider").ok())
                     .unwrap_or_default();
+                let tool_choice: Option<crate::types::ToolChoice> = opts
+                    .as_ref()
+                    .and_then(|o| o.get::<String>("tool_choice").ok())
+                    .and_then(|s| serde_json::from_value(serde_json::Value::String(s)).ok());
 
                 // Find matching provider, or use the first one.
                 let llm = if provider_id.is_empty() {
@@ -195,13 +199,20 @@ fn build_complete_fn(lua: &Lua, llm_providers: &[Arc<LlmProvider>]) -> Result<Lu
                 };
 
                 let mut result_parts = Vec::new();
-                llm.complete(&messages, &effective_model, &[], &[], None, &mut |chunk| {
-                    for dp in &chunk.delta_parts {
-                        if let crate::types::MessagePart::Text(tp) = dp {
-                            result_parts.push(tp.text.clone());
+                llm.complete(
+                    &messages,
+                    &effective_model,
+                    &[],
+                    &[],
+                    tool_choice.as_ref(),
+                    &mut |chunk| {
+                        for dp in &chunk.delta_parts {
+                            if let crate::types::MessagePart::Text(tp) = dp {
+                                result_parts.push(tp.text.clone());
+                            }
                         }
-                    }
-                })
+                    },
+                )
                 .await
                 .map_err(LuaError::external)?;
 
