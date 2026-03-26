@@ -61,51 +61,15 @@ pub enum SessionEvent {
     TurnError(String),
 }
 
-/// Client response to an approval request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApprovalDecision {
-    Approve,
-    Deny,
-}
-
-/// A persisted event in the session timeline.
-#[derive(Debug, Clone)]
-pub enum PersistedEvent {
-    TurnStarted {
-        turn_index: u32,
-    },
-    UserMessage {
-        text: String,
-    },
-    LlmCompletion {
-        message: Message,
-    },
-    ToolResult {
-        message: Message,
-    },
-    ToolApprovalRequested {
-        id: String,
-        name: String,
-    },
-    ToolApprovalDecided {
-        id: String,
-        decision: ApprovalDecision,
-    },
-    TurnComplete {
-        turn_index: u32,
-    },
-    TurnInterrupted {
-        turn_index: u32,
-        reason: String,
-    },
-}
+/// Re-export for callback signatures.
+pub use types::ApprovalDecision;
 
 /// A snapshot of session state sufficient to restore client UI.
 #[derive(Debug, Clone)]
 pub struct SessionSnapshot {
     pub session_id: String,
     pub messages: Vec<Message>,
-    pub events: Vec<PersistedEvent>,
+    pub events: Vec<types::SessionEvent>,
 }
 
 /// Session-scoped coordinator for turn execution.
@@ -120,7 +84,7 @@ pub struct UrSession {
     config: UserConfig,
     manifest: WorkspaceManifest,
     session_id: String,
-    events: Vec<PersistedEvent>,
+    events: Vec<types::SessionEvent>,
     persisted_event_count: usize,
     turn_count: u32,
     /// Tool handlers registered by Lua extensions.
@@ -143,11 +107,7 @@ impl UrSession {
             anyhow::bail!("session load rejected: {reason}");
         }
 
-        let stored_events = deps.session_provider.load_session(session_id)?;
-        let events: Vec<PersistedEvent> = stored_events
-            .into_iter()
-            .map(types_event_to_persisted)
-            .collect();
+        let events = deps.session_provider.load_session(session_id)?;
         let persisted_event_count = events.len();
 
         info!(
@@ -225,17 +185,18 @@ impl UrSession {
     ) -> Result<()> {
         let turn_index = self.turn_count;
         self.turn_count += 1;
-        self.events.push(PersistedEvent::TurnStarted { turn_index });
+        self.events
+            .push(types::SessionEvent::TurnStarted { turn_index });
 
         debug!(text = user_message, "adding user message");
-        self.events.push(PersistedEvent::UserMessage {
+        self.events.push(types::SessionEvent::UserMessage {
             text: user_message.to_owned(),
         });
 
         let result = self.run_turn_body(turn_index, &mut on_event).await;
 
         if let Err(ref e) = result {
-            self.events.push(PersistedEvent::TurnInterrupted {
+            self.events.push(types::SessionEvent::TurnInterrupted {
                 turn_index,
                 reason: e.to_string(),
             });
@@ -385,7 +346,7 @@ impl UrSession {
                 });
             }
         }
-        self.events.push(PersistedEvent::LlmCompletion {
+        self.events.push(types::SessionEvent::LlmCompletion {
             message: completion.message.clone(),
         });
 
@@ -411,14 +372,14 @@ impl UrSession {
             .await?;
             let text = extract_text(&completion2.message);
             on_event(SessionEvent::AssistantMessage { text });
-            self.events.push(PersistedEvent::LlmCompletion {
+            self.events.push(types::SessionEvent::LlmCompletion {
                 message: completion2.message,
             });
         }
 
         // Push TurnComplete before persistence so it gets written to storage.
         self.events
-            .push(PersistedEvent::TurnComplete { turn_index });
+            .push(types::SessionEvent::TurnComplete { turn_index });
 
         self.persist_and_compact()?;
 
@@ -440,7 +401,7 @@ impl UrSession {
     pub fn replay(&self, mut on_event: impl FnMut(SessionEvent)) {
         for event in &self.events {
             let session_event = match event {
-                PersistedEvent::LlmCompletion { message } => {
+                types::SessionEvent::LlmCompletion { message } => {
                     let tcs = extract_tool_calls(message);
                     if tcs.is_empty() {
                         Some(SessionEvent::AssistantMessage {
@@ -457,7 +418,7 @@ impl UrSession {
                         None
                     }
                 }
-                PersistedEvent::ToolResult { message } => {
+                types::SessionEvent::ToolResult { message } => {
                     message.parts.iter().find_map(|p| match p {
                         MessagePart::ToolResult(tr) => Some(SessionEvent::ToolResult {
                             tool_call_id: tr.tool_call_id.clone(),
@@ -467,20 +428,20 @@ impl UrSession {
                         _ => None,
                     })
                 }
-                PersistedEvent::ToolApprovalRequested { id, name } => {
+                types::SessionEvent::ToolApprovalRequested { id, name } => {
                     Some(SessionEvent::ApprovalRequired {
                         id: id.clone(),
                         tool_name: name.clone(),
                         arguments_json: String::new(),
                     })
                 }
-                PersistedEvent::TurnComplete { .. } => Some(SessionEvent::TurnComplete),
-                PersistedEvent::TurnInterrupted { reason, .. } => {
+                types::SessionEvent::TurnComplete { .. } => Some(SessionEvent::TurnComplete),
+                types::SessionEvent::TurnInterrupted { reason, .. } => {
                     Some(SessionEvent::TurnError(reason.clone()))
                 }
-                PersistedEvent::TurnStarted { .. }
-                | PersistedEvent::UserMessage { .. }
-                | PersistedEvent::ToolApprovalDecided { .. } => None,
+                types::SessionEvent::TurnStarted { .. }
+                | types::SessionEvent::UserMessage { .. }
+                | types::SessionEvent::ToolApprovalDecided { .. } => None,
             };
 
             if let Some(e) = session_event {
@@ -525,7 +486,7 @@ impl UrSession {
                     })],
                 };
                 self.events
-                    .push(PersistedEvent::ToolResult { message: msg });
+                    .push(types::SessionEvent::ToolResult { message: msg });
                 continue;
             }
             // Apply mutations: hooks can override arguments.
@@ -589,7 +550,7 @@ impl UrSession {
                 content: result_content,
             });
             self.events
-                .push(PersistedEvent::ToolResult { message: msg });
+                .push(types::SessionEvent::ToolResult { message: msg });
         }
         Ok(())
     }
@@ -604,10 +565,9 @@ impl UrSession {
         );
         for event in new_events {
             // before_session_append hook — can mutate the event or reject.
-            let types_event = persisted_to_types_event(event);
             let hook_ctx = serde_json::json!({
                 "session_id": self.session_id,
-                "event": serde_json::to_value(&types_event).unwrap_or_default(),
+                "event": serde_json::to_value(event).unwrap_or_default(),
             });
             let event_to_append = match dispatch_hook(
                 &self.extensions,
@@ -628,10 +588,10 @@ impl UrSession {
                             debug!("hook mutated session event");
                             mutated_event
                         } else {
-                            types_event.clone()
+                            event.clone()
                         }
                     } else {
-                        types_event.clone()
+                        event.clone()
                     }
                 }
             };
@@ -727,10 +687,8 @@ impl UrSession {
             self.events =
                 apply_message_mutations(std::mem::take(&mut self.events), &final_compacted);
             // Persist the compacted state, replacing the old session file.
-            let types_events: Vec<types::SessionEvent> =
-                self.events.iter().map(persisted_to_types_event).collect();
             self.session_provider
-                .replace_session(&self.session_id, &types_events)?;
+                .replace_session(&self.session_id, &self.events)?;
             self.persisted_event_count = self.events.len();
         }
 
@@ -745,9 +703,9 @@ impl UrSession {
 /// Walks through events in order. For each `UserMessage`, `LlmCompletion`, or `ToolResult`,
 /// consumes the next message from `mutated_messages`. Non-message events are preserved as-is.
 fn apply_message_mutations(
-    events: Vec<PersistedEvent>,
+    events: Vec<types::SessionEvent>,
     mutated_messages: &[Message],
-) -> Vec<PersistedEvent> {
+) -> Vec<types::SessionEvent> {
     let mut msg_idx = 0;
     events
         .into_iter()
@@ -756,24 +714,24 @@ fn apply_message_mutations(
                 return event;
             }
             match event {
-                PersistedEvent::UserMessage { .. } => {
+                types::SessionEvent::UserMessage { .. } => {
                     let msg = &mutated_messages[msg_idx];
                     msg_idx += 1;
-                    PersistedEvent::UserMessage {
+                    types::SessionEvent::UserMessage {
                         text: extract_text(msg),
                     }
                 }
-                PersistedEvent::LlmCompletion { .. } => {
+                types::SessionEvent::LlmCompletion { .. } => {
                     let msg = &mutated_messages[msg_idx];
                     msg_idx += 1;
-                    PersistedEvent::LlmCompletion {
+                    types::SessionEvent::LlmCompletion {
                         message: msg.clone(),
                     }
                 }
-                PersistedEvent::ToolResult { .. } => {
+                types::SessionEvent::ToolResult { .. } => {
                     let msg = &mutated_messages[msg_idx];
                     msg_idx += 1;
-                    PersistedEvent::ToolResult {
+                    types::SessionEvent::ToolResult {
                         message: msg.clone(),
                     }
                 }
@@ -908,89 +866,16 @@ async fn stream_completion(
     })
 }
 
-fn messages_from_events(events: &[PersistedEvent]) -> Vec<Message> {
+fn messages_from_events(events: &[types::SessionEvent]) -> Vec<Message> {
     events
         .iter()
         .filter_map(|e| match e {
-            PersistedEvent::UserMessage { text } => Some(Message::text("user", text.as_str())),
-            PersistedEvent::LlmCompletion { message } | PersistedEvent::ToolResult { message } => {
-                Some(message.clone())
-            }
+            types::SessionEvent::UserMessage { text } => Some(Message::text("user", text.as_str())),
+            types::SessionEvent::LlmCompletion { message }
+            | types::SessionEvent::ToolResult { message } => Some(message.clone()),
             _ => None,
         })
         .collect()
-}
-
-/// Converts a `types::SessionEvent` (from storage) to internal `PersistedEvent`.
-fn types_event_to_persisted(e: types::SessionEvent) -> PersistedEvent {
-    match e {
-        types::SessionEvent::TurnStarted { turn_index } => {
-            PersistedEvent::TurnStarted { turn_index }
-        }
-        types::SessionEvent::UserMessage { text } => PersistedEvent::UserMessage { text },
-        types::SessionEvent::LlmCompletion { message } => PersistedEvent::LlmCompletion { message },
-        types::SessionEvent::ToolResult { message } => PersistedEvent::ToolResult { message },
-        types::SessionEvent::ToolApprovalRequested { id, name } => {
-            PersistedEvent::ToolApprovalRequested { id, name }
-        }
-        types::SessionEvent::ToolApprovalDecided { id, decision } => {
-            PersistedEvent::ToolApprovalDecided {
-                id,
-                decision: match decision {
-                    types::ApprovalDecision::Approve => ApprovalDecision::Approve,
-                    types::ApprovalDecision::Deny => ApprovalDecision::Deny,
-                },
-            }
-        }
-        types::SessionEvent::TurnComplete { turn_index } => {
-            PersistedEvent::TurnComplete { turn_index }
-        }
-        types::SessionEvent::TurnInterrupted { turn_index, reason } => {
-            PersistedEvent::TurnInterrupted { turn_index, reason }
-        }
-    }
-}
-
-/// Converts internal `PersistedEvent` to `types::SessionEvent` (for storage).
-fn persisted_to_types_event(e: &PersistedEvent) -> types::SessionEvent {
-    match e {
-        PersistedEvent::TurnStarted { turn_index } => types::SessionEvent::TurnStarted {
-            turn_index: *turn_index,
-        },
-        PersistedEvent::UserMessage { text } => {
-            types::SessionEvent::UserMessage { text: text.clone() }
-        }
-        PersistedEvent::LlmCompletion { message } => types::SessionEvent::LlmCompletion {
-            message: message.clone(),
-        },
-        PersistedEvent::ToolResult { message } => types::SessionEvent::ToolResult {
-            message: message.clone(),
-        },
-        PersistedEvent::ToolApprovalRequested { id, name } => {
-            types::SessionEvent::ToolApprovalRequested {
-                id: id.clone(),
-                name: name.clone(),
-            }
-        }
-        PersistedEvent::ToolApprovalDecided { id, decision } => {
-            types::SessionEvent::ToolApprovalDecided {
-                id: id.clone(),
-                decision: match decision {
-                    ApprovalDecision::Approve => types::ApprovalDecision::Approve,
-                    ApprovalDecision::Deny => types::ApprovalDecision::Deny,
-                },
-            }
-        }
-        PersistedEvent::TurnComplete { turn_index } => types::SessionEvent::TurnComplete {
-            turn_index: *turn_index,
-        },
-        PersistedEvent::TurnInterrupted { turn_index, reason } => {
-            types::SessionEvent::TurnInterrupted {
-                turn_index: *turn_index,
-                reason: reason.clone(),
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1027,14 +912,14 @@ mod tests {
     #[test]
     fn messages_for_llm_derives_from_events() {
         let events = [
-            PersistedEvent::TurnStarted { turn_index: 0 },
-            PersistedEvent::UserMessage {
+            types::SessionEvent::TurnStarted { turn_index: 0 },
+            types::SessionEvent::UserMessage {
                 text: "Hello".into(),
             },
-            PersistedEvent::LlmCompletion {
+            types::SessionEvent::LlmCompletion {
                 message: text_message("assistant", "Hi there"),
             },
-            PersistedEvent::TurnComplete { turn_index: 0 },
+            types::SessionEvent::TurnComplete { turn_index: 0 },
         ];
 
         let messages = messages_from_events(&events);
@@ -1048,16 +933,16 @@ mod tests {
     #[test]
     fn messages_for_llm_includes_tool_turn() {
         let events = [
-            PersistedEvent::UserMessage {
+            types::SessionEvent::UserMessage {
                 text: "Weather?".into(),
             },
-            PersistedEvent::LlmCompletion {
+            types::SessionEvent::LlmCompletion {
                 message: tool_call_message("call-1", "get_weather"),
             },
-            PersistedEvent::ToolResult {
+            types::SessionEvent::ToolResult {
                 message: tool_result_message("call-1", "get_weather"),
             },
-            PersistedEvent::LlmCompletion {
+            types::SessionEvent::LlmCompletion {
                 message: text_message("assistant", "It is 72F."),
             },
         ];
@@ -1113,30 +998,33 @@ mod tests {
         // Verify that TurnComplete event is correctly positioned in the event list.
         // This test ensures TurnComplete is pushed before persist_and_compact is called.
         let events = [
-            PersistedEvent::TurnStarted { turn_index: 0 },
-            PersistedEvent::UserMessage {
+            types::SessionEvent::TurnStarted { turn_index: 0 },
+            types::SessionEvent::UserMessage {
                 text: "Hello".into(),
             },
-            PersistedEvent::LlmCompletion {
+            types::SessionEvent::LlmCompletion {
                 message: text_message("assistant", "Hi there"),
             },
-            PersistedEvent::TurnComplete { turn_index: 0 },
+            types::SessionEvent::TurnComplete { turn_index: 0 },
         ];
 
         // Verify TurnComplete is present and in the expected position
         assert_eq!(events.len(), 4);
         assert!(matches!(
             events[3],
-            PersistedEvent::TurnComplete { turn_index: 0 }
+            types::SessionEvent::TurnComplete { turn_index: 0 }
         ));
 
         // Verify the event sequence before TurnComplete
         assert!(matches!(
             events[0],
-            PersistedEvent::TurnStarted { turn_index: 0 }
+            types::SessionEvent::TurnStarted { turn_index: 0 }
         ));
-        assert!(matches!(events[1], PersistedEvent::UserMessage { .. }));
-        assert!(matches!(events[2], PersistedEvent::LlmCompletion { .. }));
+        assert!(matches!(events[1], types::SessionEvent::UserMessage { .. }));
+        assert!(matches!(
+            events[2],
+            types::SessionEvent::LlmCompletion { .. }
+        ));
     }
 
     #[test]
