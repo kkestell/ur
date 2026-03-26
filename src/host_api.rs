@@ -59,6 +59,7 @@ pub fn build_ur_module(
 
     // ur.tool(name, spec) — register a tool
     let tools_clone = Arc::clone(tools);
+    let needs_approval = capabilities.fs_write || capabilities.network;
     let tool_fn = lua.create_function(move |lua, (name, spec): (String, LuaTable)| {
         let description: String = spec.get("description").unwrap_or_default();
         let parameters: LuaValue = spec.get::<LuaValue>("parameters").unwrap_or(LuaValue::Nil);
@@ -80,6 +81,7 @@ pub fn build_ur_module(
             name: name.clone(),
             description,
             parameters_json_schema: params_json,
+            requires_approval: needs_approval,
         };
 
         tools_clone.lock().unwrap().push(RegisteredTool {

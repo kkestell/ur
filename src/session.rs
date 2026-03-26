@@ -438,6 +438,7 @@ impl UrSession {
         }
     }
 
+    #[expect(clippy::too_many_lines, reason = "approval flow adds substantial code")]
     fn dispatch_tool_calls(
         &mut self,
         tool_calls: &[&ToolCall],
@@ -486,6 +487,57 @@ impl UrSession {
                 .extensions
                 .iter()
                 .find(|e| e.tool_descriptors().iter().any(|d| d.name == tc.name));
+
+            // Check if the tool requires approval.
+            let needs_approval = ext
+                .and_then(|e| e.tool_descriptors().into_iter().find(|d| d.name == tc.name))
+                .is_some_and(|d| d.requires_approval);
+
+            if needs_approval {
+                // Persist the approval request.
+                self.events
+                    .push(types::SessionEvent::ToolApprovalRequested {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                    });
+
+                // Emit approval request and check callback's decision.
+                let decision = on_event(SessionEvent::ApprovalRequired {
+                    id: tc.id.clone(),
+                    tool_name: tc.name.clone(),
+                    arguments_json: effective_args.clone(),
+                });
+
+                let approved = matches!(decision, Some(ApprovalDecision::Approve));
+                self.events.push(types::SessionEvent::ToolApprovalDecided {
+                    id: tc.id.clone(),
+                    decision: if approved {
+                        types::ApprovalDecision::Approve
+                    } else {
+                        types::ApprovalDecision::Deny
+                    },
+                });
+
+                if !approved {
+                    let result_content = "Error: tool execution denied by user".to_owned();
+                    on_event(SessionEvent::ToolResult {
+                        tool_call_id: tc.id.clone(),
+                        tool_name: tc.name.clone(),
+                        content: result_content.clone(),
+                    });
+                    let msg = Message {
+                        role: "tool".into(),
+                        parts: vec![MessagePart::ToolResult(ToolResult {
+                            tool_call_id: tc.id.clone(),
+                            tool_name: tc.name.clone(),
+                            content: result_content,
+                        })],
+                    };
+                    self.events
+                        .push(types::SessionEvent::ToolResult { message: msg });
+                    continue;
+                }
+            }
 
             let result_content = if let Some(ext) = ext {
                 match ext.call_tool(&tc.name, &effective_args) {

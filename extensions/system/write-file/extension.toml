@@ -1,0 +1,4 @@
+[extension]
+id = "write-file"
+name = "Write File"
+capabilities = ["fs-write"]
