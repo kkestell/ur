@@ -190,15 +190,9 @@ impl LuaExtension {
     }
 
     fn parse_tool_arguments_or_nil(&self, arguments_json: &str) -> LuaValue {
-        self.lua
-            .load(arguments_json)
-            .eval()
-            .or_else(|_| {
-                // Keep argument handling permissive: if the payload is not valid
-                // Lua or JSON, the tool receives `nil` just as before.
-                let json: serde_json::Value = serde_json::from_str(arguments_json)?;
-                self.lua.to_value(&json).map_err(anyhow::Error::from)
-            })
+        serde_json::from_str::<serde_json::Value>(arguments_json)
+            .ok()
+            .and_then(|json| self.lua.to_value(&json).ok())
             .unwrap_or(LuaValue::Nil)
     }
 
