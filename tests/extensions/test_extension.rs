@@ -147,4 +147,8 @@ async fn http_status_tool() {
         parsed["status"], 200,
         "http_status tool should return 200 for local server"
     );
+    assert!(
+        parsed["content_length"].as_u64().unwrap_or(0) > 0,
+        "content_length should be > 0 when response has a body"
+    );
 }
