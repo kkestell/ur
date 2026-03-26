@@ -25,14 +25,27 @@ impl JsonlSessionProvider {
         }
     }
 
-    fn session_path(&self, session_id: &str) -> PathBuf {
-        self.sessions_dir.join(format!("{session_id}.jsonl"))
+    fn session_path(&self, session_id: &str) -> Result<PathBuf> {
+        validate_session_id(session_id)?;
+        Ok(self.sessions_dir.join(format!("{session_id}.jsonl")))
     }
+}
+
+fn validate_session_id(session_id: &str) -> Result<()> {
+    if session_id.is_empty()
+        || session_id.contains('/')
+        || session_id.contains('\\')
+        || session_id.contains("..")
+        || session_id.contains('\0')
+    {
+        anyhow::bail!("invalid session ID: {session_id:?}");
+    }
+    Ok(())
 }
 
 impl SessionProvider for JsonlSessionProvider {
     fn load_session(&self, session_id: &str) -> Result<Vec<SessionEvent>> {
-        let path = self.session_path(session_id);
+        let path = self.session_path(session_id)?;
         match std::fs::File::open(&path) {
             Ok(file) => {
                 let reader = std::io::BufReader::new(file);
@@ -63,7 +76,7 @@ impl SessionProvider for JsonlSessionProvider {
     }
 
     fn append_session(&self, session_id: &str, event: &SessionEvent) -> Result<()> {
-        let path = self.session_path(session_id);
+        let path = self.session_path(session_id)?;
         std::fs::create_dir_all(&self.sessions_dir)
             .with_context(|| format!("creating {}", self.sessions_dir.display()))?;
 
@@ -79,7 +92,7 @@ impl SessionProvider for JsonlSessionProvider {
     }
 
     fn replace_session(&self, session_id: &str, events: &[SessionEvent]) -> Result<()> {
-        let path = self.session_path(session_id);
+        let path = self.session_path(session_id)?;
         std::fs::create_dir_all(&self.sessions_dir)
             .with_context(|| format!("creating {}", self.sessions_dir.display()))?;
 
@@ -139,4 +152,39 @@ fn count_lines(path: &Path) -> Result<u32> {
     #[expect(clippy::cast_possible_truncation, reason = "sessions won't exceed u32")]
     let count = reader.lines().count() as u32;
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_path_traversal() {
+        validate_session_id("../etc/passwd").unwrap_err();
+    }
+
+    #[test]
+    fn rejects_slash() {
+        validate_session_id("foo/bar").unwrap_err();
+    }
+
+    #[test]
+    fn rejects_backslash() {
+        validate_session_id("foo\\bar").unwrap_err();
+    }
+
+    #[test]
+    fn rejects_empty() {
+        validate_session_id("").unwrap_err();
+    }
+
+    #[test]
+    fn rejects_null_byte() {
+        validate_session_id("foo\0bar").unwrap_err();
+    }
+
+    #[test]
+    fn accepts_valid_id() {
+        validate_session_id("my-session-123").unwrap();
+    }
 }
