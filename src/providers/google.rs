@@ -7,7 +7,6 @@ use anyhow::{Context, Result, bail};
 use futures_util::StreamExt;
 use reqwest::Client;
 
-use super::LlmProvider;
 use crate::types::{
     Completion, CompletionChunk, ConfigSetting, Message, MessagePart, ModelDescriptor,
     SettingDescriptor, SettingEnum, SettingInteger, SettingSchema, SettingString, SettingValue,
@@ -206,16 +205,19 @@ impl GoogleProvider {
     }
 }
 
-impl LlmProvider for GoogleProvider {
-    fn provider_id(&self) -> &'static str {
+impl GoogleProvider {
+    #[must_use]
+    pub fn provider_id(&self) -> &'static str {
         "google"
     }
 
-    fn list_models(&self) -> Vec<ModelDescriptor> {
+    #[must_use]
+    pub fn list_models(&self) -> Vec<ModelDescriptor> {
         GOOGLE_MODELS.iter().map(model_descriptor).collect()
     }
 
-    fn list_settings(&self) -> Vec<SettingDescriptor> {
+    #[must_use]
+    pub fn list_settings(&self) -> Vec<SettingDescriptor> {
         let mut settings = vec![SettingDescriptor {
             key: "api_key".into(),
             name: "API Key".into(),
@@ -234,32 +236,30 @@ impl LlmProvider for GoogleProvider {
         settings
     }
 
-    fn complete(
+    /// # Errors
+    ///
+    /// Returns an error if the API request fails.
+    pub async fn stream_completion_async(
         &self,
         messages: &[Message],
         model_id: &str,
         settings: &[ConfigSetting],
         tools: &[ToolDescriptor],
         tool_choice: Option<&ToolChoice>,
-        on_chunk: &mut dyn FnMut(CompletionChunk),
+        on_chunk: &mut (impl FnMut(CompletionChunk) + Send),
     ) -> Result<Completion> {
         let body = build_request_body(messages, settings, tools, tool_choice);
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{model_id}:streamGenerateContent?alt=sse"
         );
-
-        // Run the async streaming request on the current tokio runtime.
-        let handle = tokio::runtime::Handle::current();
-        handle.block_on(self.stream_completion(&url, &body, on_chunk))
+        self.stream_completion(&url, &body, on_chunk).await
     }
-}
 
-impl GoogleProvider {
     async fn stream_completion(
         &self,
         url: &str,
         body: &str,
-        on_chunk: &mut dyn FnMut(CompletionChunk),
+        on_chunk: &mut (impl FnMut(CompletionChunk) + Send),
     ) -> Result<Completion> {
         let response = self
             .client

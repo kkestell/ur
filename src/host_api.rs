@@ -21,9 +21,9 @@ use crate::types::{ExtensionCapabilities, ToolDescriptor};
     missing_debug_implementations,
     reason = "Contains dyn trait objects that are not Debug"
 )]
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct HostProviders {
-    pub llm_providers: Vec<Arc<dyn LlmProvider>>,
+    pub llm_providers: Vec<Arc<LlmProvider>>,
     pub session_provider: Option<Arc<dyn SessionProvider>>,
 }
 
@@ -59,6 +59,7 @@ pub fn build_ur_module(
 
     // ur.tool(name, spec) — register a tool
     let tools_clone = Arc::clone(tools);
+    let needs_approval = capabilities.fs_write || capabilities.network;
     let tool_fn = lua.create_function(move |lua, (name, spec): (String, LuaTable)| {
         let description: String = spec.get("description").unwrap_or_default();
         let parameters: LuaValue = spec.get::<LuaValue>("parameters").unwrap_or(LuaValue::Nil);
@@ -80,6 +81,7 @@ pub fn build_ur_module(
             name: name.clone(),
             description,
             parameters_json_schema: params_json,
+            requires_approval: needs_approval,
         };
 
         tools_clone.lock().unwrap().push(RegisteredTool {
@@ -151,58 +153,74 @@ pub fn build_ur_module(
 }
 
 /// Builds the `ur.complete()` function for raw LLM completion (no hooks).
-fn build_complete_fn(lua: &Lua, llm_providers: &[Arc<dyn LlmProvider>]) -> Result<LuaFunction> {
+fn build_complete_fn(lua: &Lua, llm_providers: &[Arc<LlmProvider>]) -> Result<LuaFunction> {
     let llm_providers = llm_providers.to_vec();
-    let complete_fn = lua.create_function(
+    let complete_fn = lua.create_async_function(
         move |lua, (messages_val, opts): (LuaValue, Option<LuaTable>)| {
-            let messages_json: serde_json::Value = lua.from_value(messages_val)?;
-            let messages: Vec<crate::types::Message> =
-                serde_json::from_value(messages_json).map_err(LuaError::external)?;
+            let llm_providers = llm_providers.clone();
+            async move {
+                let messages_json: serde_json::Value = lua.from_value(messages_val)?;
+                let messages: Vec<crate::types::Message> =
+                    serde_json::from_value(messages_json).map_err(LuaError::external)?;
 
-            let model_id: String = opts
-                .as_ref()
-                .and_then(|o| o.get::<String>("model").ok())
-                .unwrap_or_default();
-            let provider_id: String = opts
-                .as_ref()
-                .and_then(|o| o.get::<String>("provider").ok())
-                .unwrap_or_default();
+                let model_id: String = opts
+                    .as_ref()
+                    .and_then(|o| o.get::<String>("model").ok())
+                    .unwrap_or_default();
+                let provider_id: String = opts
+                    .as_ref()
+                    .and_then(|o| o.get::<String>("provider").ok())
+                    .unwrap_or_default();
+                let tool_choice: Option<crate::types::ToolChoice> = opts
+                    .as_ref()
+                    .and_then(|o| o.get::<String>("tool_choice").ok())
+                    .and_then(|s| serde_json::from_value(serde_json::Value::String(s)).ok());
 
-            // Find matching provider, or use the first one.
-            let llm = if provider_id.is_empty() {
-                llm_providers
-                    .first()
-                    .ok_or_else(|| LuaError::runtime("no LLM providers available"))?
-            } else {
-                llm_providers
-                    .iter()
-                    .find(|p| p.provider_id() == provider_id)
-                    .ok_or_else(|| {
-                        LuaError::runtime(format!("provider '{provider_id}' not found"))
-                    })?
-            };
+                // Find matching provider, or use the first one.
+                let llm = if provider_id.is_empty() {
+                    llm_providers
+                        .first()
+                        .ok_or_else(|| LuaError::runtime("no LLM providers available"))?
+                } else {
+                    llm_providers
+                        .iter()
+                        .find(|p| p.provider_id() == provider_id)
+                        .ok_or_else(|| {
+                            LuaError::runtime(format!("provider '{provider_id}' not found"))
+                        })?
+                };
 
-            let effective_model = if model_id.is_empty() {
-                llm.list_models()
-                    .first()
-                    .map(|m| m.id.clone())
-                    .unwrap_or_default()
-            } else {
-                model_id
-            };
+                let effective_model = if model_id.is_empty() {
+                    llm.list_models()
+                        .await
+                        .first()
+                        .map(|m| m.id.clone())
+                        .unwrap_or_default()
+                } else {
+                    model_id
+                };
 
-            let mut result_parts = Vec::new();
-            llm.complete(&messages, &effective_model, &[], &[], None, &mut |chunk| {
-                for dp in &chunk.delta_parts {
-                    if let crate::types::MessagePart::Text(tp) = dp {
-                        result_parts.push(tp.text.clone());
-                    }
-                }
-            })
-            .map_err(LuaError::external)?;
+                let mut result_parts = Vec::new();
+                llm.complete(
+                    &messages,
+                    &effective_model,
+                    &[],
+                    &[],
+                    tool_choice.as_ref(),
+                    &mut |chunk| {
+                        for dp in &chunk.delta_parts {
+                            if let crate::types::MessagePart::Text(tp) = dp {
+                                result_parts.push(tp.text.clone());
+                            }
+                        }
+                    },
+                )
+                .await
+                .map_err(LuaError::external)?;
 
-            let text: String = result_parts.concat();
-            lua.create_string(&text)
+                let text: String = result_parts.concat();
+                lua.create_string(&text)
+            }
         },
     )?;
     Ok(complete_fn)
@@ -238,53 +256,64 @@ fn build_session_module(
 fn build_http_module(lua: &Lua) -> Result<LuaTable> {
     let http = lua.create_table()?;
 
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(anyhow::Error::from)?;
+
+    let get_client = client.clone();
     let get_fn =
-        lua.create_async_function(|lua, (url, opts): (String, Option<LuaTable>)| async move {
-            let client = reqwest::Client::new();
-            let mut builder = client.get(&url);
+        lua.create_async_function(move |lua, (url, opts): (String, Option<LuaTable>)| {
+            let client = get_client.clone();
+            async move {
+                let mut builder = client.get(&url);
 
-            if let Some(opts) = &opts
-                && let Ok(headers) = opts.get::<LuaTable>("headers")
-            {
-                for pair in headers.pairs::<String, String>() {
-                    let (key, value) = pair?;
-                    builder = builder.header(key, value);
+                if let Some(opts) = &opts
+                    && let Ok(headers) = opts.get::<LuaTable>("headers")
+                {
+                    for pair in headers.pairs::<String, String>() {
+                        let (key, value) = pair?;
+                        builder = builder.header(key, value);
+                    }
                 }
+
+                let response = builder.send().await.map_err(LuaError::external)?;
+                let status = response.status().as_u16();
+                let body = response.text().await.map_err(LuaError::external)?;
+
+                let result = lua.create_table()?;
+                result.set("status", status)?;
+                result.set("body", body)?;
+                Ok(result)
             }
-
-            let response = builder.send().await.map_err(LuaError::external)?;
-            let status = response.status().as_u16();
-            let body = response.text().await.map_err(LuaError::external)?;
-
-            let result = lua.create_table()?;
-            result.set("status", status)?;
-            result.set("body", body)?;
-            Ok(result)
         })?;
     http.set("get", get_fn)?;
 
+    let post_client = client;
     let post_fn = lua.create_async_function(
-        |lua, (url, body, opts): (String, String, Option<LuaTable>)| async move {
-            let client = reqwest::Client::new();
-            let mut builder = client.post(&url).body(body);
+        move |lua, (url, body, opts): (String, String, Option<LuaTable>)| {
+            let client = post_client.clone();
+            async move {
+                let mut builder = client.post(&url).body(body);
 
-            if let Some(opts) = &opts
-                && let Ok(headers) = opts.get::<LuaTable>("headers")
-            {
-                for pair in headers.pairs::<String, String>() {
-                    let (key, value) = pair?;
-                    builder = builder.header(key, value);
+                if let Some(opts) = &opts
+                    && let Ok(headers) = opts.get::<LuaTable>("headers")
+                {
+                    for pair in headers.pairs::<String, String>() {
+                        let (key, value) = pair?;
+                        builder = builder.header(key, value);
+                    }
                 }
+
+                let response = builder.send().await.map_err(LuaError::external)?;
+                let status = response.status().as_u16();
+                let body = response.text().await.map_err(LuaError::external)?;
+
+                let result = lua.create_table()?;
+                result.set("status", status)?;
+                result.set("body", body)?;
+                Ok(result)
             }
-
-            let response = builder.send().await.map_err(LuaError::external)?;
-            let status = response.status().as_u16();
-            let body = response.text().await.map_err(LuaError::external)?;
-
-            let result = lua.create_table()?;
-            result.set("status", status)?;
-            result.set("body", body)?;
-            Ok(result)
         },
     )?;
     http.set("post", post_fn)?;

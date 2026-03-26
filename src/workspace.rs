@@ -18,13 +18,7 @@ use crate::providers::compaction::StubCompactionProvider;
 use crate::providers::session_jsonl::JsonlSessionProvider;
 use crate::providers::{CompactionProvider, LlmProvider, SessionProvider};
 use crate::session::{SessionDeps, UrSession};
-use crate::types::{ExtensionCapabilities, ToolDescriptor};
-
-/// A tool handler: descriptor paired with its invocation closure.
-type ToolHandler = (
-    ToolDescriptor,
-    Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
-);
+use crate::types::ExtensionCapabilities;
 
 /// A role mapping entry.
 #[derive(Debug)]
@@ -51,7 +45,7 @@ pub struct UrWorkspace {
     workspace_path: PathBuf,
     manifest: WorkspaceManifest,
     config: UserConfig,
-    llm_providers: Vec<Arc<dyn LlmProvider>>,
+    llm_providers: Vec<Arc<LlmProvider>>,
     session_provider: Arc<dyn SessionProvider>,
     /// Loaded Lua extensions.
     lua_extensions: Vec<Arc<LuaExtension>>,
@@ -65,18 +59,20 @@ impl UrWorkspace {
         config: UserConfig,
     ) -> Self {
         // Instantiate native LLM providers based on available API keys.
-        let mut llm_providers: Vec<Arc<dyn LlmProvider>> = Vec::new();
+        let mut llm_providers: Vec<Arc<LlmProvider>> = Vec::new();
 
         let google_key = provider::resolve_api_key("google");
         if let Some(key) = google_key {
-            llm_providers.push(Arc::new(crate::providers::google::GoogleProvider::new(key)));
+            llm_providers.push(Arc::new(LlmProvider::Google(
+                crate::providers::google::GoogleProvider::new(key),
+            )));
         }
 
         let openrouter_key = provider::resolve_api_key("openrouter");
         if let Some(key) = openrouter_key {
-            llm_providers.push(Arc::new(
+            llm_providers.push(Arc::new(LlmProvider::OpenRouter(
                 crate::providers::openrouter::OpenRouterProvider::new(key),
-            ));
+            )));
         }
 
         // Build session provider for extensions that need ur.session.*.
@@ -84,7 +80,7 @@ impl UrWorkspace {
         let session_provider: Arc<dyn SessionProvider> =
             Arc::new(JsonlSessionProvider::new(&sessions_dir));
 
-        // Build host providers for the ur module.
+        // Build host providers for the ur module (extensions use Arc refs).
         let host_providers = HostProviders {
             llm_providers: llm_providers.clone(),
             session_provider: Some(Arc::clone(&session_provider)),
@@ -201,8 +197,8 @@ impl UrWorkspace {
     /// # Errors
     ///
     /// Returns an error if the operation fails.
-    pub fn list_roles(&self) -> Result<Vec<RoleEntry>> {
-        let providers = self.provider_models();
+    pub async fn list_roles(&self) -> Result<Vec<RoleEntry>> {
+        let providers = self.provider_models().await;
         let mut entries = Vec::new();
 
         if !self.config.roles.contains_key("default")
@@ -225,8 +221,8 @@ impl UrWorkspace {
     /// # Errors
     ///
     /// Returns an error if the operation fails.
-    pub fn resolve_role(&self, role: &str) -> Result<ResolvedRole> {
-        let providers = self.provider_models();
+    pub async fn resolve_role(&self, role: &str) -> Result<ResolvedRole> {
+        let providers = self.provider_models().await;
         let (provider_id, model_id) = model::resolve_role(&self.config, role, &providers)?;
         Ok(ResolvedRole {
             role: role.into(),
@@ -238,8 +234,8 @@ impl UrWorkspace {
     /// # Errors
     ///
     /// Returns an error if the operation fails.
-    pub fn set_role(&mut self, role: &str, model_ref: &str) -> Result<ResolvedRole> {
-        let providers = self.provider_models();
+    pub async fn set_role(&mut self, role: &str, model_ref: &str) -> Result<ResolvedRole> {
+        let providers = self.provider_models().await;
         let (provider_id, model_id) = config::parse_model_ref(model_ref).ok_or_else(|| {
             anyhow::anyhow!("invalid model reference '{model_ref}' (expected provider/model)")
         })?;
@@ -268,19 +264,6 @@ impl UrWorkspace {
     pub fn open_session(&self, session_id: &str) -> Result<UrSession> {
         let compaction_provider: Arc<dyn CompactionProvider> = Arc::new(StubCompactionProvider);
 
-        // Collect tool handlers from Lua extensions.
-        let mut tool_handlers: Vec<ToolHandler> = Vec::new();
-        for ext in &self.lua_extensions {
-            for desc in ext.tool_descriptors() {
-                let ext_clone = Arc::clone(ext);
-                let tool_name = desc.name.clone();
-                tool_handlers.push((
-                    desc,
-                    Arc::new(move |args: &str| ext_clone.call_tool(&tool_name, args)),
-                ));
-            }
-        }
-
         UrSession::open(
             SessionDeps {
                 llm_providers: self.llm_providers.clone(),
@@ -288,7 +271,6 @@ impl UrWorkspace {
                 compaction_provider,
                 config: self.config.clone(),
                 manifest: self.manifest.clone(),
-                tool_handlers,
                 extensions: self.lua_extensions.clone(),
             },
             session_id,
@@ -307,13 +289,12 @@ impl UrWorkspace {
         &self.config.roles
     }
 
-    fn provider_models(&self) -> ProviderModels {
-        model::collect_provider_models(
-            &self
-                .llm_providers
-                .iter()
-                .map(std::convert::AsRef::as_ref)
-                .collect::<Vec<_>>(),
-        )
+    async fn provider_models(&self) -> ProviderModels {
+        let refs: Vec<&LlmProvider> = self
+            .llm_providers
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect();
+        model::collect_provider_models(&refs).await
     }
 }

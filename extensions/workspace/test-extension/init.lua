@@ -48,7 +48,7 @@ ur.tool("http_status", {
         end
 
         ur.log("http_status: request succeeded, status=" .. tostring(response.status))
-        return { status = response.status, content_length = #(response.content or "") }
+        return { status = response.status, content_length = #(response.body or "") }
     end,
 })
 

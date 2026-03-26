@@ -79,10 +79,14 @@ pub struct ToolDescriptor {
     pub name: String,
     pub description: String,
     pub parameters_json_schema: String,
+    /// Whether this tool requires user approval before execution.
+    #[serde(default)]
+    pub requires_approval: bool,
 }
 
 /// Controls how the LLM selects tools.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ToolChoice {
     Auto,
     None,

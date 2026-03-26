@@ -3,6 +3,7 @@
 //! `UrSession` owns a persisted conversation session and drives the
 //! agent turn state machine.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -18,20 +19,13 @@ use crate::types::{
     self, Completion, CompletionChunk, Message, MessagePart, ToolCall, ToolDescriptor, ToolResult,
 };
 
-/// A tool handler: descriptor paired with its invocation closure.
-type ToolHandler = (
-    ToolDescriptor,
-    Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
-);
-
 /// Bundled dependencies for constructing a session.
 pub(crate) struct SessionDeps {
-    pub llm_providers: Vec<Arc<dyn LlmProvider>>,
+    pub llm_providers: Vec<Arc<LlmProvider>>,
     pub session_provider: Arc<dyn SessionProvider>,
     pub compaction_provider: Arc<dyn CompactionProvider>,
     pub config: UserConfig,
     pub manifest: WorkspaceManifest,
-    pub tool_handlers: Vec<ToolHandler>,
     pub extensions: Vec<Arc<LuaExtension>>,
 }
 
@@ -61,51 +55,15 @@ pub enum SessionEvent {
     TurnError(String),
 }
 
-/// Client response to an approval request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApprovalDecision {
-    Approve,
-    Deny,
-}
-
-/// A persisted event in the session timeline.
-#[derive(Debug, Clone)]
-pub enum PersistedEvent {
-    TurnStarted {
-        turn_index: u32,
-    },
-    UserMessage {
-        text: String,
-    },
-    LlmCompletion {
-        message: Message,
-    },
-    ToolResult {
-        message: Message,
-    },
-    ToolApprovalRequested {
-        id: String,
-        name: String,
-    },
-    ToolApprovalDecided {
-        id: String,
-        decision: ApprovalDecision,
-    },
-    TurnComplete {
-        turn_index: u32,
-    },
-    TurnInterrupted {
-        turn_index: u32,
-        reason: String,
-    },
-}
+/// Re-export for callback signatures.
+pub use types::ApprovalDecision;
 
 /// A snapshot of session state sufficient to restore client UI.
 #[derive(Debug, Clone)]
 pub struct SessionSnapshot {
     pub session_id: String,
     pub messages: Vec<Message>,
-    pub events: Vec<PersistedEvent>,
+    pub events: Vec<types::SessionEvent>,
 }
 
 /// Session-scoped coordinator for turn execution.
@@ -114,19 +72,18 @@ pub struct SessionSnapshot {
     reason = "Contains dyn trait objects and closures that are not Debug"
 )]
 pub struct UrSession {
-    llm_providers: Vec<Arc<dyn LlmProvider>>,
+    llm_providers: Vec<Arc<LlmProvider>>,
     session_provider: Arc<dyn SessionProvider>,
     compaction_provider: Arc<dyn CompactionProvider>,
     config: UserConfig,
-    manifest: WorkspaceManifest,
     session_id: String,
-    events: Vec<PersistedEvent>,
+    events: Vec<types::SessionEvent>,
     persisted_event_count: usize,
     turn_count: u32,
-    /// Tool handlers registered by Lua extensions.
-    tool_handlers: Vec<ToolHandler>,
-    /// Lua extensions for hook dispatch.
+    /// Lua extensions for hook dispatch and tool execution.
     extensions: Vec<Arc<LuaExtension>>,
+    /// Pre-computed hook dispatch order per hook point.
+    hook_cache: HashMap<HookPoint, Vec<Arc<LuaExtension>>>,
 }
 
 impl UrSession {
@@ -143,11 +100,7 @@ impl UrSession {
             anyhow::bail!("session load rejected: {reason}");
         }
 
-        let stored_events = deps.session_provider.load_session(session_id)?;
-        let events: Vec<PersistedEvent> = stored_events
-            .into_iter()
-            .map(types_event_to_persisted)
-            .collect();
+        let events = deps.session_provider.load_session(session_id)?;
         let persisted_event_count = events.len();
 
         info!(
@@ -188,18 +141,19 @@ impl UrSession {
         };
         let persisted_event_count = events.len();
 
+        let hook_cache = build_hook_cache(&deps.extensions, &deps.manifest);
+
         Ok(Self {
             llm_providers: deps.llm_providers,
             session_provider: deps.session_provider,
             compaction_provider: deps.compaction_provider,
             config: deps.config,
-            manifest: deps.manifest,
             session_id: session_id.to_owned(),
             events,
             persisted_event_count,
             turn_count: 0,
-            tool_handlers: deps.tool_handlers,
             extensions: deps.extensions,
+            hook_cache,
         })
     }
 
@@ -218,32 +172,51 @@ impl UrSession {
     /// # Errors
     ///
     /// Returns an error if the operation fails.
+    pub async fn run_turn(
+        &mut self,
+        user_message: &str,
+        mut on_event: impl FnMut(SessionEvent) -> Option<ApprovalDecision> + Send,
+    ) -> Result<()> {
+        let turn_index = self.turn_count;
+        self.turn_count += 1;
+        self.events
+            .push(types::SessionEvent::TurnStarted { turn_index });
+
+        debug!(text = user_message, "adding user message");
+        self.events.push(types::SessionEvent::UserMessage {
+            text: user_message.to_owned(),
+        });
+
+        let result = self.run_turn_body(turn_index, &mut on_event).await;
+
+        if let Err(ref e) = result {
+            self.events.push(types::SessionEvent::TurnInterrupted {
+                turn_index,
+                reason: e.to_string(),
+            });
+            let _ = self.persist_and_compact();
+            on_event(SessionEvent::TurnError(e.to_string()));
+        }
+
+        result
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "Core turn loop; splitting hurts readability"
     )]
-    pub fn run_turn(
+    async fn run_turn_body(
         &mut self,
-        user_message: &str,
-        mut on_event: impl FnMut(SessionEvent) -> Option<ApprovalDecision>,
+        turn_index: u32,
+        on_event: &mut (impl FnMut(SessionEvent) -> Option<ApprovalDecision> + Send),
     ) -> Result<()> {
-        let turn_index = self.turn_count;
-        self.turn_count += 1;
-        self.events.push(PersistedEvent::TurnStarted { turn_index });
-
-        debug!(text = user_message, "adding user message");
-        self.events.push(PersistedEvent::UserMessage {
-            text: user_message.to_owned(),
-        });
-
         // Resolve role and find LLM provider.
-        let provider_models = model::collect_provider_models(
-            &self
-                .llm_providers
-                .iter()
-                .map(std::convert::AsRef::as_ref)
-                .collect::<Vec<_>>(),
-        );
+        let provider_refs: Vec<&LlmProvider> = self
+            .llm_providers
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect();
+        let provider_models = model::collect_provider_models(&provider_refs).await;
         let (provider_id, mut model_id) =
             model::resolve_role(&self.config, "default", &provider_models)?;
         info!(%provider_id, %model_id, "resolved role \"default\"");
@@ -256,17 +229,21 @@ impl UrSession {
         let llm = Arc::clone(llm);
 
         // Collect tools from extensions.
-        let tools: Vec<ToolDescriptor> =
-            self.tool_handlers.iter().map(|(d, _)| d.clone()).collect();
+        let tools: Vec<ToolDescriptor> = self
+            .extensions
+            .iter()
+            .flat_map(|ext| ext.tool_descriptors())
+            .collect();
 
         // Get settings for this model.
-        let descriptors = llm.list_settings();
+        let descriptors = llm.list_settings().await;
         let config_settings =
             self.config
                 .settings_for(llm.provider_id(), &model_id, &descriptors)?;
 
-        // before_completion hook — can mutate messages, model, settings, tools; can reject.
+        // before_completion hook — can mutate messages, model, settings, tools, tool_choice; can reject.
         let messages = self.messages_for_llm();
+        let tool_choice: Option<types::ToolChoice> = None;
         let hook_ctx = serde_json::json!({
             "messages": serde_json::to_value(&messages).unwrap_or_default(),
             "model": model_id,
@@ -275,51 +252,54 @@ impl UrSession {
                 "value": format_setting_value(&s.value),
             })).collect::<Vec<_>>(),
             "tools": serde_json::to_value(&tools).unwrap_or_default(),
+            "tool_choice": serde_json::to_value(&tool_choice).unwrap_or_default(),
         });
-        let (messages, config_settings, tools) = match dispatch_hook(
-            &self.extensions,
-            &self.manifest,
-            HookPoint::BeforeCompletion,
-            hook_ctx,
-        )? {
-            HookResult::Rejected(reason) => {
-                on_event(SessionEvent::TurnError(format!(
-                    "completion rejected: {reason}"
-                )));
-                return Ok(());
-            }
-            HookResult::Pass(ctx) => {
-                // Apply mutations: deserialize and use modified values
-                if let Some(m) = ctx.get("model").and_then(|v| v.as_str()) {
-                    info!(original = %model_id, overridden = %m, "hook overrode model");
-                    model_id.clone_from(&m.to_string());
+        let (messages, config_settings, tools, tool_choice) =
+            match dispatch_hook_cached(&self.hook_cache, HookPoint::BeforeCompletion, hook_ctx)? {
+                HookResult::Rejected(reason) => {
+                    on_event(SessionEvent::TurnError(format!(
+                        "completion rejected: {reason}"
+                    )));
+                    return Ok(());
                 }
-                let messages = ctx
-                    .get("messages")
-                    .and_then(|v| serde_json::from_value::<Vec<Message>>(v.clone()).ok())
-                    .unwrap_or(messages);
-                let config_settings = ctx
-                    .get("settings")
-                    .and_then(parse_settings_from_json)
-                    .unwrap_or(config_settings);
-                let tools = ctx
-                    .get("tools")
-                    .and_then(|v| serde_json::from_value::<Vec<ToolDescriptor>>(v.clone()).ok())
-                    .unwrap_or(tools);
-                (messages, config_settings, tools)
-            }
-        };
+                HookResult::Pass(ctx) => {
+                    // Apply mutations: deserialize and use modified values
+                    if let Some(m) = ctx.get("model").and_then(|v| v.as_str()) {
+                        info!(original = %model_id, overridden = %m, "hook overrode model");
+                        model_id.clone_from(&m.to_string());
+                    }
+                    let messages = ctx
+                        .get("messages")
+                        .and_then(|v| serde_json::from_value::<Vec<Message>>(v.clone()).ok())
+                        .unwrap_or(messages);
+                    let config_settings = ctx
+                        .get("settings")
+                        .and_then(parse_settings_from_json)
+                        .unwrap_or(config_settings);
+                    let tools = ctx
+                        .get("tools")
+                        .and_then(|v| serde_json::from_value::<Vec<ToolDescriptor>>(v.clone()).ok())
+                        .unwrap_or(tools);
+                    let tool_choice = ctx
+                        .get("tool_choice")
+                        .and_then(|v| serde_json::from_value::<types::ToolChoice>(v.clone()).ok())
+                        .or(tool_choice);
+                    (messages, config_settings, tools, tool_choice)
+                }
+            };
 
         // First LLM completion.
         info!(messages = messages.len(), "calling LLM streaming");
         let mut completion = stream_completion(
-            &*llm,
+            &llm,
             &messages,
             &model_id,
             &config_settings,
             &tools,
-            &mut on_event,
-        )?;
+            tool_choice.as_ref(),
+            on_event,
+        )
+        .await?;
 
         // after_completion hook — can mutate the response.
         let hook_ctx = serde_json::json!({
@@ -327,12 +307,7 @@ impl UrSession {
             "model": model_id,
             "response": serde_json::to_value(&completion.message).unwrap_or_default(),
         });
-        match dispatch_hook(
-            &self.extensions,
-            &self.manifest,
-            HookPoint::AfterCompletion,
-            hook_ctx,
-        )? {
+        match dispatch_hook_cached(&self.hook_cache, HookPoint::AfterCompletion, hook_ctx)? {
             HookResult::Pass(ctx) => {
                 // Deserialize and apply response mutation if provided
                 if let Some(response_val) = ctx.get("response")
@@ -359,13 +334,13 @@ impl UrSession {
                 });
             }
         }
-        self.events.push(PersistedEvent::LlmCompletion {
+        self.events.push(types::SessionEvent::LlmCompletion {
             message: completion.message.clone(),
         });
 
         // Tool dispatch.
         if !tool_calls.is_empty() {
-            self.dispatch_tool_calls(&tool_calls, &mut on_event)?;
+            self.dispatch_tool_calls(&tool_calls, on_event)?;
 
             // Second LLM completion with tool results.
             let messages = self.messages_for_llm();
@@ -374,23 +349,25 @@ impl UrSession {
                 "calling LLM streaming (with tool results)"
             );
             let completion2 = stream_completion(
-                &*llm,
+                &llm,
                 &messages,
                 &model_id,
                 &config_settings,
                 &tools,
-                &mut on_event,
-            )?;
+                tool_choice.as_ref(),
+                on_event,
+            )
+            .await?;
             let text = extract_text(&completion2.message);
             on_event(SessionEvent::AssistantMessage { text });
-            self.events.push(PersistedEvent::LlmCompletion {
+            self.events.push(types::SessionEvent::LlmCompletion {
                 message: completion2.message,
             });
         }
 
         // Push TurnComplete before persistence so it gets written to storage.
         self.events
-            .push(PersistedEvent::TurnComplete { turn_index });
+            .push(types::SessionEvent::TurnComplete { turn_index });
 
         self.persist_and_compact()?;
 
@@ -412,7 +389,7 @@ impl UrSession {
     pub fn replay(&self, mut on_event: impl FnMut(SessionEvent)) {
         for event in &self.events {
             let session_event = match event {
-                PersistedEvent::LlmCompletion { message } => {
+                types::SessionEvent::LlmCompletion { message } => {
                     let tcs = extract_tool_calls(message);
                     if tcs.is_empty() {
                         Some(SessionEvent::AssistantMessage {
@@ -429,7 +406,7 @@ impl UrSession {
                         None
                     }
                 }
-                PersistedEvent::ToolResult { message } => {
+                types::SessionEvent::ToolResult { message } => {
                     message.parts.iter().find_map(|p| match p {
                         MessagePart::ToolResult(tr) => Some(SessionEvent::ToolResult {
                             tool_call_id: tr.tool_call_id.clone(),
@@ -439,20 +416,20 @@ impl UrSession {
                         _ => None,
                     })
                 }
-                PersistedEvent::ToolApprovalRequested { id, name } => {
+                types::SessionEvent::ToolApprovalRequested { id, name } => {
                     Some(SessionEvent::ApprovalRequired {
                         id: id.clone(),
                         tool_name: name.clone(),
                         arguments_json: String::new(),
                     })
                 }
-                PersistedEvent::TurnComplete { .. } => Some(SessionEvent::TurnComplete),
-                PersistedEvent::TurnInterrupted { reason, .. } => {
+                types::SessionEvent::TurnComplete { .. } => Some(SessionEvent::TurnComplete),
+                types::SessionEvent::TurnInterrupted { reason, .. } => {
                     Some(SessionEvent::TurnError(reason.clone()))
                 }
-                PersistedEvent::TurnStarted { .. }
-                | PersistedEvent::UserMessage { .. }
-                | PersistedEvent::ToolApprovalDecided { .. } => None,
+                types::SessionEvent::TurnStarted { .. }
+                | types::SessionEvent::UserMessage { .. }
+                | types::SessionEvent::ToolApprovalDecided { .. } => None,
             };
 
             if let Some(e) = session_event {
@@ -461,6 +438,7 @@ impl UrSession {
         }
     }
 
+    #[expect(clippy::too_many_lines, reason = "approval flow adds substantial code")]
     fn dispatch_tool_calls(
         &mut self,
         tool_calls: &[&ToolCall],
@@ -475,12 +453,8 @@ impl UrSession {
                 "arguments": tc.arguments_json,
                 "call_id": tc.id,
             });
-            let before_tool_result = dispatch_hook(
-                &self.extensions,
-                &self.manifest,
-                HookPoint::BeforeTool,
-                hook_ctx,
-            )?;
+            let before_tool_result =
+                dispatch_hook_cached(&self.hook_cache, HookPoint::BeforeTool, hook_ctx)?;
             if let HookResult::Rejected(reason) = before_tool_result {
                 let result_content = format!("Error: tool rejected by extension: {reason}");
                 on_event(SessionEvent::ToolResult {
@@ -497,7 +471,7 @@ impl UrSession {
                     })],
                 };
                 self.events
-                    .push(PersistedEvent::ToolResult { message: msg });
+                    .push(types::SessionEvent::ToolResult { message: msg });
                 continue;
             }
             // Apply mutations: hooks can override arguments.
@@ -509,14 +483,64 @@ impl UrSession {
                 HookResult::Rejected(_) => unreachable!(),
             };
 
-            let handler = self
-                .tool_handlers
+            let ext = self
+                .extensions
                 .iter()
-                .find(|(d, _)| d.name == tc.name)
-                .map(|(_, h)| Arc::clone(h));
+                .find(|e| e.tool_descriptors().iter().any(|d| d.name == tc.name));
 
-            let result_content = if let Some(handler) = handler {
-                match handler(&effective_args) {
+            // Check if the tool requires approval.
+            let needs_approval = ext
+                .and_then(|e| e.tool_descriptors().into_iter().find(|d| d.name == tc.name))
+                .is_some_and(|d| d.requires_approval);
+
+            if needs_approval {
+                // Persist the approval request.
+                self.events
+                    .push(types::SessionEvent::ToolApprovalRequested {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                    });
+
+                // Emit approval request and check callback's decision.
+                let decision = on_event(SessionEvent::ApprovalRequired {
+                    id: tc.id.clone(),
+                    tool_name: tc.name.clone(),
+                    arguments_json: effective_args.clone(),
+                });
+
+                let approved = matches!(decision, Some(ApprovalDecision::Approve));
+                self.events.push(types::SessionEvent::ToolApprovalDecided {
+                    id: tc.id.clone(),
+                    decision: if approved {
+                        types::ApprovalDecision::Approve
+                    } else {
+                        types::ApprovalDecision::Deny
+                    },
+                });
+
+                if !approved {
+                    let result_content = "Error: tool execution denied by user".to_owned();
+                    on_event(SessionEvent::ToolResult {
+                        tool_call_id: tc.id.clone(),
+                        tool_name: tc.name.clone(),
+                        content: result_content.clone(),
+                    });
+                    let msg = Message {
+                        role: "tool".into(),
+                        parts: vec![MessagePart::ToolResult(ToolResult {
+                            tool_call_id: tc.id.clone(),
+                            tool_name: tc.name.clone(),
+                            content: result_content,
+                        })],
+                    };
+                    self.events
+                        .push(types::SessionEvent::ToolResult { message: msg });
+                    continue;
+                }
+            }
+
+            let result_content = if let Some(ext) = ext {
+                match ext.call_tool(&tc.name, &effective_args) {
                     Ok(result) => result,
                     Err(e) => format!("Error: {e}"),
                 }
@@ -530,19 +554,15 @@ impl UrSession {
                 "call_id": tc.id,
                 "result": result_content,
             });
-            let result_content = match dispatch_hook(
-                &self.extensions,
-                &self.manifest,
-                HookPoint::AfterTool,
-                hook_ctx,
-            )? {
-                HookResult::Pass(ctx) => ctx
-                    .get("result")
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-                    .unwrap_or(result_content),
-                HookResult::Rejected(_) => result_content, // after hooks can't reject
-            };
+            let result_content =
+                match dispatch_hook_cached(&self.hook_cache, HookPoint::AfterTool, hook_ctx)? {
+                    HookResult::Pass(ctx) => ctx
+                        .get("result")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                        .unwrap_or(result_content),
+                    HookResult::Rejected(_) => result_content, // after hooks can't reject
+                };
 
             debug!(tool = %tc.name, %result_content, "tool result");
 
@@ -561,7 +581,7 @@ impl UrSession {
                 content: result_content,
             });
             self.events
-                .push(PersistedEvent::ToolResult { message: msg });
+                .push(types::SessionEvent::ToolResult { message: msg });
         }
         Ok(())
     }
@@ -576,14 +596,12 @@ impl UrSession {
         );
         for event in new_events {
             // before_session_append hook — can mutate the event or reject.
-            let types_event = persisted_to_types_event(event);
             let hook_ctx = serde_json::json!({
                 "session_id": self.session_id,
-                "event": serde_json::to_value(&types_event).unwrap_or_default(),
+                "event": serde_json::to_value(event).unwrap_or_default(),
             });
-            let event_to_append = match dispatch_hook(
-                &self.extensions,
-                &self.manifest,
+            let event_to_append = match dispatch_hook_cached(
+                &self.hook_cache,
                 HookPoint::BeforeSessionAppend,
                 hook_ctx,
             )? {
@@ -600,10 +618,10 @@ impl UrSession {
                             debug!("hook mutated session event");
                             mutated_event
                         } else {
-                            types_event.clone()
+                            event.clone()
                         }
                     } else {
-                        types_event.clone()
+                        event.clone()
                     }
                 }
             };
@@ -620,32 +638,28 @@ impl UrSession {
         let hook_ctx = serde_json::json!({
             "messages": serde_json::to_value(&messages).unwrap_or_default(),
         });
-        let messages_to_compact = match dispatch_hook(
-            &self.extensions,
-            &self.manifest,
-            HookPoint::BeforeCompaction,
-            hook_ctx,
-        )? {
-            HookResult::Rejected(reason) => {
-                debug!(reason = %reason, "compaction rejected by hook, skipping");
-                return Ok(());
-            }
-            HookResult::Pass(ctx) => {
-                // Deserialize and apply messages mutation if provided
-                if let Some(messages_val) = ctx.get("messages") {
-                    if let Ok(mutated_messages) =
-                        serde_json::from_value::<Vec<Message>>(messages_val.clone())
-                    {
-                        debug!("hook mutated messages before compaction");
-                        mutated_messages
+        let messages_to_compact =
+            match dispatch_hook_cached(&self.hook_cache, HookPoint::BeforeCompaction, hook_ctx)? {
+                HookResult::Rejected(reason) => {
+                    debug!(reason = %reason, "compaction rejected by hook, skipping");
+                    return Ok(());
+                }
+                HookResult::Pass(ctx) => {
+                    // Deserialize and apply messages mutation if provided
+                    if let Some(messages_val) = ctx.get("messages") {
+                        if let Ok(mutated_messages) =
+                            serde_json::from_value::<Vec<Message>>(messages_val.clone())
+                        {
+                            debug!("hook mutated messages before compaction");
+                            mutated_messages
+                        } else {
+                            messages.clone()
+                        }
                     } else {
                         messages.clone()
                     }
-                } else {
-                    messages.clone()
                 }
-            }
-        };
+            };
 
         let compacted = self.compaction_provider.compact(&messages_to_compact)?;
         info!(
@@ -663,29 +677,25 @@ impl UrSession {
             "original": serde_json::to_value(&messages).unwrap_or_default(),
             "compacted": serde_json::to_value(&compacted).unwrap_or_default(),
         });
-        let final_compacted = match dispatch_hook(
-            &self.extensions,
-            &self.manifest,
-            HookPoint::AfterCompaction,
-            hook_ctx,
-        )? {
-            HookResult::Pass(ctx) => {
-                // Deserialize and apply compacted mutation if provided
-                if let Some(compacted_val) = ctx.get("compacted") {
-                    if let Ok(mutated_compacted) =
-                        serde_json::from_value::<Vec<Message>>(compacted_val.clone())
-                    {
-                        debug!("hook mutated compacted messages");
-                        mutated_compacted
+        let final_compacted =
+            match dispatch_hook_cached(&self.hook_cache, HookPoint::AfterCompaction, hook_ctx)? {
+                HookResult::Pass(ctx) => {
+                    // Deserialize and apply compacted mutation if provided
+                    if let Some(compacted_val) = ctx.get("compacted") {
+                        if let Ok(mutated_compacted) =
+                            serde_json::from_value::<Vec<Message>>(compacted_val.clone())
+                        {
+                            debug!("hook mutated compacted messages");
+                            mutated_compacted
+                        } else {
+                            compacted
+                        }
                     } else {
                         compacted
                     }
-                } else {
-                    compacted
                 }
-            }
-            HookResult::Rejected(_) => compacted, // after hooks can't reject
-        };
+                HookResult::Rejected(_) => compacted, // after hooks can't reject
+            };
 
         // Apply compacted messages: rebuild events and persist.
         // Always apply when content differs — hooks may edit messages without
@@ -699,10 +709,8 @@ impl UrSession {
             self.events =
                 apply_message_mutations(std::mem::take(&mut self.events), &final_compacted);
             // Persist the compacted state, replacing the old session file.
-            let types_events: Vec<types::SessionEvent> =
-                self.events.iter().map(persisted_to_types_event).collect();
             self.session_provider
-                .replace_session(&self.session_id, &types_events)?;
+                .replace_session(&self.session_id, &self.events)?;
             self.persisted_event_count = self.events.len();
         }
 
@@ -717,9 +725,9 @@ impl UrSession {
 /// Walks through events in order. For each `UserMessage`, `LlmCompletion`, or `ToolResult`,
 /// consumes the next message from `mutated_messages`. Non-message events are preserved as-is.
 fn apply_message_mutations(
-    events: Vec<PersistedEvent>,
+    events: Vec<types::SessionEvent>,
     mutated_messages: &[Message],
-) -> Vec<PersistedEvent> {
+) -> Vec<types::SessionEvent> {
     let mut msg_idx = 0;
     events
         .into_iter()
@@ -728,24 +736,24 @@ fn apply_message_mutations(
                 return event;
             }
             match event {
-                PersistedEvent::UserMessage { .. } => {
+                types::SessionEvent::UserMessage { .. } => {
                     let msg = &mutated_messages[msg_idx];
                     msg_idx += 1;
-                    PersistedEvent::UserMessage {
+                    types::SessionEvent::UserMessage {
                         text: extract_text(msg),
                     }
                 }
-                PersistedEvent::LlmCompletion { .. } => {
+                types::SessionEvent::LlmCompletion { .. } => {
                     let msg = &mutated_messages[msg_idx];
                     msg_idx += 1;
-                    PersistedEvent::LlmCompletion {
+                    types::SessionEvent::LlmCompletion {
                         message: msg.clone(),
                     }
                 }
-                PersistedEvent::ToolResult { .. } => {
+                types::SessionEvent::ToolResult { .. } => {
                     let msg = &mutated_messages[msg_idx];
                     msg_idx += 1;
-                    PersistedEvent::ToolResult {
+                    types::SessionEvent::ToolResult {
                         message: msg.clone(),
                     }
                 }
@@ -773,6 +781,13 @@ fn parse_settings_from_json(val: &serde_json::Value) -> Option<Vec<types::Config
                 }
             }
             serde_json::Value::String(s) => types::SettingValue::String(s.clone()),
+            serde_json::Value::Object(obj) => {
+                if let Some(serde_json::Value::String(s)) = obj.get("__enum") {
+                    types::SettingValue::Enumeration(s.clone())
+                } else {
+                    continue;
+                }
+            }
             _ => continue,
         };
         settings.push(types::ConfigSetting {
@@ -786,9 +801,8 @@ fn parse_settings_from_json(val: &serde_json::Value) -> Option<Vec<types::Config
 fn format_setting_value(val: &types::SettingValue) -> serde_json::Value {
     match val {
         types::SettingValue::Integer(i) => serde_json::Value::Number((*i).into()),
-        types::SettingValue::Enumeration(s) | types::SettingValue::String(s) => {
-            serde_json::Value::String(s.clone())
-        }
+        types::SettingValue::Enumeration(s) => serde_json::json!({ "__enum": s }),
+        types::SettingValue::String(s) => serde_json::Value::String(s.clone()),
         types::SettingValue::Boolean(b) => serde_json::Value::Bool(*b),
         types::SettingValue::Number(n) => serde_json::Number::from_f64(*n)
             .map_or(serde_json::Value::Null, serde_json::Value::Number),
@@ -809,7 +823,7 @@ fn extract_tool_calls(msg: &Message) -> Vec<&ToolCall> {
         .collect()
 }
 
-/// Dispatches a hook with manifest-based ordering.
+/// Dispatches a hook with manifest-based ordering (used before session is constructed).
 fn dispatch_hook(
     extensions: &[Arc<LuaExtension>],
     manifest: &WorkspaceManifest,
@@ -821,13 +835,61 @@ fn dispatch_hook(
     hooks::run_hook_ordered(extensions, hook, context, Some(&order_refs))
 }
 
-fn stream_completion(
-    llm: &dyn LlmProvider,
+/// Dispatches a hook using the pre-computed cache.
+fn dispatch_hook_cached(
+    cache: &HashMap<HookPoint, Vec<Arc<LuaExtension>>>,
+    hook: HookPoint,
+    context: serde_json::Value,
+) -> Result<HookResult> {
+    let ordered = cache.get(&hook).cloned().unwrap_or_default();
+    hooks::run_hook(&ordered, hook, context)
+}
+
+/// Pre-computes the ordered extension list per hook point.
+fn build_hook_cache(
+    extensions: &[Arc<LuaExtension>],
+    manifest: &WorkspaceManifest,
+) -> HashMap<HookPoint, Vec<Arc<LuaExtension>>> {
+    let all_hooks = [
+        HookPoint::BeforeCompletion,
+        HookPoint::AfterCompletion,
+        HookPoint::BeforeTool,
+        HookPoint::AfterTool,
+        HookPoint::BeforeSessionLoad,
+        HookPoint::AfterSessionLoad,
+        HookPoint::BeforeSessionAppend,
+        HookPoint::BeforeCompaction,
+        HookPoint::AfterCompaction,
+    ];
+    let mut cache = HashMap::new();
+    for hook in all_hooks {
+        let order = manifest::hook_order(manifest, hook.as_str());
+        let order_refs: Vec<&str> = order.clone();
+        // Build the ordered extension list once.
+        let mut ordered: Vec<Arc<LuaExtension>> = Vec::new();
+        for id in &order_refs {
+            if let Some(ext) = extensions.iter().find(|e| e.id == *id) {
+                ordered.push(Arc::clone(ext));
+            }
+        }
+        for ext in extensions {
+            if !ordered.iter().any(|e| e.id == ext.id) {
+                ordered.push(Arc::clone(ext));
+            }
+        }
+        cache.insert(hook, ordered);
+    }
+    cache
+}
+
+async fn stream_completion(
+    llm: &LlmProvider,
     messages: &[Message],
     model_id: &str,
     settings: &[crate::types::ConfigSetting],
     tools: &[ToolDescriptor],
-    on_event: &mut impl FnMut(SessionEvent) -> Option<ApprovalDecision>,
+    tool_choice: Option<&types::ToolChoice>,
+    on_event: &mut (impl FnMut(SessionEvent) -> Option<ApprovalDecision> + Send),
 ) -> Result<Completion> {
     let mut parts: Vec<MessagePart> = Vec::new();
     let mut usage = None;
@@ -837,7 +899,7 @@ fn stream_completion(
         model_id,
         settings,
         tools,
-        None,
+        tool_choice,
         &mut |chunk: CompletionChunk| {
             for dp in &chunk.delta_parts {
                 match dp {
@@ -861,7 +923,8 @@ fn stream_completion(
                 usage = chunk.usage;
             }
         },
-    )?;
+    )
+    .await?;
 
     Ok(Completion {
         message: Message {
@@ -872,89 +935,16 @@ fn stream_completion(
     })
 }
 
-fn messages_from_events(events: &[PersistedEvent]) -> Vec<Message> {
+fn messages_from_events(events: &[types::SessionEvent]) -> Vec<Message> {
     events
         .iter()
         .filter_map(|e| match e {
-            PersistedEvent::UserMessage { text } => Some(Message::text("user", text.as_str())),
-            PersistedEvent::LlmCompletion { message } | PersistedEvent::ToolResult { message } => {
-                Some(message.clone())
-            }
+            types::SessionEvent::UserMessage { text } => Some(Message::text("user", text.as_str())),
+            types::SessionEvent::LlmCompletion { message }
+            | types::SessionEvent::ToolResult { message } => Some(message.clone()),
             _ => None,
         })
         .collect()
-}
-
-/// Converts a `types::SessionEvent` (from storage) to internal `PersistedEvent`.
-fn types_event_to_persisted(e: types::SessionEvent) -> PersistedEvent {
-    match e {
-        types::SessionEvent::TurnStarted { turn_index } => {
-            PersistedEvent::TurnStarted { turn_index }
-        }
-        types::SessionEvent::UserMessage { text } => PersistedEvent::UserMessage { text },
-        types::SessionEvent::LlmCompletion { message } => PersistedEvent::LlmCompletion { message },
-        types::SessionEvent::ToolResult { message } => PersistedEvent::ToolResult { message },
-        types::SessionEvent::ToolApprovalRequested { id, name } => {
-            PersistedEvent::ToolApprovalRequested { id, name }
-        }
-        types::SessionEvent::ToolApprovalDecided { id, decision } => {
-            PersistedEvent::ToolApprovalDecided {
-                id,
-                decision: match decision {
-                    types::ApprovalDecision::Approve => ApprovalDecision::Approve,
-                    types::ApprovalDecision::Deny => ApprovalDecision::Deny,
-                },
-            }
-        }
-        types::SessionEvent::TurnComplete { turn_index } => {
-            PersistedEvent::TurnComplete { turn_index }
-        }
-        types::SessionEvent::TurnInterrupted { turn_index, reason } => {
-            PersistedEvent::TurnInterrupted { turn_index, reason }
-        }
-    }
-}
-
-/// Converts internal `PersistedEvent` to `types::SessionEvent` (for storage).
-fn persisted_to_types_event(e: &PersistedEvent) -> types::SessionEvent {
-    match e {
-        PersistedEvent::TurnStarted { turn_index } => types::SessionEvent::TurnStarted {
-            turn_index: *turn_index,
-        },
-        PersistedEvent::UserMessage { text } => {
-            types::SessionEvent::UserMessage { text: text.clone() }
-        }
-        PersistedEvent::LlmCompletion { message } => types::SessionEvent::LlmCompletion {
-            message: message.clone(),
-        },
-        PersistedEvent::ToolResult { message } => types::SessionEvent::ToolResult {
-            message: message.clone(),
-        },
-        PersistedEvent::ToolApprovalRequested { id, name } => {
-            types::SessionEvent::ToolApprovalRequested {
-                id: id.clone(),
-                name: name.clone(),
-            }
-        }
-        PersistedEvent::ToolApprovalDecided { id, decision } => {
-            types::SessionEvent::ToolApprovalDecided {
-                id: id.clone(),
-                decision: match decision {
-                    ApprovalDecision::Approve => types::ApprovalDecision::Approve,
-                    ApprovalDecision::Deny => types::ApprovalDecision::Deny,
-                },
-            }
-        }
-        PersistedEvent::TurnComplete { turn_index } => types::SessionEvent::TurnComplete {
-            turn_index: *turn_index,
-        },
-        PersistedEvent::TurnInterrupted { turn_index, reason } => {
-            types::SessionEvent::TurnInterrupted {
-                turn_index: *turn_index,
-                reason: reason.clone(),
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -991,14 +981,14 @@ mod tests {
     #[test]
     fn messages_for_llm_derives_from_events() {
         let events = [
-            PersistedEvent::TurnStarted { turn_index: 0 },
-            PersistedEvent::UserMessage {
+            types::SessionEvent::TurnStarted { turn_index: 0 },
+            types::SessionEvent::UserMessage {
                 text: "Hello".into(),
             },
-            PersistedEvent::LlmCompletion {
+            types::SessionEvent::LlmCompletion {
                 message: text_message("assistant", "Hi there"),
             },
-            PersistedEvent::TurnComplete { turn_index: 0 },
+            types::SessionEvent::TurnComplete { turn_index: 0 },
         ];
 
         let messages = messages_from_events(&events);
@@ -1012,16 +1002,16 @@ mod tests {
     #[test]
     fn messages_for_llm_includes_tool_turn() {
         let events = [
-            PersistedEvent::UserMessage {
+            types::SessionEvent::UserMessage {
                 text: "Weather?".into(),
             },
-            PersistedEvent::LlmCompletion {
+            types::SessionEvent::LlmCompletion {
                 message: tool_call_message("call-1", "get_weather"),
             },
-            PersistedEvent::ToolResult {
+            types::SessionEvent::ToolResult {
                 message: tool_result_message("call-1", "get_weather"),
             },
-            PersistedEvent::LlmCompletion {
+            types::SessionEvent::LlmCompletion {
                 message: text_message("assistant", "It is 72F."),
             },
         ];
@@ -1077,29 +1067,69 @@ mod tests {
         // Verify that TurnComplete event is correctly positioned in the event list.
         // This test ensures TurnComplete is pushed before persist_and_compact is called.
         let events = [
-            PersistedEvent::TurnStarted { turn_index: 0 },
-            PersistedEvent::UserMessage {
+            types::SessionEvent::TurnStarted { turn_index: 0 },
+            types::SessionEvent::UserMessage {
                 text: "Hello".into(),
             },
-            PersistedEvent::LlmCompletion {
+            types::SessionEvent::LlmCompletion {
                 message: text_message("assistant", "Hi there"),
             },
-            PersistedEvent::TurnComplete { turn_index: 0 },
+            types::SessionEvent::TurnComplete { turn_index: 0 },
         ];
 
         // Verify TurnComplete is present and in the expected position
         assert_eq!(events.len(), 4);
         assert!(matches!(
             events[3],
-            PersistedEvent::TurnComplete { turn_index: 0 }
+            types::SessionEvent::TurnComplete { turn_index: 0 }
         ));
 
         // Verify the event sequence before TurnComplete
         assert!(matches!(
             events[0],
-            PersistedEvent::TurnStarted { turn_index: 0 }
+            types::SessionEvent::TurnStarted { turn_index: 0 }
         ));
-        assert!(matches!(events[1], PersistedEvent::UserMessage { .. }));
-        assert!(matches!(events[2], PersistedEvent::LlmCompletion { .. }));
+        assert!(matches!(events[1], types::SessionEvent::UserMessage { .. }));
+        assert!(matches!(
+            events[2],
+            types::SessionEvent::LlmCompletion { .. }
+        ));
+    }
+
+    #[test]
+    fn setting_enumeration_round_trips_through_json() {
+        use crate::types::{ConfigSetting, SettingValue};
+
+        let original = [
+            ConfigSetting {
+                key: "thinking_level".into(),
+                value: SettingValue::Enumeration("high".into()),
+            },
+            ConfigSetting {
+                key: "api_key".into(),
+                value: SettingValue::String("secret".into()),
+            },
+            ConfigSetting {
+                key: "max_tokens".into(),
+                value: SettingValue::Integer(1024),
+            },
+        ];
+
+        let json: Vec<serde_json::Value> = original
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "key": s.key,
+                    "value": format_setting_value(&s.value),
+                })
+            })
+            .collect();
+        let json_val = serde_json::Value::Array(json);
+        let parsed = parse_settings_from_json(&json_val).unwrap();
+
+        assert_eq!(parsed.len(), 3);
+        assert!(matches!(&parsed[0].value, SettingValue::Enumeration(s) if s == "high"));
+        assert!(matches!(&parsed[1].value, SettingValue::String(s) if s == "secret"));
+        assert!(matches!(&parsed[2].value, SettingValue::Integer(1024)));
     }
 }

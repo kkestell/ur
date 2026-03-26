@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::process;
 
+use anyhow::Context;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -45,20 +46,26 @@ impl LogHandle {
 /// `mirror_stderr` is also set, a human-readable copy is written to
 /// stderr.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if the log directory cannot be created or the subscriber
-/// cannot be installed (e.g. a global subscriber already exists).
-pub fn init(binary_name: &str, ur_root: &Path, verbose: bool, mirror_stderr: bool) -> LogHandle {
+/// Returns an error if the log directory or file cannot be created.
+pub fn init(
+    binary_name: &str,
+    ur_root: &Path,
+    verbose: bool,
+    mirror_stderr: bool,
+) -> anyhow::Result<LogHandle> {
     let logs_dir = ur_root.join("logs");
-    std::fs::create_dir_all(&logs_dir).expect("cannot create log directory");
+    std::fs::create_dir_all(&logs_dir)
+        .with_context(|| format!("cannot create log directory {}", logs_dir.display()))?;
 
     let timestamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S");
     let pid = process::id();
     let filename = format!("{binary_name}-{timestamp}-{pid}.log");
     let log_path = logs_dir.join(&filename);
 
-    let file = std::fs::File::create(&log_path).expect("cannot create log file");
+    let file = std::fs::File::create(&log_path)
+        .with_context(|| format!("cannot create log file {}", log_path.display()))?;
 
     let file_level = if verbose { "ur=debug" } else { "ur=info" };
     let file_filter =
@@ -86,8 +93,8 @@ pub fn init(binary_name: &str, ur_root: &Path, verbose: bool, mirror_stderr: boo
         tracing_subscriber::registry().with(file_layer).init();
     }
 
-    LogHandle {
+    Ok(LogHandle {
         path: log_path,
         _guard: guard,
-    }
+    })
 }

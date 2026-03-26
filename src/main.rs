@@ -20,14 +20,14 @@ async fn main() -> Result<()> {
 
     let ur_root = ur::resolve_ur_root();
 
-    let log_handle = logging::init("ur", &ur_root, args.verbose, args.verbose);
+    let log_handle = logging::init("ur", &ur_root, args.verbose, args.verbose)?;
     tracing::info!(
         verbose = args.verbose,
         ur_root = %ur_root.display(),
         "ur starting"
     );
 
-    let result = run(&args, &ur_root);
+    let result = run(&args, &ur_root).await;
     if let Err(ref e) = result {
         tracing::error!(error = %e, "ur exiting with error");
         eprintln!("log: {}", log_handle.path().display());
@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
     result
 }
 
-fn run(args: &Cli, ur_root: &Path) -> Result<()> {
+async fn run(args: &Cli, ur_root: &Path) -> Result<()> {
     let workspace_dir = args
         .workspace
         .clone()
@@ -46,8 +46,8 @@ fn run(args: &Cli, ur_root: &Path) -> Result<()> {
 
     match &args.command {
         Command::Extension { action } => handle_extension(&mut ws, action),
-        Command::Role { action } => handle_role(&mut ws, action),
-        Command::Run { message } => handle_run(&mut ws, message),
+        Command::Role { action } => handle_role(&mut ws, action).await,
+        Command::Run { message } => handle_run(&mut ws, message).await,
     }
 }
 
@@ -89,24 +89,24 @@ fn handle_extension(ws: &mut UrWorkspace, action: &ExtensionAction) -> Result<()
     Ok(())
 }
 
-fn handle_role(ws: &mut UrWorkspace, action: &RoleAction) -> Result<()> {
+async fn handle_role(ws: &mut UrWorkspace, action: &RoleAction) -> Result<()> {
     match action {
         RoleAction::List => {
-            let roles = ws.list_roles()?;
+            let roles = ws.list_roles().await?;
             println!("{:<12}MODEL", "ROLE");
             for entry in &roles {
                 println!("{:<12}{}", entry.role, entry.model_ref);
             }
         }
         RoleAction::Get { role } => {
-            let resolved = ws.resolve_role(role)?;
+            let resolved = ws.resolve_role(role).await?;
             println!(
                 "{} -> {}/{}",
                 resolved.role, resolved.provider_id, resolved.model_id
             );
         }
         RoleAction::Set { role, model_ref } => {
-            let resolved = ws.set_role(role, model_ref)?;
+            let resolved = ws.set_role(role, model_ref).await?;
             println!(
                 "{} -> {}/{}",
                 resolved.role, resolved.provider_id, resolved.model_id
@@ -116,23 +116,25 @@ fn handle_role(ws: &mut UrWorkspace, action: &RoleAction) -> Result<()> {
     Ok(())
 }
 
-fn handle_run(ws: &mut UrWorkspace, message: &str) -> Result<()> {
+async fn handle_run(ws: &mut UrWorkspace, message: &str) -> Result<()> {
     let mut session = ws.open_session("demo")?;
-    session.run_turn(message, |event| {
-        match event {
-            SessionEvent::TextDelta(delta) => {
-                print!("{delta}");
-                let _ = std::io::stdout().flush();
+    session
+        .run_turn(message, |event| {
+            match event {
+                SessionEvent::TextDelta(delta) => {
+                    print!("{delta}");
+                    let _ = std::io::stdout().flush();
+                }
+                SessionEvent::AssistantMessage { .. } => {
+                    println!();
+                }
+                SessionEvent::ApprovalRequired { .. } => {
+                    return Some(session::ApprovalDecision::Approve);
+                }
+                _ => {}
             }
-            SessionEvent::AssistantMessage { .. } => {
-                println!();
-            }
-            SessionEvent::ApprovalRequired { .. } => {
-                return Some(session::ApprovalDecision::Approve);
-            }
-            _ => {}
-        }
-        None
-    })?;
+            None
+        })
+        .await?;
     Ok(())
 }
