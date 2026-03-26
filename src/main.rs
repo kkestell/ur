@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
 
     let ur_root = ur::resolve_ur_root();
 
-    let log_handle = logging::init("ur", &ur_root, args.verbose, args.verbose);
+    let log_handle = logging::init("ur", &ur_root, args.verbose, args.verbose)?;
     tracing::info!(
         verbose = args.verbose,
         ur_root = %ur_root.display(),

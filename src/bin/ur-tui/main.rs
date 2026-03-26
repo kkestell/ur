@@ -43,7 +43,7 @@ fn main() -> Result<()> {
     let ur_root = ur::resolve_ur_root();
 
     // File sink only — no stderr mirror because the TUI owns the terminal.
-    let log_handle = logging::init("ur-tui", &ur_root, args.verbose, false);
+    let log_handle = logging::init("ur-tui", &ur_root, args.verbose, false)?;
     tracing::info!(
         verbose = args.verbose,
         ur_root = %ur_root.display(),
