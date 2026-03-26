@@ -13,10 +13,10 @@ use crate::types::ModelDescriptor;
 pub type ProviderModels = BTreeMap<String, Vec<ModelDescriptor>>;
 
 /// Collects provider models from all registered LLM providers.
-pub fn collect_provider_models(providers: &[&dyn LlmProvider]) -> ProviderModels {
+pub async fn collect_provider_models(providers: &[&LlmProvider]) -> ProviderModels {
     let mut result = BTreeMap::new();
     for provider in providers {
-        let models = provider.list_models();
+        let models = provider.list_models().await;
         if !models.is_empty() {
             result.insert(provider.provider_id().to_owned(), models);
         }

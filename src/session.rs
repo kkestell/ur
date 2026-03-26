@@ -26,7 +26,7 @@ type ToolHandler = (
 
 /// Bundled dependencies for constructing a session.
 pub(crate) struct SessionDeps {
-    pub llm_providers: Vec<Arc<dyn LlmProvider>>,
+    pub llm_providers: Vec<Arc<LlmProvider>>,
     pub session_provider: Arc<dyn SessionProvider>,
     pub compaction_provider: Arc<dyn CompactionProvider>,
     pub config: UserConfig,
@@ -114,7 +114,7 @@ pub struct SessionSnapshot {
     reason = "Contains dyn trait objects and closures that are not Debug"
 )]
 pub struct UrSession {
-    llm_providers: Vec<Arc<dyn LlmProvider>>,
+    llm_providers: Vec<Arc<LlmProvider>>,
     session_provider: Arc<dyn SessionProvider>,
     compaction_provider: Arc<dyn CompactionProvider>,
     config: UserConfig,
@@ -222,10 +222,10 @@ impl UrSession {
         clippy::too_many_lines,
         reason = "Core turn loop; splitting hurts readability"
     )]
-    pub fn run_turn(
+    pub async fn run_turn(
         &mut self,
         user_message: &str,
-        mut on_event: impl FnMut(SessionEvent) -> Option<ApprovalDecision>,
+        mut on_event: impl FnMut(SessionEvent) -> Option<ApprovalDecision> + Send,
     ) -> Result<()> {
         let turn_index = self.turn_count;
         self.turn_count += 1;
@@ -237,13 +237,12 @@ impl UrSession {
         });
 
         // Resolve role and find LLM provider.
-        let provider_models = model::collect_provider_models(
-            &self
-                .llm_providers
-                .iter()
-                .map(std::convert::AsRef::as_ref)
-                .collect::<Vec<_>>(),
-        );
+        let provider_refs: Vec<&LlmProvider> = self
+            .llm_providers
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect();
+        let provider_models = model::collect_provider_models(&provider_refs).await;
         let (provider_id, mut model_id) =
             model::resolve_role(&self.config, "default", &provider_models)?;
         info!(%provider_id, %model_id, "resolved role \"default\"");
@@ -260,7 +259,7 @@ impl UrSession {
             self.tool_handlers.iter().map(|(d, _)| d.clone()).collect();
 
         // Get settings for this model.
-        let descriptors = llm.list_settings();
+        let descriptors = llm.list_settings().await;
         let config_settings =
             self.config
                 .settings_for(llm.provider_id(), &model_id, &descriptors)?;
@@ -313,13 +312,14 @@ impl UrSession {
         // First LLM completion.
         info!(messages = messages.len(), "calling LLM streaming");
         let mut completion = stream_completion(
-            &*llm,
+            &llm,
             &messages,
             &model_id,
             &config_settings,
             &tools,
             &mut on_event,
-        )?;
+        )
+        .await?;
 
         // after_completion hook — can mutate the response.
         let hook_ctx = serde_json::json!({
@@ -374,13 +374,14 @@ impl UrSession {
                 "calling LLM streaming (with tool results)"
             );
             let completion2 = stream_completion(
-                &*llm,
+                &llm,
                 &messages,
                 &model_id,
                 &config_settings,
                 &tools,
                 &mut on_event,
-            )?;
+            )
+            .await?;
             let text = extract_text(&completion2.message);
             on_event(SessionEvent::AssistantMessage { text });
             self.events.push(PersistedEvent::LlmCompletion {
@@ -821,13 +822,13 @@ fn dispatch_hook(
     hooks::run_hook_ordered(extensions, hook, context, Some(&order_refs))
 }
 
-fn stream_completion(
-    llm: &dyn LlmProvider,
+async fn stream_completion(
+    llm: &LlmProvider,
     messages: &[Message],
     model_id: &str,
     settings: &[crate::types::ConfigSetting],
     tools: &[ToolDescriptor],
-    on_event: &mut impl FnMut(SessionEvent) -> Option<ApprovalDecision>,
+    on_event: &mut (impl FnMut(SessionEvent) -> Option<ApprovalDecision> + Send),
 ) -> Result<Completion> {
     let mut parts: Vec<MessagePart> = Vec::new();
     let mut usage = None;
@@ -861,7 +862,8 @@ fn stream_completion(
                 usage = chunk.usage;
             }
         },
-    )?;
+    )
+    .await?;
 
     Ok(Completion {
         message: Message {

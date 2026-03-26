@@ -21,9 +21,9 @@ use crate::types::{ExtensionCapabilities, ToolDescriptor};
     missing_debug_implementations,
     reason = "Contains dyn trait objects that are not Debug"
 )]
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct HostProviders {
-    pub llm_providers: Vec<Arc<dyn LlmProvider>>,
+    pub llm_providers: Vec<Arc<LlmProvider>>,
     pub session_provider: Option<Arc<dyn SessionProvider>>,
 }
 
@@ -151,58 +151,63 @@ pub fn build_ur_module(
 }
 
 /// Builds the `ur.complete()` function for raw LLM completion (no hooks).
-fn build_complete_fn(lua: &Lua, llm_providers: &[Arc<dyn LlmProvider>]) -> Result<LuaFunction> {
+fn build_complete_fn(lua: &Lua, llm_providers: &[Arc<LlmProvider>]) -> Result<LuaFunction> {
     let llm_providers = llm_providers.to_vec();
-    let complete_fn = lua.create_function(
+    let complete_fn = lua.create_async_function(
         move |lua, (messages_val, opts): (LuaValue, Option<LuaTable>)| {
-            let messages_json: serde_json::Value = lua.from_value(messages_val)?;
-            let messages: Vec<crate::types::Message> =
-                serde_json::from_value(messages_json).map_err(LuaError::external)?;
+            let llm_providers = llm_providers.clone();
+            async move {
+                let messages_json: serde_json::Value = lua.from_value(messages_val)?;
+                let messages: Vec<crate::types::Message> =
+                    serde_json::from_value(messages_json).map_err(LuaError::external)?;
 
-            let model_id: String = opts
-                .as_ref()
-                .and_then(|o| o.get::<String>("model").ok())
-                .unwrap_or_default();
-            let provider_id: String = opts
-                .as_ref()
-                .and_then(|o| o.get::<String>("provider").ok())
-                .unwrap_or_default();
+                let model_id: String = opts
+                    .as_ref()
+                    .and_then(|o| o.get::<String>("model").ok())
+                    .unwrap_or_default();
+                let provider_id: String = opts
+                    .as_ref()
+                    .and_then(|o| o.get::<String>("provider").ok())
+                    .unwrap_or_default();
 
-            // Find matching provider, or use the first one.
-            let llm = if provider_id.is_empty() {
-                llm_providers
-                    .first()
-                    .ok_or_else(|| LuaError::runtime("no LLM providers available"))?
-            } else {
-                llm_providers
-                    .iter()
-                    .find(|p| p.provider_id() == provider_id)
-                    .ok_or_else(|| {
-                        LuaError::runtime(format!("provider '{provider_id}' not found"))
-                    })?
-            };
+                // Find matching provider, or use the first one.
+                let llm = if provider_id.is_empty() {
+                    llm_providers
+                        .first()
+                        .ok_or_else(|| LuaError::runtime("no LLM providers available"))?
+                } else {
+                    llm_providers
+                        .iter()
+                        .find(|p| p.provider_id() == provider_id)
+                        .ok_or_else(|| {
+                            LuaError::runtime(format!("provider '{provider_id}' not found"))
+                        })?
+                };
 
-            let effective_model = if model_id.is_empty() {
-                llm.list_models()
-                    .first()
-                    .map(|m| m.id.clone())
-                    .unwrap_or_default()
-            } else {
-                model_id
-            };
+                let effective_model = if model_id.is_empty() {
+                    llm.list_models()
+                        .await
+                        .first()
+                        .map(|m| m.id.clone())
+                        .unwrap_or_default()
+                } else {
+                    model_id
+                };
 
-            let mut result_parts = Vec::new();
-            llm.complete(&messages, &effective_model, &[], &[], None, &mut |chunk| {
-                for dp in &chunk.delta_parts {
-                    if let crate::types::MessagePart::Text(tp) = dp {
-                        result_parts.push(tp.text.clone());
+                let mut result_parts = Vec::new();
+                llm.complete(&messages, &effective_model, &[], &[], None, &mut |chunk| {
+                    for dp in &chunk.delta_parts {
+                        if let crate::types::MessagePart::Text(tp) = dp {
+                            result_parts.push(tp.text.clone());
+                        }
                     }
-                }
-            })
-            .map_err(LuaError::external)?;
+                })
+                .await
+                .map_err(LuaError::external)?;
 
-            let text: String = result_parts.concat();
-            lua.create_string(&text)
+                let text: String = result_parts.concat();
+                lua.create_string(&text)
+            }
         },
     )?;
     Ok(complete_fn)

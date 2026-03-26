@@ -122,14 +122,17 @@ impl OpenRouterProvider {
         })
     }
 
-    async fn complete_async(
+    /// # Errors
+    ///
+    /// Returns an error if the API request fails.
+    pub async fn complete_async(
         &self,
         messages: &[Message],
         model_id: &str,
         settings: &[ConfigSetting],
         tools: &[ToolDescriptor],
         tool_choice: Option<&ToolChoice>,
-        on_chunk: &mut dyn FnMut(CompletionChunk),
+        on_chunk: &mut (impl FnMut(CompletionChunk) + Send),
     ) -> anyhow::Result<Completion> {
         let body = build_request_body(model_id, messages, settings, tools, tool_choice);
 
@@ -239,42 +242,6 @@ impl OpenRouterProvider {
         filtered.sort_by(|a, b| a.id.cmp(&b.id));
 
         Ok(filtered)
-    }
-}
-
-impl super::LlmProvider for OpenRouterProvider {
-    fn provider_id(&self) -> &'static str {
-        "openrouter"
-    }
-
-    fn list_models(&self) -> Vec<ModelDescriptor> {
-        let handle = tokio::runtime::Handle::current();
-        handle.block_on(self.list_models())
-    }
-
-    fn list_settings(&self) -> Vec<SettingDescriptor> {
-        let handle = tokio::runtime::Handle::current();
-        handle.block_on(self.list_settings())
-    }
-
-    fn complete(
-        &self,
-        messages: &[Message],
-        model_id: &str,
-        settings: &[ConfigSetting],
-        tools: &[ToolDescriptor],
-        tool_choice: Option<&ToolChoice>,
-        on_chunk: &mut dyn FnMut(CompletionChunk),
-    ) -> anyhow::Result<Completion> {
-        let handle = tokio::runtime::Handle::current();
-        handle.block_on(self.complete_async(
-            messages,
-            model_id,
-            settings,
-            tools,
-            tool_choice,
-            on_chunk,
-        ))
     }
 }
 
