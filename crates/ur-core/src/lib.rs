@@ -1,4 +1,43 @@
 //! Provider-agnostic core API for `ur`.
+//!
+//! This crate contains the public data model and state machine shared by all
+//! providers: [`Model`], [`Agent`], [`Session`], [`EventStream`], [`Tool`], and
+//! the [`Provider`] seam. Applications usually depend on the `ur` facade, while
+//! provider crates depend on `ur-core` directly.
+//!
+//! The full provider-agnostic contract is maintained in the repository
+//! [API specification](https://github.com/kkestell/ur/blob/main/docs/API.md).
+//!
+//! # Example
+//!
+//! ```no_run
+//! use ur_core::event::FinishReason;
+//! use ur_core::provider::{ModelSpec, Provider, RawEvent, Request};
+//! use ur_core::{BoxStream, Model, Result};
+//!
+//! struct EchoProvider;
+//!
+//! impl Provider for EchoProvider {
+//!     fn chat(&self, _request: &Request) -> BoxStream<'static, Result<RawEvent>> {
+//!         Box::pin(futures_util::stream::iter([
+//!             Ok(RawEvent::TextDelta("hello".to_owned())),
+//!             Ok(RawEvent::Done {
+//!                 finish_reason: FinishReason::Stop,
+//!                 usage: None,
+//!             }),
+//!         ]))
+//!     }
+//!
+//!     fn model_spec(&self, _model_id: &str) -> Option<ModelSpec> {
+//!         None
+//!     }
+//! }
+//!
+//! let model = Model::new(EchoProvider, "echo-model");
+//! let agent = ur_core::Agent::new("You are concise.", model);
+//! let mut session = agent.session();
+//! let _events = session.send("hello");
+//! ```
 
 #![forbid(unsafe_code)]
 

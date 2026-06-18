@@ -28,8 +28,8 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 trybuild = "1.0.116"
+wiremock.workspace = true
 
 [[example]]
 name = "deepseek"
 required-features = ["deepseek"]
-

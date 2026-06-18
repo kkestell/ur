@@ -193,6 +193,8 @@ Done when:
 
 ## Phase 9: Integration, docs, and release hardening
 
+Status: Complete.
+
 Build:
 
 - Add workspace-level integration tests that exercise `ur` facade + `ur-core` + `ur-macros` + fake provider together.

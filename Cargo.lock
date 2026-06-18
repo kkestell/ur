@@ -1326,6 +1326,7 @@ dependencies = [
  "ur-core",
  "ur-deepseek",
  "ur-macros",
+ "wiremock",
 ]
 
 [[package]]

@@ -1,7 +1,39 @@
 //! DeepSeek [`Provider`] implementation for `ur`.
 //!
-//! See `DEEPSEEK.md` for the wire mapping, generation-setting semantics, strict
-//! mode, and retry behavior this crate implements.
+//! This crate provides [`DeepSeekClient`], its builder, and the compiled-in
+//! DeepSeek model catalog. Most applications reach it through the `ur` facade as
+//! `ur::deepseek` with the `deepseek` feature enabled.
+//!
+//! See the repository
+//! [DeepSeek provider specification](https://github.com/kkestell/ur/blob/main/docs/DEEPSEEK.md)
+//! for the wire mapping, generation-setting semantics, strict mode, and retry
+//! behavior this crate implements.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use futures_util::StreamExt;
+//! use ur_core::event::Event;
+//! use ur_core::{Agent, Model};
+//! use ur_deepseek::DeepSeekClient;
+//!
+//! # async fn run() -> ur_core::Result<()> {
+//! let client = DeepSeekClient::try_from_env()?;
+//! let model = Model::new(client, "deepseek-v4-pro");
+//! let agent = Agent::new("You are concise.", model);
+//! let mut session = agent.session();
+//!
+//! let mut events = session.send("Say hello in one sentence.");
+//! while let Some(event) = events.next().await {
+//!     match event? {
+//!         Event::TextDelta { delta } => print!("{delta}"),
+//!         Event::Done { .. } => break,
+//!         _ => {}
+//!     }
+//! }
+//! # Ok(())
+//! # }
+//! ```
 
 #![forbid(unsafe_code)]
 
