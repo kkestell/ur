@@ -31,3 +31,15 @@
 - Added a minimal `EventStream<'_>` implementation for Phase 3 preflight errors. The full provider event loop, successful-turn event emission, history commit/rollback, and tool execution remain deferred to Phase 4.
 - Removed leftover placeholder-era accessors that were not part of `docs/API.md`, avoiding accidental public API expansion before the public surface is locked.
 - Added coverage for registered-tool lookup by name, deprecated-model warning emission, and constructing `Model<Arc<dyn Provider>>` through the facade compile contracts after independent review flagged those gaps.
+
+## Phase 4
+
+- Replaced the minimal `EventStream<'_>` placeholder with the full provider-agnostic loop: staged user turns, provider stream polling, assistant delta accumulation, tool-call assembly, sequential tool execution, retrying the model after tool results, and terminal `Done` emission.
+- Kept `EventStream<'_>` non-generic by erasing the session provider to `Arc<dyn Provider>` inside `Session::send`; this preserves the documented public stream type while still supporting `Model<P>` and `Model<Arc<dyn Provider>>`.
+- Delayed committing pending history until the final non-tool `Event::Done` is actually yielded. Provider errors, malformed normalized streams, and dropped streams leave `Session::history()` exactly as it was before `send`.
+- Treat an empty provider stream before `RawEvent::Done` as `Error::Decode`, matching the provider seam contract that every successful provider turn terminates with exactly one `Done`.
+- Preserve assistant `reasoning_content` in both committed history and follow-up provider requests after tool rounds.
+- Added focused fake-provider tests for tool-round event ordering, no intermediate `Done`, argument-fragment concatenation by index, multiple sequential tool calls, unknown tools, malformed tool arguments, JSON-string tool outputs, provider-error rollback, cancellation rollback, and atomic complete-turn commits.
+- After independent review, changed `finish_reason = ToolCalls` with no assembled tool calls into an `Error::Decode` rollback path and added post-tool-result rollback tests for provider errors and cancellation.
+- Updated the DeepSeek placeholder provider to emit one normalized `Done` event instead of an empty stream so it remains compatible with the phase 4 core loop until real DeepSeek streaming is implemented.
+- Deferred true macro-generated malformed-argument coverage to the macro/facade phases; Phase 4 uses a manual parsing tool to exercise the same `ToolOutput::Err` loop behavior without pulling macro implementation forward.

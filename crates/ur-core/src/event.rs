@@ -1,32 +1,243 @@
 //! Event types produced by the agent loop.
 
+use std::collections::{BTreeMap, VecDeque};
 use std::hash::Hash;
-use std::marker::PhantomData;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use crate::tool::ToolArguments;
-use crate::{Result, Stream};
+use crate::provider::{Message, Provider, RawEvent, Request, Settings, ToolCall};
+use crate::tool::{Tool, ToolArguments, ToolSchema};
+use crate::{BoxFuture, BoxStream, Error, Result, Stream, UserMessage};
 
 /// Opaque stream of events returned by a session.
 pub struct EventStream<'a> {
-    pending: Option<Result<Event>>,
-    _session: PhantomData<&'a mut ()>,
+    session_history: Option<&'a mut Vec<Message>>,
+    pending_history: Vec<Message>,
+    provider: Option<Arc<dyn Provider>>,
+    model: String,
+    tools: Vec<StreamTool>,
+    tool_schemas: Vec<ToolSchema>,
+    settings: Settings,
+    provider_stream: Option<BoxStream<'static, Result<RawEvent>>>,
+    assistant: AssistantTurn,
+    ready: VecDeque<QueuedEvent>,
+    continue_after_tools: bool,
+    tool_calls: Vec<ToolCall>,
+    next_tool_index: usize,
+    tool_to_start: Option<ToolCall>,
+    running_tool: Option<RunningTool>,
+    finished: bool,
 }
 
 impl<'a> EventStream<'a> {
+    pub(crate) fn new(
+        session_history: &'a mut Vec<Message>,
+        provider: Arc<dyn Provider>,
+        model: String,
+        tools: Vec<StreamTool>,
+        tool_schemas: Vec<ToolSchema>,
+        settings: Settings,
+        message: UserMessage,
+    ) -> Self {
+        let mut pending_history = session_history.clone();
+        pending_history.push(Message::user(message.as_str()));
+
+        let mut stream = Self {
+            session_history: Some(session_history),
+            pending_history,
+            provider: Some(provider),
+            model,
+            tools,
+            tool_schemas,
+            settings,
+            provider_stream: None,
+            assistant: AssistantTurn::default(),
+            ready: VecDeque::new(),
+            continue_after_tools: false,
+            tool_calls: Vec::new(),
+            next_tool_index: 0,
+            tool_to_start: None,
+            running_tool: None,
+            finished: false,
+        };
+        stream.start_provider_turn();
+        stream
+    }
+
+    #[cfg(test)]
     pub(crate) fn empty() -> Self {
         Self {
-            pending: None,
-            _session: PhantomData,
+            session_history: None,
+            pending_history: Vec::new(),
+            provider: None,
+            model: String::new(),
+            tools: Vec::new(),
+            tool_schemas: Vec::new(),
+            settings: Settings::default(),
+            provider_stream: None,
+            assistant: AssistantTurn::default(),
+            ready: VecDeque::new(),
+            continue_after_tools: false,
+            tool_calls: Vec::new(),
+            next_tool_index: 0,
+            tool_to_start: None,
+            running_tool: None,
+            finished: true,
         }
     }
 
     pub(crate) fn from_error(error: crate::Error) -> Self {
         Self {
-            pending: Some(Err(error)),
-            _session: PhantomData,
+            session_history: None,
+            pending_history: Vec::new(),
+            provider: None,
+            model: String::new(),
+            tools: Vec::new(),
+            tool_schemas: Vec::new(),
+            settings: Settings::default(),
+            provider_stream: None,
+            assistant: AssistantTurn::default(),
+            ready: VecDeque::from([QueuedEvent::Error(error)]),
+            continue_after_tools: false,
+            tool_calls: Vec::new(),
+            next_tool_index: 0,
+            tool_to_start: None,
+            running_tool: None,
+            finished: false,
         }
+    }
+
+    fn start_provider_turn(&mut self) {
+        let Some(provider) = &self.provider else {
+            self.finished = true;
+            return;
+        };
+
+        let request = Request {
+            model: self.model.clone(),
+            messages: self.pending_history.clone(),
+            tools: self.tool_schemas.clone(),
+            settings: self.settings.clone(),
+        };
+        self.assistant = AssistantTurn::default();
+        self.provider_stream = Some(provider.chat(&request));
+    }
+
+    fn handle_raw_event(&mut self, event: RawEvent) {
+        match event {
+            RawEvent::TextDelta(delta) => {
+                self.assistant.content.push_str(&delta);
+                self.ready
+                    .push_back(QueuedEvent::Event(Event::TextDelta { delta }));
+            }
+            RawEvent::ReasoningDelta(delta) => {
+                self.assistant.reasoning_content.push_str(&delta);
+                self.ready
+                    .push_back(QueuedEvent::Event(Event::ReasoningDelta { delta }));
+            }
+            RawEvent::ToolCallDelta {
+                index,
+                id,
+                name,
+                arguments,
+            } => self
+                .assistant
+                .push_tool_call_fragment(index, id, name, arguments),
+            RawEvent::Done {
+                finish_reason,
+                usage,
+            } => {
+                if let Some(usage) = usage {
+                    self.ready
+                        .push_back(QueuedEvent::Event(Event::Usage { usage }));
+                }
+
+                let is_tool_call_turn = finish_reason == FinishReason::ToolCalls;
+                let tool_calls = match self.assistant.tool_calls() {
+                    Ok(tool_calls) => tool_calls,
+                    Err(error) => {
+                        self.fail(error);
+                        return;
+                    }
+                };
+
+                self.pending_history.push(Message::assistant(
+                    non_empty_string(&self.assistant.content),
+                    non_empty_string(&self.assistant.reasoning_content),
+                    tool_calls.clone(),
+                ));
+                self.provider_stream = None;
+                self.assistant = AssistantTurn::default();
+
+                if is_tool_call_turn {
+                    if tool_calls.is_empty() {
+                        self.fail(missing_tool_calls());
+                        return;
+                    }
+
+                    self.continue_after_tools = true;
+                    self.tool_calls = tool_calls;
+                    self.next_tool_index = 0;
+                } else {
+                    self.ready.push_back(QueuedEvent::Done(finish_reason));
+                }
+            }
+        }
+    }
+
+    fn queue_next_tool_call(&mut self) {
+        let call = self.tool_calls[self.next_tool_index].clone();
+        self.next_tool_index += 1;
+        self.tool_to_start = Some(call.clone());
+        self.ready.push_back(QueuedEvent::Event(Event::ToolCall {
+            id: call.id,
+            name: call.name,
+            arguments: call.arguments,
+        }));
+    }
+
+    fn start_tool(&mut self, call: ToolCall) {
+        let Some(tool) = self
+            .tools
+            .iter()
+            .find(|tool| tool.schema.name == call.name)
+            .map(|tool| Arc::clone(&tool.tool))
+        else {
+            let output = ToolOutput::Err(format!("unknown tool '{}'", call.name));
+            self.finish_tool(call, output);
+            return;
+        };
+
+        self.running_tool = Some(RunningTool {
+            call: call.clone(),
+            future: tool.call(call.arguments),
+        });
+    }
+
+    fn finish_tool(&mut self, call: ToolCall, output: ToolOutput) {
+        self.pending_history
+            .push(Message::tool(call.id.clone(), output.content()));
+        self.ready.push_back(QueuedEvent::Event(Event::ToolResult {
+            id: call.id,
+            name: call.name,
+            output,
+        }));
+    }
+
+    fn fail(&mut self, error: Error) {
+        self.provider_stream = None;
+        self.running_tool = None;
+        self.tool_to_start = None;
+        self.continue_after_tools = false;
+        self.ready.push_back(QueuedEvent::Error(error));
+    }
+
+    fn commit(&mut self) {
+        if let Some(history) = self.session_history.as_mut() {
+            **history = self.pending_history.clone();
+        }
+        self.session_history = None;
     }
 }
 
@@ -36,11 +247,186 @@ impl std::fmt::Debug for EventStream<'_> {
     }
 }
 
+impl Unpin for EventStream<'_> {}
+
 impl Stream for EventStream<'_> {
     type Item = Result<Event>;
 
-    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(self.pending.take())
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        loop {
+            if let Some(event) = this.ready.pop_front() {
+                return match event {
+                    QueuedEvent::Event(event) => Poll::Ready(Some(Ok(event))),
+                    QueuedEvent::Error(error) => {
+                        this.finished = true;
+                        Poll::Ready(Some(Err(error)))
+                    }
+                    QueuedEvent::Done(finish_reason) => {
+                        this.commit();
+                        this.finished = true;
+                        Poll::Ready(Some(Ok(Event::Done { finish_reason })))
+                    }
+                };
+            }
+
+            if this.finished {
+                return Poll::Ready(None);
+            }
+
+            if let Some(call) = this.tool_to_start.take() {
+                this.start_tool(call);
+                continue;
+            }
+
+            if let Some(running_tool) = this.running_tool.as_mut() {
+                match running_tool.future.as_mut().poll(cx) {
+                    Poll::Ready(output) => {
+                        let running_tool = this
+                            .running_tool
+                            .take()
+                            .expect("running tool exists while it is being polled");
+                        this.finish_tool(running_tool.call, ToolOutput::from_result(output));
+                        continue;
+                    }
+                    Poll::Pending => return Poll::Pending,
+                }
+            }
+
+            if this.continue_after_tools {
+                if this.next_tool_index < this.tool_calls.len() {
+                    this.queue_next_tool_call();
+                    continue;
+                }
+
+                this.continue_after_tools = false;
+                this.tool_calls.clear();
+                this.start_provider_turn();
+                continue;
+            }
+
+            let Some(provider_stream) = this.provider_stream.as_mut() else {
+                this.finished = true;
+                return Poll::Ready(None);
+            };
+
+            match provider_stream.as_mut().poll_next(cx) {
+                Poll::Ready(Some(Ok(event))) => {
+                    this.handle_raw_event(event);
+                    continue;
+                }
+                Poll::Ready(Some(Err(error))) => {
+                    this.fail(error);
+                    continue;
+                }
+                Poll::Ready(None) => {
+                    this.fail(unexpected_provider_eof());
+                    continue;
+                }
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
+}
+
+pub(crate) struct StreamTool {
+    pub(crate) tool: Arc<dyn Tool>,
+    pub(crate) schema: ToolSchema,
+}
+
+struct RunningTool {
+    call: ToolCall,
+    future: BoxFuture<'static, std::result::Result<String, String>>,
+}
+
+enum QueuedEvent {
+    Event(Event),
+    Error(Error),
+    Done(FinishReason),
+}
+
+#[derive(Default)]
+struct AssistantTurn {
+    content: String,
+    reasoning_content: String,
+    tool_calls: BTreeMap<u32, ToolCallBuilder>,
+}
+
+impl AssistantTurn {
+    fn push_tool_call_fragment(
+        &mut self,
+        index: u32,
+        id: Option<String>,
+        name: Option<String>,
+        arguments: String,
+    ) {
+        let call = self.tool_calls.entry(index).or_default();
+        if call.id.is_none() {
+            call.id = id;
+        }
+        if call.name.is_none() {
+            call.name = name;
+        }
+        call.arguments.push_str(&arguments);
+    }
+
+    fn tool_calls(&self) -> Result<Vec<ToolCall>> {
+        self.tool_calls
+            .iter()
+            .map(|(index, call)| {
+                let id = call
+                    .id
+                    .clone()
+                    .ok_or_else(|| missing_tool_field(*index, "id"))?;
+                let name = call
+                    .name
+                    .clone()
+                    .ok_or_else(|| missing_tool_field(*index, "name"))?;
+                Ok(ToolCall::new(id, name, call.arguments.clone()))
+            })
+            .collect()
+    }
+}
+
+#[derive(Default)]
+struct ToolCallBuilder {
+    id: Option<String>,
+    name: Option<String>,
+    arguments: String,
+}
+
+fn non_empty_string(value: &str) -> Option<String> {
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+fn missing_tool_field(index: u32, field: &str) -> Error {
+    Error::Decode {
+        context: format!("assembling tool call {index}"),
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("missing tool call {field}"),
+        )),
+    }
+}
+
+fn missing_tool_calls() -> Error {
+    Error::Decode {
+        context: "assembling tool calls".to_owned(),
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "provider finished with tool_calls but emitted no tool calls",
+        )),
+    }
+}
+
+fn unexpected_provider_eof() -> Error {
+    Error::Decode {
+        context: "reading provider stream".to_owned(),
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "provider stream ended before RawEvent::Done",
+        )),
     }
 }
 

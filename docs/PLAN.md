@@ -85,6 +85,8 @@ Done when:
 
 ## Phase 4: EventStream and provider-agnostic agent loop
 
+Status: Complete.
+
 Build:
 
 - Implement `Event`, `EventStream<'_>`, and the full `Session::send` state machine.

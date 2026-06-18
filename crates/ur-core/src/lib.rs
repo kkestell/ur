@@ -15,7 +15,8 @@ pub use schemars::JsonSchema;
 pub use serde_json::{Error as JsonError, Value as JsonValue};
 
 pub use event::EventStream;
-use provider::{Message, ModelNotice, ModelSpec, Provider, Request, Settings};
+use event::StreamTool;
+use provider::{Message, ModelNotice, ModelSpec, Provider, Settings};
 use tool::{Tool, ToolSchema};
 
 /// A boxed, sendable future returned by asynchronous extension points.
@@ -334,13 +335,34 @@ impl<P: Provider> Session<P> {
     /// Sends a user turn and returns its event stream.
     pub fn send(&mut self, message: impl Into<UserMessage>) -> EventStream<'_> {
         let message = message.into();
-        let request = match self.request_for(&message) {
-            Ok(request) => request,
+        let tool_schemas = match self.agent.tool_schemas() {
+            Ok(tool_schemas) => tool_schemas,
             Err(error) => return EventStream::from_error(error),
         };
+        if let Err(error) = self.agent.model.validate_settings() {
+            return EventStream::from_error(error);
+        }
 
-        let _stream = self.agent.model.provider.chat(&request);
-        EventStream::empty()
+        let provider: Arc<dyn Provider> = self.agent.model.provider.clone();
+        let tools = self
+            .agent
+            .tools
+            .iter()
+            .map(|registered| StreamTool {
+                tool: Arc::clone(&registered.tool),
+                schema: registered.schema.clone(),
+            })
+            .collect();
+
+        EventStream::new(
+            &mut self.history,
+            provider,
+            self.agent.model.id.clone(),
+            tools,
+            tool_schemas,
+            self.agent.model.settings.clone(),
+            message,
+        )
     }
 
     /// Returns the accumulated complete conversation history.
@@ -351,21 +373,6 @@ impl<P: Provider> Session<P> {
     /// Drops every turn after the system prompt.
     pub fn reset(&mut self) {
         self.history.truncate(1);
-    }
-
-    fn request_for(&self, message: &UserMessage) -> Result<Request> {
-        self.agent.model.validate_settings()?;
-        let tools = self.agent.tool_schemas()?;
-
-        let mut messages = self.history.clone();
-        messages.push(Message::user(message.as_str()));
-
-        Ok(Request {
-            model: self.agent.model.id.clone(),
-            messages,
-            tools,
-            settings: self.agent.model.settings.clone(),
-        })
     }
 }
 
@@ -430,7 +437,8 @@ impl From<String> for UserMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::RawEvent;
+    use crate::provider::{RawEvent, Request};
+    use std::collections::VecDeque;
     use std::error::Error as StdError;
     use std::hash::Hash;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -445,6 +453,7 @@ mod tests {
         notice_calls: AtomicUsize,
         chat_calls: AtomicUsize,
         requests: Mutex<Vec<Request>>,
+        responses: Mutex<VecDeque<Vec<Result<RawEvent>>>>,
     }
 
     struct FakeProvider {
@@ -455,13 +464,28 @@ mod tests {
         fn new(state: Arc<FakeProviderState>) -> Self {
             Self { state }
         }
+
+        fn with_responses(
+            state: Arc<FakeProviderState>,
+            responses: impl IntoIterator<Item = Vec<Result<RawEvent>>>,
+        ) -> Self {
+            *state.responses.lock().unwrap() = responses.into_iter().collect();
+            Self { state }
+        }
     }
 
     impl Provider for FakeProvider {
         fn chat(&self, request: &Request) -> BoxStream<'static, Result<RawEvent>> {
             self.state.chat_calls.fetch_add(1, Ordering::Relaxed);
             self.state.requests.lock().unwrap().push(request.clone());
-            Box::pin(futures_util::stream::empty())
+            let events = self
+                .state
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| vec![Ok(done_event())]);
+            Box::pin(futures_util::stream::iter(events))
         }
 
         fn model_spec(&self, model_id: &str) -> Option<ModelSpec> {
@@ -498,6 +522,66 @@ mod tests {
         }
     }
 
+    struct RecordingTool {
+        name: &'static str,
+        output: std::result::Result<String, String>,
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Tool for RecordingTool {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn schema(&self) -> ToolSchema {
+            ToolSchema::new(self.name, serde_json::json!({ "type": "object" }))
+        }
+
+        fn call(
+            &self,
+            args: tool::ToolArguments,
+        ) -> BoxFuture<'static, std::result::Result<String, String>> {
+            let calls = Arc::clone(&self.calls);
+            let name = self.name.to_owned();
+            let output = self.output.clone();
+            Box::pin(async move {
+                calls.lock().unwrap().push(format!("{name}:{args}"));
+                output
+            })
+        }
+    }
+
+    struct ParsingTool {
+        calls: Arc<Mutex<Vec<u32>>>,
+    }
+
+    impl Tool for ParsingTool {
+        fn name(&self) -> &str {
+            "parse"
+        }
+
+        fn schema(&self) -> ToolSchema {
+            ToolSchema::new("parse", serde_json::json!({ "type": "object" }))
+        }
+
+        fn call(
+            &self,
+            args: tool::ToolArguments,
+        ) -> BoxFuture<'static, std::result::Result<String, String>> {
+            let calls = Arc::clone(&self.calls);
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Args {
+                    n: u32,
+                }
+
+                let args = args.parse::<Args>().map_err(|error| error.to_string())?;
+                calls.lock().unwrap().push(args.n);
+                Ok(serde_json::to_string(&args.n).expect("u32 serializes"))
+            })
+        }
+    }
+
     struct WarningCounter {
         warnings: Arc<AtomicUsize>,
     }
@@ -529,8 +613,47 @@ mod tests {
     fn next_event(stream: &mut EventStream<'_>) -> Option<Result<event::Event>> {
         match poll_event_stream(stream) {
             Poll::Ready(event) => event,
-            Poll::Pending => panic!("phase 3 event stream should not pend"),
+            Poll::Pending => panic!("test event stream should not pend"),
         }
+    }
+
+    fn done_event() -> RawEvent {
+        RawEvent::Done {
+            finish_reason: event::FinishReason::Stop,
+            usage: None,
+        }
+    }
+
+    fn assert_done(stream: &mut EventStream<'_>) {
+        match next_event(stream) {
+            Some(Ok(event::Event::Done {
+                finish_reason: event::FinishReason::Stop,
+            })) => {}
+            other => panic!("expected terminal stop event, got {other:?}"),
+        }
+        assert!(next_event(stream).is_none());
+    }
+
+    fn ok_response(events: impl IntoIterator<Item = RawEvent>) -> Vec<Result<RawEvent>> {
+        events.into_iter().map(Ok).collect()
+    }
+
+    fn usage(total_tokens: u32) -> event::Usage {
+        event::Usage {
+            prompt_tokens: total_tokens / 2,
+            completion_tokens: total_tokens / 2,
+            total_tokens,
+            cached_prompt_tokens: None,
+            reasoning_tokens: None,
+        }
+    }
+
+    fn drain_ok(stream: &mut EventStream<'_>) -> Vec<event::Event> {
+        let mut events = Vec::new();
+        while let Some(event) = next_event(stream) {
+            events.push(event.expect("stream should yield only ok events"));
+        }
+        events
     }
 
     fn assert_config_error(stream: &mut EventStream<'_>, expected: &str) {
@@ -661,7 +784,7 @@ mod tests {
         let mut session = agent.session();
         let mut stream = session.send("hello");
 
-        assert!(next_event(&mut stream).is_none());
+        assert_done(&mut stream);
         assert_eq!(state.chat_calls.load(Ordering::Relaxed), 1);
         assert_eq!(state.spec_calls.load(Ordering::Relaxed), 1);
         assert_eq!(state.notice_calls.load(Ordering::Relaxed), 1);
@@ -722,7 +845,7 @@ mod tests {
         let mut session = Agent::new("system", model).session();
         let mut stream = session.send("hello");
 
-        assert!(next_event(&mut stream).is_none());
+        assert_done(&mut stream);
         assert_eq!(state.chat_calls.load(Ordering::Relaxed), 1);
     }
 
@@ -740,7 +863,7 @@ mod tests {
         let mut session = Agent::new("system", model).session();
         let mut stream = session.send("hello");
 
-        assert!(next_event(&mut stream).is_none());
+        assert_done(&mut stream);
 
         let requests = state.requests.lock().unwrap();
         let request = requests.last().unwrap();
@@ -801,7 +924,7 @@ mod tests {
         assert_eq!(session.history()[0].content(), Some("system"));
 
         let mut stream = session.send("new");
-        assert!(next_event(&mut stream).is_none());
+        assert_done(&mut stream);
 
         let requests = state.requests.lock().unwrap();
         let request = requests.last().unwrap();
@@ -819,7 +942,7 @@ mod tests {
         let mut session = agent.session();
         let mut stream = session.send("hello");
 
-        assert!(next_event(&mut stream).is_none());
+        assert_done(&mut stream);
 
         let requests = state.requests.lock().unwrap();
         let request = requests.last().unwrap();
@@ -866,6 +989,543 @@ mod tests {
         let mut invalid_stream = invalid_session.send("hello");
         assert_config_error(&mut invalid_stream, "invalid tool name");
         assert_eq!(invalid_state.chat_calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn tool_round_events_are_ordered_and_done_is_terminal() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [
+                    ok_response([
+                        RawEvent::TextDelta("calling ".to_owned()),
+                        RawEvent::ReasoningDelta("need tool".to_owned()),
+                        RawEvent::ToolCallDelta {
+                            index: 0,
+                            id: Some("call-1".to_owned()),
+                            name: Some("add".to_owned()),
+                            arguments: r#"{"a":"#.to_owned(),
+                        },
+                        RawEvent::ToolCallDelta {
+                            index: 0,
+                            id: None,
+                            name: None,
+                            arguments: "1}".to_owned(),
+                        },
+                        RawEvent::Done {
+                            finish_reason: event::FinishReason::ToolCalls,
+                            usage: Some(usage(10)),
+                        },
+                    ]),
+                    ok_response([
+                        RawEvent::TextDelta("done".to_owned()),
+                        RawEvent::Done {
+                            finish_reason: event::FinishReason::Stop,
+                            usage: Some(usage(12)),
+                        },
+                    ]),
+                ],
+            ),
+            "known",
+        );
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let agent = Agent::new("system", model).tool(RecordingTool {
+            name: "add",
+            output: Ok("1".to_owned()),
+            calls: Arc::clone(&calls),
+        });
+        let mut session = agent.session();
+
+        let mut stream = session.send("use a tool");
+        let events = drain_ok(&mut stream);
+        drop(stream);
+
+        assert_eq!(
+            events,
+            vec![
+                event::Event::TextDelta {
+                    delta: "calling ".to_owned()
+                },
+                event::Event::ReasoningDelta {
+                    delta: "need tool".to_owned()
+                },
+                event::Event::Usage { usage: usage(10) },
+                event::Event::ToolCall {
+                    id: "call-1".to_owned(),
+                    name: "add".to_owned(),
+                    arguments: r#"{"a":1}"#.into(),
+                },
+                event::Event::ToolResult {
+                    id: "call-1".to_owned(),
+                    name: "add".to_owned(),
+                    output: event::ToolOutput::Ok("1".to_owned()),
+                },
+                event::Event::TextDelta {
+                    delta: "done".to_owned()
+                },
+                event::Event::Usage { usage: usage(12) },
+                event::Event::Done {
+                    finish_reason: event::FinishReason::Stop,
+                },
+            ]
+        );
+        assert_eq!(*calls.lock().unwrap(), vec![r#"add:{"a":1}"#]);
+
+        let requests = state.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1].messages.len(), 4);
+        assert_eq!(
+            requests[1].messages[2].role(),
+            provider::MessageRole::Assistant
+        );
+        assert_eq!(requests[1].messages[2].content(), Some("calling "));
+        assert_eq!(
+            requests[1].messages[2].reasoning_content(),
+            Some("need tool")
+        );
+        assert_eq!(requests[1].messages[2].tool_calls().len(), 1);
+        assert_eq!(requests[1].messages[3].role(), provider::MessageRole::Tool);
+        assert_eq!(requests[1].messages[3].tool_call_id(), Some("call-1"));
+        assert_eq!(requests[1].messages[3].content(), Some("1"));
+
+        assert_eq!(session.history().len(), 5);
+        assert_eq!(session.history()[2].reasoning_content(), Some("need tool"));
+        assert_eq!(session.history()[3].tool_call_id(), Some("call-1"));
+        assert_eq!(session.history()[4].content(), Some("done"));
+    }
+
+    #[test]
+    fn multiple_tool_calls_run_sequentially_by_index() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [
+                    ok_response([
+                        RawEvent::ToolCallDelta {
+                            index: 1,
+                            id: Some("call-2".to_owned()),
+                            name: Some("second".to_owned()),
+                            arguments: "{}".to_owned(),
+                        },
+                        RawEvent::ToolCallDelta {
+                            index: 0,
+                            id: Some("call-1".to_owned()),
+                            name: Some("first".to_owned()),
+                            arguments: r#"{"x":"#.to_owned(),
+                        },
+                        RawEvent::ToolCallDelta {
+                            index: 0,
+                            id: None,
+                            name: None,
+                            arguments: "1}".to_owned(),
+                        },
+                        RawEvent::Done {
+                            finish_reason: event::FinishReason::ToolCalls,
+                            usage: None,
+                        },
+                    ]),
+                    ok_response([done_event()]),
+                ],
+            ),
+            "known",
+        );
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let agent = Agent::new("system", model)
+            .tool(RecordingTool {
+                name: "first",
+                output: Ok(r#""one""#.to_owned()),
+                calls: Arc::clone(&calls),
+            })
+            .tool(RecordingTool {
+                name: "second",
+                output: Ok(r#""two""#.to_owned()),
+                calls: Arc::clone(&calls),
+            });
+        let mut session = agent.session();
+
+        let mut stream = session.send("run both");
+        let events = drain_ok(&mut stream);
+        drop(stream);
+
+        let tool_events = events
+            .iter()
+            .filter_map(|event| match event {
+                event::Event::ToolCall { id, .. } => Some(format!("call:{id}")),
+                event::Event::ToolResult { id, output, .. } => {
+                    Some(format!("result:{id}:{}", output.content()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tool_events,
+            [
+                "call:call-1",
+                "result:call-1:\"one\"",
+                "call:call-2",
+                "result:call-2:\"two\""
+            ]
+        );
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![r#"first:{"x":1}"#, "second:{}"]
+        );
+        assert_eq!(session.history()[3].tool_call_id(), Some("call-1"));
+        assert_eq!(session.history()[3].content(), Some(r#""one""#));
+        assert_eq!(session.history()[4].tool_call_id(), Some("call-2"));
+        assert_eq!(session.history()[4].content(), Some(r#""two""#));
+    }
+
+    #[test]
+    fn unknown_tool_appends_error_result_and_continues() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [
+                    ok_response([
+                        RawEvent::ToolCallDelta {
+                            index: 0,
+                            id: Some("missing-1".to_owned()),
+                            name: Some("missing".to_owned()),
+                            arguments: "{}".to_owned(),
+                        },
+                        RawEvent::Done {
+                            finish_reason: event::FinishReason::ToolCalls,
+                            usage: None,
+                        },
+                    ]),
+                    ok_response([RawEvent::TextDelta("retried".to_owned()), done_event()]),
+                ],
+            ),
+            "known",
+        );
+        let mut session = Agent::new("system", model).session();
+
+        let mut stream = session.send("use missing tool");
+        let events = drain_ok(&mut stream);
+        drop(stream);
+
+        let output = events
+            .iter()
+            .find_map(|event| match event {
+                event::Event::ToolResult { output, .. } => Some(output),
+                _ => None,
+            })
+            .expect("tool result is emitted");
+        assert!(matches!(output, event::ToolOutput::Err(_)));
+        assert!(output.content().contains("unknown tool 'missing'"));
+        assert_eq!(session.history()[3].content(), Some(output.content()));
+        assert_eq!(session.history()[4].content(), Some("retried"));
+    }
+
+    #[test]
+    fn malformed_tool_arguments_are_tool_errors_not_turn_errors() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [
+                    ok_response([
+                        RawEvent::ToolCallDelta {
+                            index: 0,
+                            id: Some("parse-1".to_owned()),
+                            name: Some("parse".to_owned()),
+                            arguments: "not json".to_owned(),
+                        },
+                        RawEvent::Done {
+                            finish_reason: event::FinishReason::ToolCalls,
+                            usage: None,
+                        },
+                    ]),
+                    ok_response([RawEvent::TextDelta("retry ok".to_owned()), done_event()]),
+                ],
+            ),
+            "known",
+        );
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut session = Agent::new("system", model)
+            .tool(ParsingTool {
+                calls: Arc::clone(&calls),
+            })
+            .session();
+
+        let mut stream = session.send("parse this");
+        let events = drain_ok(&mut stream);
+        drop(stream);
+
+        let output = events
+            .iter()
+            .find_map(|event| match event {
+                event::Event::ToolResult { output, .. } => Some(output),
+                _ => None,
+            })
+            .expect("tool result is emitted");
+        assert!(matches!(output, event::ToolOutput::Err(_)));
+        assert!(calls.lock().unwrap().is_empty());
+        assert_eq!(session.history()[3].tool_call_id(), Some("parse-1"));
+        assert_eq!(session.history()[3].content(), Some(output.content()));
+        assert_eq!(session.history()[4].content(), Some("retry ok"));
+    }
+
+    #[test]
+    fn provider_error_rolls_back_pending_turn() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [vec![
+                    Ok(RawEvent::TextDelta("partial".to_owned())),
+                    Err(Error::Server {
+                        status: 500,
+                        message: "down".to_owned(),
+                    }),
+                ]],
+            ),
+            "known",
+        );
+        let mut session = Agent::new("system", model).session();
+        let before = session.history().to_vec();
+
+        let mut stream = session.send("hello");
+        assert_eq!(
+            next_event(&mut stream).unwrap().unwrap(),
+            event::Event::TextDelta {
+                delta: "partial".to_owned()
+            }
+        );
+        match next_event(&mut stream) {
+            Some(Err(Error::Server { status: 500, .. })) => {}
+            other => panic!("expected provider error, got {other:?}"),
+        }
+        drop(stream);
+
+        assert_eq!(session.history(), before.as_slice());
+    }
+
+    #[test]
+    fn tool_calls_finish_with_no_calls_errors_and_rolls_back() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [ok_response([RawEvent::Done {
+                    finish_reason: event::FinishReason::ToolCalls,
+                    usage: None,
+                }])],
+            ),
+            "known",
+        );
+        let mut session = Agent::new("system", model).session();
+        let before = session.history().to_vec();
+
+        let mut stream = session.send("bad provider");
+        match next_event(&mut stream) {
+            Some(Err(Error::Decode { context, source })) => {
+                assert_eq!(context, "assembling tool calls");
+                assert!(source.to_string().contains("emitted no tool calls"));
+            }
+            other => panic!("expected decode error, got {other:?}"),
+        }
+        drop(stream);
+
+        assert_eq!(session.history(), before.as_slice());
+        assert_eq!(state.chat_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn provider_error_after_tool_result_rolls_back_whole_turn() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [
+                    ok_response([
+                        RawEvent::ToolCallDelta {
+                            index: 0,
+                            id: Some("call-1".to_owned()),
+                            name: Some("add".to_owned()),
+                            arguments: "{}".to_owned(),
+                        },
+                        RawEvent::Done {
+                            finish_reason: event::FinishReason::ToolCalls,
+                            usage: None,
+                        },
+                    ]),
+                    vec![
+                        Ok(RawEvent::TextDelta("partial retry".to_owned())),
+                        Err(Error::Server {
+                            status: 502,
+                            message: "retry failed".to_owned(),
+                        }),
+                    ],
+                ],
+            ),
+            "known",
+        );
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut session = Agent::new("system", model)
+            .tool(RecordingTool {
+                name: "add",
+                output: Ok("1".to_owned()),
+                calls,
+            })
+            .session();
+        let before = session.history().to_vec();
+
+        let mut stream = session.send("tool then fail");
+        assert!(matches!(
+            next_event(&mut stream),
+            Some(Ok(event::Event::ToolCall { .. }))
+        ));
+        assert!(matches!(
+            next_event(&mut stream),
+            Some(Ok(event::Event::ToolResult { .. }))
+        ));
+        assert_eq!(
+            next_event(&mut stream).unwrap().unwrap(),
+            event::Event::TextDelta {
+                delta: "partial retry".to_owned()
+            }
+        );
+        match next_event(&mut stream) {
+            Some(Err(Error::Server { status: 502, .. })) => {}
+            other => panic!("expected provider error, got {other:?}"),
+        }
+        drop(stream);
+
+        assert_eq!(session.history(), before.as_slice());
+    }
+
+    #[test]
+    fn dropping_stream_before_done_rolls_back_pending_turn() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [ok_response([
+                    RawEvent::TextDelta("partial".to_owned()),
+                    done_event(),
+                ])],
+            ),
+            "known",
+        );
+        let mut session = Agent::new("system", model).session();
+        let before = session.history().to_vec();
+
+        let mut stream = session.send("hello");
+        assert_eq!(
+            next_event(&mut stream).unwrap().unwrap(),
+            event::Event::TextDelta {
+                delta: "partial".to_owned()
+            }
+        );
+        drop(stream);
+
+        assert_eq!(session.history(), before.as_slice());
+    }
+
+    #[test]
+    fn dropping_stream_after_tool_result_rolls_back_whole_turn() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [
+                    ok_response([
+                        RawEvent::ToolCallDelta {
+                            index: 0,
+                            id: Some("call-1".to_owned()),
+                            name: Some("add".to_owned()),
+                            arguments: "{}".to_owned(),
+                        },
+                        RawEvent::Done {
+                            finish_reason: event::FinishReason::ToolCalls,
+                            usage: None,
+                        },
+                    ]),
+                    ok_response([
+                        RawEvent::TextDelta("partial retry".to_owned()),
+                        done_event(),
+                    ]),
+                ],
+            ),
+            "known",
+        );
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut session = Agent::new("system", model)
+            .tool(RecordingTool {
+                name: "add",
+                output: Ok("1".to_owned()),
+                calls,
+            })
+            .session();
+        let before = session.history().to_vec();
+
+        let mut stream = session.send("tool then drop");
+        assert!(matches!(
+            next_event(&mut stream),
+            Some(Ok(event::Event::ToolCall { .. }))
+        ));
+        assert!(matches!(
+            next_event(&mut stream),
+            Some(Ok(event::Event::ToolResult { .. }))
+        ));
+        assert_eq!(
+            next_event(&mut stream).unwrap().unwrap(),
+            event::Event::TextDelta {
+                delta: "partial retry".to_owned()
+            }
+        );
+        drop(stream);
+
+        assert_eq!(session.history(), before.as_slice());
+    }
+
+    #[test]
+    fn complete_turn_commits_user_assistant_and_reasoning_atomically() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [ok_response([
+                    RawEvent::ReasoningDelta("because".to_owned()),
+                    RawEvent::TextDelta("answer".to_owned()),
+                    done_event(),
+                ])],
+            ),
+            "known",
+        );
+        let mut session = Agent::new("system", model).session();
+
+        let mut stream = session.send("hello");
+        assert_eq!(
+            drain_ok(&mut stream),
+            vec![
+                event::Event::ReasoningDelta {
+                    delta: "because".to_owned()
+                },
+                event::Event::TextDelta {
+                    delta: "answer".to_owned()
+                },
+                event::Event::Done {
+                    finish_reason: event::FinishReason::Stop
+                }
+            ]
+        );
+        drop(stream);
+
+        assert_eq!(session.history().len(), 3);
+        assert_eq!(session.history()[1].role(), provider::MessageRole::User);
+        assert_eq!(session.history()[1].content(), Some("hello"));
+        assert_eq!(
+            session.history()[2].role(),
+            provider::MessageRole::Assistant
+        );
+        assert_eq!(session.history()[2].content(), Some("answer"));
+        assert_eq!(session.history()[2].reasoning_content(), Some("because"));
     }
 
     #[test]
