@@ -1,0 +1,5 @@
+error: `#[ur::tool]` parameters must be simple `name: Type` bindings
+ --> tests/ui/bad_argument_pattern.rs:4:14
+  |
+4 | async fn add((a, b): (i64, i64)) -> i64 {
+  |              ^^^^^^

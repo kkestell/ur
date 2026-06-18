@@ -1,0 +1,5 @@
+error: `#[ur::tool]` does not support generic functions
+ --> tests/ui/unsupported_signature.rs:4:13
+  |
+4 | async fn add<T>(a: T) -> i64 {
+  |             ^^^

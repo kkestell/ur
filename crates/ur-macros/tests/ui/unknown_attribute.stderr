@@ -1,0 +1,5 @@
+error: unknown `#[ur::tool]` attribute `nonsense`; expected `description`, `name`, or a parameter name
+ --> tests/ui/unknown_attribute.rs:3:8
+  |
+3 | #[tool(nonsense = "x")]
+  |        ^^^^^^^^

@@ -110,6 +110,8 @@ Done when:
 
 ## Phase 5: `#[ur::tool]` macro
 
+Status: Complete.
+
 Build:
 
 - Implement the `ur-macros` attribute macro for async and sync functions.

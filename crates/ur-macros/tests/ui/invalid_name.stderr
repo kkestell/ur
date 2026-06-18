@@ -1,0 +1,5 @@
+error: tool name must match `[a-zA-Z0-9_-]{1,64}`
+ --> tests/ui/invalid_name.rs:3:15
+  |
+3 | #[tool(name = "bad name")]
+  |               ^^^^^^^^^^

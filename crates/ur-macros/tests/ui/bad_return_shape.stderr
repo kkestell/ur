@@ -1,0 +1,5 @@
+error: `#[ur::tool]` does not support `impl Trait` return types
+ --> tests/ui/bad_return_shape.rs:4:20
+  |
+4 | async fn make() -> impl std::fmt::Debug {
+  |                    ^^^^^^^^^^^^^^^^^^^^
