@@ -1346,7 +1346,10 @@ dependencies = [
 name = "ur-deepseek"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "reqwest",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "ur-core",

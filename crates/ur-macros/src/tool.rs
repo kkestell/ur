@@ -71,13 +71,13 @@ fn validate_signature(sig: &Signature) -> syn::Result<()> {
             "`#[ur::tool]` does not support variadic functions",
         ));
     }
-    if let ReturnType::Type(_, ty) = &sig.output {
-        if matches!(**ty, Type::ImplTrait(_)) {
-            return Err(syn::Error::new_spanned(
-                ty,
-                "`#[ur::tool]` does not support `impl Trait` return types",
-            ));
-        }
+    if let ReturnType::Type(_, ty) = &sig.output
+        && matches!(**ty, Type::ImplTrait(_))
+    {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "`#[ur::tool]` does not support `impl Trait` return types",
+        ));
     }
     Ok(())
 }
@@ -183,12 +183,11 @@ fn is_valid_tool_name(name: &str) -> bool {
 
 /// Returns whether the return type is a `Result`, requiring error stringification.
 fn returns_result(output: &ReturnType) -> bool {
-    if let ReturnType::Type(_, ty) = output {
-        if let Type::Path(tp) = &**ty {
-            if let Some(seg) = tp.path.segments.last() {
-                return seg.ident == "Result";
-            }
-        }
+    if let ReturnType::Type(_, ty) = output
+        && let Type::Path(tp) = &**ty
+        && let Some(seg) = tp.path.segments.last()
+    {
+        return seg.ident == "Result";
     }
     false
 }

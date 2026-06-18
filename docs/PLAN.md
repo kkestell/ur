@@ -7,7 +7,7 @@ This plan implements the public contract in `API.md` and the DeepSeek-specific c
 The project is complete when all of these hold:
 
 - `cargo test --workspace --all-features` passes.
-- `cargo +1.85 test --workspace --all-features` passes, proving the documented MSRV still builds as dependencies drift.
+- `cargo +1.88 test --workspace --all-features` passes, proving the documented MSRV still builds as dependencies drift.
 - `cargo clippy --workspace --all-features --all-targets -- -D warnings` passes.
 - `cargo fmt --all --check` passes.
 - `cargo doc --workspace --all-features --no-deps` builds without public API breakage or broken intra-doc links.
@@ -23,7 +23,7 @@ Status: Complete.
 Build:
 
 - Create the Cargo workspace with crates `ur`, `ur-core`, `ur-macros`, and `ur-deepseek`.
-- Configure edition 2024, MSRV 1.85, license metadata, feature wiring, and default features as documented.
+- Configure edition 2024, MSRV 1.88, license metadata, feature wiring, and default features as documented.
 - Add shared dependencies only where needed: `futures-core`, `futures-util` for tests/examples, `serde`, `serde_json`, `schemars`, `tracing`, `thiserror` or handwritten errors, `proc-macro2`/`quote`/`syn`, `reqwest`, `tokio`, and an HTTP mocking crate for provider tests. Keep runtime and HTTP dependencies out of `ur-core`; `tokio`, `reqwest`, and HTTP mocks belong only in provider crates, integration tests, or examples.
 - Add baseline CI-friendly commands through docs or scripts if desired, but do not require custom tooling to run the standard checks.
 
@@ -150,6 +150,8 @@ Done when:
 - Public signatures use `ur::BoxFuture`, `ur::BoxStream`, `ur::JsonSchema`, `ur::JsonValue`, and `ur::JsonError` where the spec says callers should see those names.
 
 ## Phase 7: DeepSeek client, catalog, and request encoding
+
+Status: Complete.
 
 Build:
 

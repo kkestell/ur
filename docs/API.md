@@ -4,7 +4,7 @@
 
 This document is self-contained for the provider-agnostic surface: it specifies every public item of `ur`, `ur-core`, and `ur-macros`, the `#[ur::tool]` macro contract, the agent loop semantics, and the `Provider` seam that backends implement. It deliberately says nothing about any concrete provider's wire format, models, or runtime behavior; that belongs in each provider crate's own documentation.
 
-- Edition: 2024 (Rust 1.85+). MSRV: 1.85.
+- Edition: 2024 (Rust 1.88+). MSRV: 1.88.
 - Async runtime: agnostic at the type level. A concrete provider may impose a runtime requirement (for example, an HTTP provider built on `reqwest` requires a Tokio reactor at run time).
 
 ---
@@ -58,7 +58,7 @@ With no provider feature at all, `ur` still compiles and exposes the full agent/
 [package]
 name = "ur"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "Async tool-using LLM agents over a pluggable provider backend"
 license = "MIT OR Apache-2.0"
 repository = "..."         # fill in

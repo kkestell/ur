@@ -1,55 +1,129 @@
-//! DeepSeek provider placeholder for `ur`.
+//! DeepSeek [`Provider`] implementation for `ur`.
+//!
+//! See `DEEPSEEK.md` for the wire mapping, generation-setting semantics, strict
+//! mode, and retry behavior this crate implements.
 
 #![forbid(unsafe_code)]
 
-use std::pin::Pin;
-use std::task::{Context, Poll};
+mod catalog;
+mod client;
+mod request;
 
-/// Placeholder DeepSeek client handle.
-#[derive(Clone, Debug, Default)]
-pub struct DeepSeekClient;
+pub use client::{DeepSeekClient, DeepSeekClientBuilder, DeepSeekHttpClient};
 
-impl ur_core::provider::Provider for DeepSeekClient {
-    fn chat(
-        &self,
-        _request: &ur_core::provider::Request,
-    ) -> ur_core::BoxStream<'static, ur_core::Result<ur_core::provider::RawEvent>> {
-        Box::pin(PlaceholderStream { done: false })
-    }
+use ur_core::event::FinishReason;
+use ur_core::provider::{ModelNotice, ModelSpec, Provider, RawEvent, Request};
+use ur_core::{BoxStream, Result};
 
-    fn model_spec(&self, _model_id: &str) -> Option<ur_core::provider::ModelSpec> {
-        None
-    }
-}
-
-struct PlaceholderStream {
-    done: bool,
-}
-
-impl ur_core::Stream for PlaceholderStream {
-    type Item = ur_core::Result<ur_core::provider::RawEvent>;
-
-    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.done {
-            return Poll::Ready(None);
+impl Provider for DeepSeekClient {
+    fn chat(&self, request: &Request) -> BoxStream<'static, Result<RawEvent>> {
+        let config = self.config();
+        match request::encode(request, config.user_id.as_deref(), config.is_beta()) {
+            Ok(_body) => Box::pin(futures_util::stream::once(async {
+                Ok(RawEvent::Done {
+                    finish_reason: FinishReason::Stop,
+                    usage: None,
+                })
+            })),
+            Err(error) => Box::pin(futures_util::stream::once(async move { Err(error) })),
         }
+    }
 
-        self.done = true;
-        Poll::Ready(Some(Ok(ur_core::provider::RawEvent::Done {
-            finish_reason: ur_core::event::FinishReason::Stop,
-            usage: None,
-        })))
+    fn model_spec(&self, model_id: &str) -> Option<ModelSpec> {
+        catalog::model_spec(model_id)
+    }
+
+    fn model_notice(&self, model_id: &str) -> Option<ModelNotice> {
+        catalog::model_notice(model_id)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tracing::span::{Attributes, Record};
+    use tracing::{Event as TracingEvent, Id, Level, Metadata, Subscriber};
+    use ur_core::Model;
 
     #[test]
     fn client_is_a_provider() {
-        fn assert_provider<P: ur_core::provider::Provider>() {}
+        fn assert_provider<P: Provider>() {}
 
         assert_provider::<DeepSeekClient>();
+    }
+
+    #[test]
+    fn catalog_lookups_are_silent_and_repeatable() {
+        let client = DeepSeekClient::new("key");
+
+        for _ in 0..3 {
+            assert_eq!(
+                client.model_spec("deepseek-v4-pro"),
+                Some(ModelSpec::new(1_000_000, 384_000))
+            );
+            assert!(matches!(
+                client.model_notice("deepseek-chat"),
+                Some(ModelNotice::Deprecated { .. })
+            ));
+            assert_eq!(client.model_spec("unknown"), None);
+            assert_eq!(client.model_notice("deepseek-v4-pro"), None);
+        }
+    }
+
+    struct WarningCounter {
+        warnings: Arc<AtomicUsize>,
+    }
+
+    impl Subscriber for WarningCounter {
+        fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
+            true
+        }
+
+        fn new_span(&self, _span: &Attributes<'_>) -> Id {
+            Id::from_u64(1)
+        }
+
+        fn record(&self, _span: &Id, _values: &Record<'_>) {}
+
+        fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
+
+        fn event(&self, event: &TracingEvent<'_>) {
+            if *event.metadata().level() == Level::WARN {
+                self.warnings.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        fn enter(&self, _span: &Id) {}
+
+        fn exit(&self, _span: &Id) {}
+    }
+
+    #[test]
+    fn legacy_models_warn_once_while_direct_lookups_stay_silent() {
+        let warnings = Arc::new(AtomicUsize::new(0));
+        let dispatch = tracing::Dispatch::new(WarningCounter {
+            warnings: Arc::clone(&warnings),
+        });
+
+        tracing::dispatcher::with_default(&dispatch, || {
+            let client = DeepSeekClient::new("key");
+
+            for id in ["deepseek-chat", "deepseek-reasoner"] {
+                let _ = client.model_spec(id);
+                let _ = client.model_notice(id);
+            }
+            assert_eq!(warnings.load(Ordering::Relaxed), 0);
+
+            let _ = Model::new(client.clone(), "deepseek-chat");
+            assert_eq!(warnings.load(Ordering::Relaxed), 1);
+
+            let _ = Model::new(client.clone(), "deepseek-reasoner");
+            assert_eq!(warnings.load(Ordering::Relaxed), 2);
+
+            let _ = Model::new(client, "deepseek-v4-pro");
+            assert_eq!(warnings.load(Ordering::Relaxed), 2);
+        });
     }
 }
