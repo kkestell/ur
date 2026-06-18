@@ -96,7 +96,7 @@ let model = ur::Model::new(provider, "deepseek-v4-pro")
     .max_tokens(4096)
     .temperature(0.7)
     .top_p(0.9)
-    .stop(["END"])
+    .stop(["END".to_owned()])
     .response_format(ur::ResponseFormat::JsonObject);
 ```
 
@@ -106,4 +106,4 @@ MSRV is Rust 1.88.
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option.
+Licensed under either of Apache License, Version 2.0 or MIT license at your option.
