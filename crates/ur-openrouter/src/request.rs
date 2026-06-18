@@ -1,15 +1,21 @@
-//! Encoding of a core [`Request`] into the OpenAI Chat Completions body.
+//! Encoding of a core [`Request`] into the OpenRouter Chat Completions body.
 
 use serde_json::{Map, Value, json};
 use ur_core::Error;
-use ur_core::model::{ReasoningEffort, ResponseFormat};
+use ur_core::model::{ReasoningEffort, ResponseFormat, Thinking};
 use ur_core::provider::{Message, MessageRole, Request, Settings};
 use ur_core::schema::strict_schema;
 use ur_core::tool::ToolSchema;
 
+use crate::client::ProviderRouting;
+
 const MAX_STOP_SEQUENCES: usize = 4;
 
-pub(crate) fn encode(request: &Request, user: Option<&str>) -> Result<Value, Error> {
+pub(crate) fn encode(
+    request: &Request,
+    user: Option<&str>,
+    provider_routing: Option<&ProviderRouting>,
+) -> Result<Value, Error> {
     let mut body = Map::new();
 
     body.insert("model".to_owned(), Value::String(request.model.clone()));
@@ -27,6 +33,10 @@ pub(crate) fn encode(request: &Request, user: Option<&str>) -> Result<Value, Err
         body.insert("tool_choice".to_owned(), Value::String("auto".to_owned()));
     }
 
+    if let Some(routing) = provider_routing {
+        encode_provider_routing(&mut body, routing);
+    }
+
     if let Some(user) = user {
         body.insert("user".to_owned(), Value::String(user.to_owned()));
     }
@@ -35,12 +45,7 @@ pub(crate) fn encode(request: &Request, user: Option<&str>) -> Result<Value, Err
 }
 
 fn encode_settings(body: &mut Map<String, Value>, settings: &Settings) -> Result<(), Error> {
-    if let Some(effort) = settings.reasoning_effort {
-        body.insert(
-            "reasoning_effort".to_owned(),
-            Value::String(reasoning_effort(effort).to_owned()),
-        );
-    }
+    encode_reasoning(body, settings);
 
     if let Some(max_tokens) = settings.max_tokens {
         if max_tokens == 0 {
@@ -56,6 +61,59 @@ fn encode_settings(body: &mut Map<String, Value>, settings: &Settings) -> Result
     encode_sampling(body, settings)?;
 
     Ok(())
+}
+
+// OpenRouter normalizes reasoning into a single `reasoning` object rather than
+// OpenAI's flat `reasoning_effort` string, letting `thinking` and
+// `reasoning_effort` be expressed together.
+fn encode_reasoning(body: &mut Map<String, Value>, settings: &Settings) {
+    let mut reasoning = Map::new();
+
+    match settings.thinking {
+        Thinking::Default => {}
+        Thinking::Enabled => {
+            reasoning.insert("enabled".to_owned(), Value::Bool(true));
+        }
+        Thinking::Disabled => {
+            reasoning.insert("enabled".to_owned(), Value::Bool(false));
+        }
+        _ => {}
+    }
+
+    if let Some(effort) = settings.reasoning_effort {
+        reasoning.insert(
+            "effort".to_owned(),
+            Value::String(reasoning_effort(effort).to_owned()),
+        );
+    }
+
+    if !reasoning.is_empty() {
+        body.insert("reasoning".to_owned(), Value::Object(reasoning));
+    }
+}
+
+fn encode_provider_routing(body: &mut Map<String, Value>, routing: &ProviderRouting) {
+    let mut provider = Map::new();
+
+    if !routing.order.is_empty() {
+        provider.insert("order".to_owned(), json!(routing.order));
+    }
+    if let Some(allow_fallbacks) = routing.allow_fallbacks {
+        provider.insert("allow_fallbacks".to_owned(), Value::Bool(allow_fallbacks));
+    }
+    if let Some(sort) = &routing.sort {
+        provider.insert("sort".to_owned(), Value::String(sort.clone()));
+    }
+    if !routing.only.is_empty() {
+        provider.insert("only".to_owned(), json!(routing.only));
+    }
+    if !routing.ignore.is_empty() {
+        provider.insert("ignore".to_owned(), json!(routing.ignore));
+    }
+
+    if !provider.is_empty() {
+        body.insert("provider".to_owned(), Value::Object(provider));
+    }
 }
 
 fn encode_response_format(body: &mut Map<String, Value>, format: &ResponseFormat) {
@@ -131,11 +189,14 @@ fn encode_sampling(body: &mut Map<String, Value>, settings: &Settings) -> Result
     Ok(())
 }
 
+// OpenRouter's reasoning effort scale tops out at `xhigh`, so both `ExtraHigh`
+// and `Max` collapse onto it.
 fn reasoning_effort(effort: ReasoningEffort) -> &'static str {
     match effort {
         ReasoningEffort::Low => "low",
         ReasoningEffort::Medium => "medium",
-        ReasoningEffort::High | ReasoningEffort::ExtraHigh | ReasoningEffort::Max => "high",
+        ReasoningEffort::High => "high",
+        ReasoningEffort::ExtraHigh | ReasoningEffort::Max => "xhigh",
         _ => "medium",
     }
 }
@@ -229,7 +290,6 @@ fn encode_tool(tool: &ToolSchema) -> Value {
 #[cfg(all(test, feature = "serde"))]
 mod tests {
     use super::*;
-    use ur_core::model::Thinking;
     use ur_core::provider::ToolCall;
 
     fn request(
@@ -249,7 +309,7 @@ mod tests {
 
     fn user_turn(settings: Settings) -> Request {
         request(
-            "gpt-5.5",
+            "openai/gpt-5.5",
             vec![Message::system("sys"), Message::user("hi")],
             Vec::new(),
             settings,
@@ -265,11 +325,11 @@ mod tests {
 
     #[test]
     fn no_tool_request_has_the_streaming_envelope() {
-        let body = encode(&user_turn(Settings::default()), None).unwrap();
+        let body = encode(&user_turn(Settings::default()), None, None).unwrap();
         assert_eq!(
             body,
             json!({
-                "model": "gpt-5.5",
+                "model": "openai/gpt-5.5",
                 "messages": [
                     { "role": "system", "content": "sys" },
                     { "role": "user", "content": "hi" },
@@ -290,11 +350,12 @@ mod tests {
         let tool = ToolSchema::new("add", parameters.clone()).description("Add two integers.");
         let body = encode(
             &request(
-                "gpt-5.5",
+                "openai/gpt-5.5",
                 vec![Message::user("hi")],
                 vec![tool],
                 Settings::default(),
             ),
+            None,
             None,
         )
         .unwrap();
@@ -331,11 +392,12 @@ mod tests {
         let loose = ToolSchema::new("loose_weather", json!({ "type": "object" }));
         let body = encode(
             &request(
-                "gpt-5.5",
+                "openai/gpt-5.5",
                 vec![Message::user("hi")],
                 vec![strict, loose],
                 Settings::default(),
             ),
+            None,
             None,
         )
         .unwrap();
@@ -356,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_are_encoded_with_openai_names() {
+    fn settings_are_encoded_with_openrouter_names() {
         let mut settings = Settings::default();
         settings.thinking = Thinking::Enabled;
         settings.max_tokens = Some(128);
@@ -366,15 +428,75 @@ mod tests {
         settings.response_format = ResponseFormat::JsonObject;
         settings.reasoning_effort = Some(ReasoningEffort::ExtraHigh);
 
-        let body = encode(&user_turn(settings), Some("tenant-1")).unwrap();
-        assert!(body.get("thinking").is_none());
+        let body = encode(&user_turn(settings), Some("tenant-1"), None).unwrap();
         assert_eq!(body["max_completion_tokens"], json!(128));
         assert_eq!(body["temperature"], json!(0.7_f32));
         assert_eq!(body["top_p"], json!(0.9_f32));
         assert_eq!(body["stop"], json!(["STOP"]));
         assert_eq!(body["response_format"], json!({ "type": "json_object" }));
-        assert_eq!(body["reasoning_effort"], json!("high"));
+        assert_eq!(
+            body["reasoning"],
+            json!({ "enabled": true, "effort": "xhigh" })
+        );
         assert_eq!(body["user"], json!("tenant-1"));
+    }
+
+    #[test]
+    fn thinking_disabled_sets_reasoning_enabled_false() {
+        let mut settings = Settings::default();
+        settings.thinking = Thinking::Disabled;
+        let body = encode(&user_turn(settings), None, None).unwrap();
+        assert_eq!(body["reasoning"], json!({ "enabled": false }));
+    }
+
+    #[test]
+    fn default_thinking_without_effort_omits_reasoning() {
+        let body = encode(&user_turn(Settings::default()), None, None).unwrap();
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn reasoning_effort_maps_to_openrouter_levels() {
+        let cases = [
+            (ReasoningEffort::Low, "low"),
+            (ReasoningEffort::Medium, "medium"),
+            (ReasoningEffort::High, "high"),
+            (ReasoningEffort::ExtraHigh, "xhigh"),
+            (ReasoningEffort::Max, "xhigh"),
+        ];
+        for (effort, expected) in cases {
+            let mut settings = Settings::default();
+            settings.reasoning_effort = Some(effort);
+            let body = encode(&user_turn(settings), None, None).unwrap();
+            assert_eq!(body["reasoning"], json!({ "effort": expected }));
+        }
+    }
+
+    #[test]
+    fn provider_routing_is_encoded_when_present() {
+        let routing = ProviderRouting {
+            order: vec!["openai".to_owned(), "azure".to_owned()],
+            allow_fallbacks: Some(false),
+            sort: Some("throughput".to_owned()),
+            ignore: vec!["bedrock".to_owned()],
+            ..Default::default()
+        };
+        let body = encode(&user_turn(Settings::default()), None, Some(&routing)).unwrap();
+        assert_eq!(
+            body["provider"],
+            json!({
+                "order": ["openai", "azure"],
+                "allow_fallbacks": false,
+                "sort": "throughput",
+                "ignore": ["bedrock"],
+            })
+        );
+    }
+
+    #[test]
+    fn no_provider_routing_omits_the_field() {
+        let body = encode(&user_turn(Settings::default()), None, None).unwrap();
+        assert!(body.get("provider").is_none());
     }
 
     #[test]
@@ -397,7 +519,7 @@ mod tests {
             .description("A capital city."),
         );
 
-        let body = encode(&user_turn(settings), None).unwrap();
+        let body = encode(&user_turn(settings), None, None).unwrap();
         let format = &body["response_format"];
         assert_eq!(format["type"], json!("json_schema"));
 
@@ -430,7 +552,7 @@ mod tests {
         settings.response_format =
             ResponseFormat::JsonSchema(JsonSchemaFormat::new("capital", raw.clone()).strict(false));
 
-        let body = encode(&user_turn(settings), None).unwrap();
+        let body = encode(&user_turn(settings), None, None).unwrap();
         let json_schema = &body["response_format"]["json_schema"];
         assert_eq!(json_schema["strict"], json!(false));
         assert!(json_schema.get("description").is_none());
@@ -438,39 +560,22 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_effort_maps_supported_levels_directly() {
-        let cases = [
-            (ReasoningEffort::Low, "low"),
-            (ReasoningEffort::Medium, "medium"),
-            (ReasoningEffort::High, "high"),
-            (ReasoningEffort::ExtraHigh, "high"),
-            (ReasoningEffort::Max, "high"),
-        ];
-        for (effort, expected) in cases {
-            let mut settings = Settings::default();
-            settings.reasoning_effort = Some(effort);
-            let body = encode(&user_turn(settings), None).unwrap();
-            assert_eq!(body["reasoning_effort"], json!(expected));
-        }
-    }
-
-    #[test]
     fn invalid_settings_are_config_errors() {
         let mut zero = Settings::default();
         zero.max_tokens = Some(0);
-        assert_config(encode(&user_turn(zero), None));
+        assert_config(encode(&user_turn(zero), None, None));
 
         let mut bad_temp = Settings::default();
         bad_temp.temperature = Some(2.1);
-        assert_config(encode(&user_turn(bad_temp), None));
+        assert_config(encode(&user_turn(bad_temp), None, None));
 
         let mut bad_top_p = Settings::default();
         bad_top_p.top_p = Some(1.1);
-        assert_config(encode(&user_turn(bad_top_p), None));
+        assert_config(encode(&user_turn(bad_top_p), None, None));
 
         let mut too_many_stops = Settings::default();
         too_many_stops.stop = (0..5).map(|n| n.to_string()).collect();
-        assert_config(encode(&user_turn(too_many_stops), None));
+        assert_config(encode(&user_turn(too_many_stops), None, None));
     }
 
     #[test]
@@ -478,12 +583,12 @@ mod tests {
         let call = ToolCall::new("call-1", "add", r#"{"a":1}"#);
         let assistant = Message::assistant(
             Some("ok".to_owned()),
-            Some("ignored by OpenAI".to_owned()),
+            Some("ignored on the way back".to_owned()),
             vec![call],
         );
         let body = encode(
             &request(
-                "gpt-5.5",
+                "openai/gpt-5.5",
                 vec![
                     Message::system("sys"),
                     Message::user("hi"),
@@ -493,6 +598,7 @@ mod tests {
                 Vec::new(),
                 Settings::default(),
             ),
+            None,
             None,
         )
         .unwrap();

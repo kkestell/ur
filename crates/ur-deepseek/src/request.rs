@@ -4,6 +4,7 @@ use serde_json::{Map, Value, json};
 use ur_core::Error;
 use ur_core::model::{ReasoningEffort, ResponseFormat, Thinking};
 use ur_core::provider::{Message, MessageRole, Request, Settings};
+use ur_core::schema::strict_schema;
 use ur_core::tool::ToolSchema;
 
 use crate::catalog;
@@ -62,11 +63,22 @@ fn encode_settings(body: &mut Map<String, Value>, request: &Request) -> Result<(
     encode_max_tokens(body, request)?;
     encode_stop(body, settings)?;
 
-    if settings.response_format == ResponseFormat::JsonObject {
-        body.insert(
-            "response_format".to_owned(),
-            json!({ "type": "json_object" }),
-        );
+    match &settings.response_format {
+        ResponseFormat::Text => {}
+        ResponseFormat::JsonObject => {
+            body.insert(
+                "response_format".to_owned(),
+                json!({ "type": "json_object" }),
+            );
+        }
+        ResponseFormat::JsonSchema(_) => {
+            return Err(Error::Config {
+                message: "DeepSeek does not support a json_schema response format; \
+                    use ResponseFormat::JsonObject"
+                    .to_owned(),
+            });
+        }
+        _ => {}
     }
 
     encode_sampling(body, settings)?;
@@ -262,81 +274,6 @@ fn encode_tool(tool: &ToolSchema, strict: bool) -> Value {
         "type": "function",
         "function": Value::Object(function),
     })
-}
-
-/// Rewrites a JSON Schema into DeepSeek's strict subset: objects are closed,
-/// every property is required, originally-optional properties become nullable,
-/// and unsupported size keywords are dropped.
-fn strict_schema(schema: &Value) -> Value {
-    let Value::Object(object) = schema else {
-        return schema.clone();
-    };
-
-    let mut object = object.clone();
-    for keyword in ["minLength", "maxLength", "minItems", "maxItems"] {
-        object.remove(keyword);
-    }
-
-    if let Some(Value::Object(items)) = object.get("items") {
-        let rewritten = strict_schema(&Value::Object(items.clone()));
-        object.insert("items".to_owned(), rewritten);
-    }
-
-    if let Some(Value::Object(properties)) = object.get("properties").cloned() {
-        let required: Vec<String> = object
-            .get("required")
-            .and_then(Value::as_array)
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let mut rewritten = Map::new();
-        for (name, property) in properties {
-            let mut property = strict_schema(&property);
-            if !required.contains(&name) {
-                property = make_nullable(property);
-            }
-            rewritten.insert(name, property);
-        }
-
-        let names: Vec<Value> = rewritten.keys().cloned().map(Value::String).collect();
-        object.insert("properties".to_owned(), Value::Object(rewritten));
-        object.insert("required".to_owned(), Value::Array(names));
-        object.insert("additionalProperties".to_owned(), Value::Bool(false));
-    }
-
-    Value::Object(object)
-}
-
-/// Makes a property schema accept `null` without changing its other constraints.
-fn make_nullable(schema: Value) -> Value {
-    let Value::Object(mut object) = schema else {
-        return schema;
-    };
-
-    match object.get("type").cloned() {
-        Some(Value::String(single)) => {
-            if single != "null" {
-                object.insert("type".to_owned(), json!([single, "null"]));
-            }
-        }
-        Some(Value::Array(mut variants)) => {
-            if !variants.iter().any(|value| value == "null") {
-                variants.push(Value::String("null".to_owned()));
-            }
-            object.insert("type".to_owned(), Value::Array(variants));
-        }
-        _ => {
-            return json!({ "anyOf": [Value::Object(object), { "type": "null" }] });
-        }
-    }
-
-    Value::Object(object)
 }
 
 #[cfg(all(test, feature = "serde"))]
@@ -651,6 +588,14 @@ mod tests {
         settings.response_format = ResponseFormat::JsonObject;
         let body = encode(&user_turn(settings), None, false).unwrap();
         assert_eq!(body["response_format"], json!({ "type": "json_object" }));
+    }
+
+    #[test]
+    fn json_schema_response_format_is_rejected() {
+        let mut settings = Settings::default();
+        settings.response_format =
+            ResponseFormat::json_schema("capital", json!({ "type": "object" }));
+        assert_config(encode(&user_turn(settings), None, false));
     }
 
     #[test]

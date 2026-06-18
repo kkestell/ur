@@ -5,13 +5,35 @@ use std::path::Path;
 
 use futures_util::StreamExt as _;
 use serde_json::{Value, json};
-use ur::{Event, FinishReason, Model, ToolOutput};
+use ur::{Event, FinishReason, Model, ResponseFormat, ToolOutput};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[ur::tool(description = "Add two integers.")]
 async fn add(a: i64, b: i64) -> i64 {
     a + b
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, schemars::JsonSchema)]
+struct Capital {
+    city: String,
+    country: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct Geo {
+    latitude: f64,
+    longitude: f64,
+}
+
+// A nested struct: `schemars` emits `Geo` under `$defs` and references it with
+// `$ref`, so this only encodes (and decodes) correctly once the strict rewriter
+// closes the referenced definition too.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct LocatedCapital {
+    city: String,
+    country: String,
+    location: Geo,
 }
 
 fn sse(data: &str) -> ResponseTemplate {
@@ -167,6 +189,165 @@ async fn mocked_openai_tool_round_trips_through_session_send() {
     assert_eq!(second["messages"][3]["role"], "tool");
     assert_eq!(second["messages"][3]["tool_call_id"], "call-1");
     assert_eq!(second["messages"][3]["content"], "42");
+}
+
+#[tokio::test]
+async fn mocked_openai_json_schema_request_is_well_formed() {
+    let server = MockServer::start().await;
+    let body = format!(
+        "{}{}data: [DONE]\n\n",
+        chunk(json!({
+            "choices": [{
+                "delta": { "content": "{\"city\":\"Paris\",\"country\":\"France\"}" },
+                "finish_reason": null
+            }],
+            "usage": null
+        })),
+        done("stop"),
+    );
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(header("authorization", "Bearer test-key"))
+        .respond_with(sse(&body))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = openai_client(&server);
+    let model = Model::new(client, "gpt-5.5")
+        .response_format(ResponseFormat::json_schema_for::<Capital>("capital"));
+    let agent = ur::Agent::new("Answer with the requested structured data.", model);
+    let mut session = agent.session();
+
+    let mut text = String::new();
+    let mut events = session.send("What is the capital of France?");
+    while let Some(event) = events.next().await {
+        if let Event::TextDelta { delta } = event.expect("mocked OpenAI stream succeeds") {
+            text.push_str(&delta);
+        }
+    }
+    drop(events);
+
+    assert_eq!(
+        serde_json::from_str::<Capital>(&text).unwrap(),
+        Capital {
+            city: "Paris".to_owned(),
+            country: "France".to_owned(),
+        }
+    );
+
+    let requests = server.received_requests().await.unwrap();
+    let request: Value = requests[0].body_json().unwrap();
+    let format = &request["response_format"];
+    assert_eq!(format["type"], "json_schema");
+
+    let json_schema = &format["json_schema"];
+    assert_eq!(json_schema["name"], "capital");
+    assert_eq!(json_schema["strict"], true);
+
+    let schema = &json_schema["schema"];
+    assert_eq!(schema["type"], "object");
+    assert_eq!(schema["additionalProperties"], false);
+    assert_eq!(schema["required"], json!(["city", "country"]));
+}
+
+#[tokio::test]
+async fn mocked_openai_nested_json_schema_closes_definitions() {
+    let server = MockServer::start().await;
+    let body = format!(
+        "{}{}data: [DONE]\n\n",
+        chunk(json!({
+            "choices": [{ "delta": { "content": "{}" }, "finish_reason": null }],
+            "usage": null
+        })),
+        done("stop"),
+    );
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(header("authorization", "Bearer test-key"))
+        .respond_with(sse(&body))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = openai_client(&server);
+    let model = Model::new(client, "gpt-5.5").response_format(ResponseFormat::json_schema_for::<
+        LocatedCapital,
+    >("located_capital"));
+    let agent = ur::Agent::new("Answer with the requested structured data.", model);
+    let mut session = agent.session();
+
+    let mut events = session.send("Where is the capital of France?");
+    while let Some(event) = events.next().await {
+        let _ = event.expect("mocked OpenAI stream succeeds");
+    }
+    drop(events);
+
+    let requests = server.received_requests().await.unwrap();
+    let request: Value = requests[0].body_json().unwrap();
+    let schema = &request["response_format"]["json_schema"]["schema"];
+
+    // The referenced definition is constrained just like the root object.
+    let geo = &schema["$defs"]["Geo"];
+    assert_eq!(geo["additionalProperties"], false);
+    assert_eq!(geo["required"], json!(["latitude", "longitude"]));
+    assert_eq!(schema["additionalProperties"], false);
+    assert_eq!(schema["required"], json!(["city", "country", "location"]));
+}
+
+#[tokio::test]
+#[ignore = "live OpenAI smoke test; requires OPENAI_API_KEY in the environment or .env"]
+async fn live_openai_nested_structured_output_smoke_test() {
+    let client = live_client();
+    let model = Model::new(client, "gpt-5.5")
+        .max_tokens(256)
+        .response_format(ResponseFormat::json_schema_for::<LocatedCapital>(
+            "located_capital",
+        ));
+    let agent = ur::Agent::new("Answer with the requested structured data.", model);
+    let mut session = agent.session();
+
+    let mut text = String::new();
+    let mut events = session.send("What is the capital of France and its coordinates?");
+    while let Some(event) = events.next().await {
+        if let Event::TextDelta { delta } = event.expect("live nested structured request succeeds")
+        {
+            text.push_str(&delta);
+        }
+    }
+    drop(events);
+
+    let located: LocatedCapital =
+        serde_json::from_str(&text).expect("nested structured output parses into the schema type");
+    assert_eq!(located.country, "France");
+    assert!(!located.city.is_empty());
+    assert!(located.location.latitude.is_finite());
+    assert!(located.location.longitude.is_finite());
+}
+
+#[tokio::test]
+#[ignore = "live OpenAI smoke test; requires OPENAI_API_KEY in the environment or .env"]
+async fn live_openai_structured_output_smoke_test() {
+    let client = live_client();
+    let model = Model::new(client, "gpt-5.5")
+        .max_tokens(256)
+        .response_format(ResponseFormat::json_schema_for::<Capital>("capital"));
+    let agent = ur::Agent::new("Answer with the requested structured data.", model);
+    let mut session = agent.session();
+
+    let mut text = String::new();
+    let mut events = session.send("What is the capital of France?");
+    while let Some(event) = events.next().await {
+        if let Event::TextDelta { delta } = event.expect("live structured request succeeds") {
+            text.push_str(&delta);
+        }
+    }
+    drop(events);
+
+    let capital: Capital =
+        serde_json::from_str(&text).expect("structured output parses into the schema type");
+    assert_eq!(capital.country, "France");
+    assert!(!capital.city.is_empty());
 }
 
 #[tokio::test]

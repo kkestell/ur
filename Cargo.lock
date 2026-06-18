@@ -1368,10 +1368,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ur-openrouter"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "ur-core",
+ "wiremock",
+]
+
+[[package]]
 name = "ur-rs"
 version = "0.1.0-alpha.1"
 dependencies = [
  "futures-util",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -1380,6 +1395,7 @@ dependencies = [
  "ur-deepseek",
  "ur-macros",
  "ur-openai",
+ "ur-openrouter",
  "wiremock",
 ]
 

@@ -76,7 +76,8 @@ impl OpenAiHttpClient {
 - `temperature` must be in `0.0..=2.0`.
 - `top_p` must be in `0.0..=1.0`.
 - `stop` accepts at most 4 entries.
-- `response_format = JsonObject` sends `{ "type": "json_object" }`.
+- `response_format = JsonObject` sends `{ "type": "json_object" }` (valid JSON, no schema).
+- `response_format = JsonSchema(..)` sends `{ "type": "json_schema", "json_schema": { "name", "schema", "strict", optional "description" } }`. A strict schema (the default) is rewritten into the constrained subset described in §3 before it is sent, so the reply conforms to the schema. The schema name must match `[A-Za-z0-9_-]{1,64}`.
 - `ReasoningEffort::Low`, `Medium`, and `High` map directly. `ExtraHigh` and `Max` map to `high`.
 - `Thinking` is ignored because Chat Completions has no matching request field.
 
@@ -86,7 +87,7 @@ Invalid settings surface as `Error::Config` before any HTTP request is sent.
 
 Tools are sent as OpenAI function tools. A strict `ToolSchema` is rewritten into the constrained subset: objects are closed with `additionalProperties: false`, every property is listed in `required`, originally-optional properties become nullable, and unsupported size keywords are dropped.
 
-Unlike DeepSeek, OpenAI accepts mixed strict and non-strict tools, so each tool's `strict` flag is encoded independently.
+Unlike DeepSeek, OpenAI accepts mixed strict and non-strict tools, so each tool's `strict` flag is encoded independently. A strict `json_schema` response format (§2) is rewritten through the same constrained subset.
 
 ## 4. Retries, timeouts, errors
 
@@ -163,6 +164,7 @@ Focused example targets in [`crates/ur/examples`](../../crates/ur/examples) demo
 - `minimal` — the smallest text-only request and stream loop.
 - `builder` — configuring the client builder (timeout, retries, `user`, key fallback).
 - `json` — `ResponseFormat::JsonObject` output (§2).
+- `structured_openai` — `ResponseFormat::json_schema_for::<T>` output parsed back into a Rust type (§2).
 - `session` — a multi-turn conversation with automatic history replay.
 - `strict` — a hand-written strict-mode tool (§3).
 - `effort` — `ReasoningEffort` control (§2).

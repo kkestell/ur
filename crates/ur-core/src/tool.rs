@@ -127,7 +127,7 @@ impl Hash for ToolSchema {
     }
 }
 
-fn hash_json_value<H: Hasher>(value: &JsonValue, state: &mut H) {
+pub(crate) fn hash_json_value<H: Hasher>(value: &JsonValue, state: &mut H) {
     std::mem::discriminant(value).hash(state);
 
     match value {

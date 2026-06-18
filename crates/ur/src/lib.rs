@@ -94,7 +94,7 @@
 #![forbid(unsafe_code)]
 
 pub use ur_core::event::{Event, FinishReason, ToolOutput, Usage};
-pub use ur_core::model::{ReasoningEffort, ResponseFormat, Thinking};
+pub use ur_core::model::{JsonSchemaFormat, ReasoningEffort, ResponseFormat, Thinking};
 pub use ur_core::provider::{
     Message, MessageRole, ModelNotice, ModelSpec, Provider, RawEvent, Request, Settings, ToolCall,
 };
@@ -113,6 +113,9 @@ pub use ur_deepseek as deepseek;
 
 #[cfg(feature = "openai")]
 pub use ur_openai as openai;
+
+#[cfg(feature = "openrouter")]
+pub use ur_openrouter as openrouter;
 
 #[cfg(test)]
 mod tests {

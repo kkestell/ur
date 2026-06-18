@@ -20,18 +20,21 @@ all-features = true
 
 [features]
 default = ["serde", "openai"]
-serde = ["ur-core/serde", "ur-deepseek?/serde", "ur-openai?/serde"]
+serde = ["ur-core/serde", "ur-deepseek?/serde", "ur-openai?/serde", "ur-openrouter?/serde"]
 deepseek = ["dep:ur-deepseek"]
 openai = ["dep:ur-openai"]
+openrouter = ["dep:ur-openrouter"]
 
 [dependencies]
 ur-core = { version = "0.1.0-alpha.1", path = "../ur-core", default-features = false }
 ur-deepseek = { version = "0.1.0-alpha.1", path = "../ur-deepseek", default-features = false, optional = true }
 ur-macros = { version = "0.1.0-alpha.1", path = "../ur-macros" }
 ur-openai = { version = "0.1.0-alpha.1", path = "../ur-openai", default-features = false, optional = true }
+ur-openrouter = { version = "0.1.0-alpha.1", path = "../ur-openrouter", default-features = false, optional = true }
 
 [dev-dependencies]
 futures-util.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
@@ -71,5 +74,17 @@ name = "strict"
 required-features = ["openai"]
 
 [[example]]
+name = "structured_openai"
+required-features = ["openai"]
+
+[[example]]
+name = "structured_openrouter"
+required-features = ["openrouter"]
+
+[[example]]
 name = "effort"
 required-features = ["openai"]
+
+[[example]]
+name = "openrouter"
+required-features = ["openrouter"]

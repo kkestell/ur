@@ -44,6 +44,7 @@
 pub mod event;
 pub mod model;
 pub mod provider;
+pub mod schema;
 pub mod tool;
 
 use std::collections::HashSet;
@@ -198,6 +199,14 @@ impl<P: Provider> Model<P> {
     }
 
     fn validate_settings(&self) -> Result<()> {
+        if let model::ResponseFormat::JsonSchema(format) = &self.settings.response_format
+            && !is_valid_name(&format.name)
+        {
+            return Err(Error::Config {
+                message: format!("invalid response schema name '{}'", format.name),
+            });
+        }
+
         let Some(max_tokens) = self.settings.max_tokens else {
             return Ok(());
         };
@@ -357,14 +366,18 @@ impl<P: Provider> std::fmt::Debug for Agent<P> {
     }
 }
 
-fn validate_tool_name(name: &str) -> Result<()> {
-    let valid = !name.is_empty()
+/// Whether a name is a valid tool or response-schema identifier, matching the
+/// `^[A-Za-z0-9_-]{1,64}$` shape providers require.
+fn is_valid_name(name: &str) -> bool {
+    !name.is_empty()
         && name.len() <= 64
         && name
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'));
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
 
-    if valid {
+fn validate_tool_name(name: &str) -> Result<()> {
+    if is_valid_name(name) {
         Ok(())
     } else {
         Err(Error::Config {
@@ -884,6 +897,22 @@ mod tests {
         let mut over_stream = over_session.send("hello");
         assert_config_error(&mut over_stream, "exceeds");
         assert_eq!(over_state.chat_calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn invalid_response_schema_name_errors_before_provider_chat() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(FakeProvider::new(Arc::clone(&state)), "known").response_format(
+            model::ResponseFormat::json_schema(
+                "bad name!",
+                serde_json::json!({ "type": "object" }),
+            ),
+        );
+        let mut session = Agent::new("system", model).session();
+        let mut stream = session.send("hello");
+
+        assert_config_error(&mut stream, "response schema name");
+        assert_eq!(state.chat_calls.load(Ordering::Relaxed), 0);
     }
 
     #[test]
