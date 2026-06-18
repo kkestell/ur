@@ -128,7 +128,7 @@ The backend's rule for thinking models:
 
 ## 4. Strict mode
 
-`ToolSchema::strict(true)` requires the beta base URL (`beta(true)`) and applies to the whole request: DeepSeek requires every function in `tools` to carry `strict: true`, so if any registered tool is strict, `ur` marks them all strict. Mixing strict and non-strict tools, or setting strict without the beta URL, is rejected locally as `Error::Config`.
+`ToolSchema::strict(true)` requires the beta base URL (`beta(true)`) and applies to the whole request: DeepSeek requires every function in `tools` to carry `strict: true`, so the tool set must be uniform. `ur` enforces this rather than coercing it — a request whose tools are all strict is sent strict, all non-strict is sent non-strict, and a mixed set is rejected locally as `Error::Config`. Setting strict without the beta URL is likewise rejected.
 
 For each strict tool the provider rewrites the macro-generated schema into DeepSeek's strict subset: objects are closed (`additionalProperties: false`) with every property listed in `required`, and an `Option<T>` parameter becomes required-but-nullable (`"type": ["…", "null"]`). Keywords strict mode does not support (`minLength`/`maxLength`, `minItems`/`maxItems`) are dropped.
 
