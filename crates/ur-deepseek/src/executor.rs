@@ -249,7 +249,7 @@ fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
 
 async fn status_error(response: reqwest::Response, retry_after: Option<Duration>) -> Error {
     let status = response.status().as_u16();
-    let message = error_message(response, status).await;
+    let message = error_message(response).await;
 
     match status {
         400 => Error::BadRequest { message },
@@ -261,7 +261,7 @@ async fn status_error(response: reqwest::Response, retry_after: Option<Duration>
     }
 }
 
-async fn error_message(response: reqwest::Response, status: u16) -> String {
+async fn error_message(response: reqwest::Response) -> String {
     let default = response
         .status()
         .canonical_reason()
@@ -276,7 +276,7 @@ async fn error_message(response: reqwest::Response, status: u16) -> String {
         return default;
     }
 
-    serde_json::from_str::<Value>(&body)
+    let message = serde_json::from_str::<Value>(&body)
         .ok()
         .and_then(|value| {
             value
@@ -285,26 +285,13 @@ async fn error_message(response: reqwest::Response, status: u16) -> String {
                 .and_then(Value::as_str)
                 .map(str::to_owned)
         })
-        .unwrap_or(body)
-        .trim()
-        .to_owned()
-        .or_else_default(status)
-}
+        .unwrap_or(body);
 
-trait DefaultIfEmpty {
-    fn or_else_default(self, status: u16) -> String;
-}
-
-impl DefaultIfEmpty for String {
-    fn or_else_default(self, status: u16) -> String {
-        if self.is_empty() {
-            reqwest::StatusCode::from_u16(status)
-                .ok()
-                .and_then(|status| status.canonical_reason().map(str::to_owned))
-                .unwrap_or_else(|| "provider error".to_owned())
-        } else {
-            self
-        }
+    let message = message.trim();
+    if message.is_empty() {
+        default
+    } else {
+        message.to_owned()
     }
 }
 

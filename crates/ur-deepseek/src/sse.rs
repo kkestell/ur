@@ -10,6 +10,7 @@ use ur_core::provider::RawEvent;
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum SseItem {
     Events(Vec<RawEvent>),
+    FinishReason(FinishReason),
     Usage(Usage),
     Done,
 }
@@ -107,17 +108,10 @@ impl CompletionState {
         let mut events = VecDeque::new();
         match item {
             SseItem::Events(raw_events) => {
-                for event in raw_events {
-                    match event {
-                        RawEvent::Done {
-                            finish_reason,
-                            usage: _,
-                        } => {
-                            self.finish_reason = Some(finish_reason);
-                        }
-                        other => events.push_back(other),
-                    }
-                }
+                events.extend(raw_events);
+            }
+            SseItem::FinishReason(finish_reason) => {
+                self.finish_reason = Some(finish_reason);
             }
             SseItem::Usage(usage) => {
                 self.usage = Some(usage);
@@ -150,6 +144,7 @@ fn decode_chunk(data: &str) -> Result<Vec<SseItem>, Error> {
 
     let mut items = Vec::new();
     let mut events = Vec::new();
+    let mut finish = None;
 
     for choice in chunk.choices {
         if let Some(delta) = choice.delta {
@@ -174,15 +169,15 @@ fn decode_chunk(data: &str) -> Result<Vec<SseItem>, Error> {
         }
 
         if let Some(reason) = choice.finish_reason {
-            events.push(RawEvent::Done {
-                finish_reason: finish_reason(&reason),
-                usage: None,
-            });
+            finish = Some(finish_reason(&reason));
         }
     }
 
     if !events.is_empty() {
         items.push(SseItem::Events(events));
+    }
+    if let Some(finish_reason) = finish {
+        items.push(SseItem::FinishReason(finish_reason));
     }
     if let Some(usage) = chunk.usage {
         items.push(SseItem::Usage(usage.into()));
