@@ -23,8 +23,7 @@ pub struct EventStream<'a> {
     assistant: AssistantTurn,
     ready: VecDeque<QueuedEvent>,
     continue_after_tools: bool,
-    tool_calls: Vec<ToolCall>,
-    next_tool_index: usize,
+    tool_calls: VecDeque<ToolCall>,
     tool_to_start: Option<ToolCall>,
     running_tool: Option<RunningTool>,
     finished: bool,
@@ -55,8 +54,7 @@ impl<'a> EventStream<'a> {
             assistant: AssistantTurn::default(),
             ready: VecDeque::new(),
             continue_after_tools: false,
-            tool_calls: Vec::new(),
-            next_tool_index: 0,
+            tool_calls: VecDeque::new(),
             tool_to_start: None,
             running_tool: None,
             finished: false,
@@ -79,8 +77,7 @@ impl<'a> EventStream<'a> {
             assistant: AssistantTurn::default(),
             ready: VecDeque::new(),
             continue_after_tools: false,
-            tool_calls: Vec::new(),
-            next_tool_index: 0,
+            tool_calls: VecDeque::new(),
             tool_to_start: None,
             running_tool: None,
             finished: true,
@@ -100,8 +97,7 @@ impl<'a> EventStream<'a> {
             assistant: AssistantTurn::default(),
             ready: VecDeque::from([QueuedEvent::Error(error)]),
             continue_after_tools: false,
-            tool_calls: Vec::new(),
-            next_tool_index: 0,
+            tool_calls: VecDeque::new(),
             tool_to_start: None,
             running_tool: None,
             finished: false,
@@ -177,8 +173,7 @@ impl<'a> EventStream<'a> {
                     }
 
                     self.continue_after_tools = true;
-                    self.tool_calls = tool_calls;
-                    self.next_tool_index = 0;
+                    self.tool_calls = tool_calls.into();
                 } else {
                     self.ready.push_back(QueuedEvent::Done(finish_reason));
                 }
@@ -187,8 +182,10 @@ impl<'a> EventStream<'a> {
     }
 
     fn queue_next_tool_call(&mut self) {
-        let call = self.tool_calls[self.next_tool_index].clone();
-        self.next_tool_index += 1;
+        let call = self
+            .tool_calls
+            .pop_front()
+            .expect("tool call queued while continuing after tools");
         self.tool_to_start = Some(call.clone());
         self.ready.push_back(QueuedEvent::Event(Event::ToolCall {
             id: call.id,
@@ -295,13 +292,12 @@ impl Stream for EventStream<'_> {
             }
 
             if this.continue_after_tools {
-                if this.next_tool_index < this.tool_calls.len() {
+                if !this.tool_calls.is_empty() {
                     this.queue_next_tool_call();
                     continue;
                 }
 
                 this.continue_after_tools = false;
-                this.tool_calls.clear();
                 this.start_provider_turn();
                 continue;
             }
