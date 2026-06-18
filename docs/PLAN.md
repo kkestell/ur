@@ -173,6 +173,8 @@ Done when:
 
 ## Phase 8: DeepSeek streaming, retries, and error mapping
 
+Status: Complete.
+
 Build:
 
 - Implement streaming-only HTTP execution with SSE parsing.

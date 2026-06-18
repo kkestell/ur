@@ -7,11 +7,12 @@
 
 mod catalog;
 mod client;
+mod executor;
 mod request;
+mod sse;
 
 pub use client::{DeepSeekClient, DeepSeekClientBuilder, DeepSeekHttpClient};
 
-use ur_core::event::FinishReason;
 use ur_core::provider::{ModelNotice, ModelSpec, Provider, RawEvent, Request};
 use ur_core::{BoxStream, Result};
 
@@ -19,12 +20,7 @@ impl Provider for DeepSeekClient {
     fn chat(&self, request: &Request) -> BoxStream<'static, Result<RawEvent>> {
         let config = self.config();
         match request::encode(request, config.user_id.as_deref(), config.is_beta()) {
-            Ok(_body) => Box::pin(futures_util::stream::once(async {
-                Ok(RawEvent::Done {
-                    finish_reason: FinishReason::Stop,
-                    usage: None,
-                })
-            })),
+            Ok(body) => executor::chat(self.shared_config(), body),
             Err(error) => Box::pin(futures_util::stream::once(async move { Err(error) })),
         }
     }

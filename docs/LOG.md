@@ -82,3 +82,13 @@
 - `Provider::chat` encodes and validates the body, surfacing `Error::Config` on the stream for invalid settings or tool sets. The validated happy path emits a single terminal `Done`; streaming HTTP execution and SSE decoding land in Phase 8, so the `Config` fields the executor will read (`http`, `api_key`, `timeout`, `max_retries`) carry `#[allow(dead_code)]` until then.
 - Added the complete `DEEPSEEK.md` example as a `required-features = ["deepseek"]` example target (deferred from Phase 6); it builds against the real constructors.
 - Raised the workspace MSRV from 1.85 to 1.88 (the let-chain stabilization release). This keeps idiomatic `if let … && …` chains across `ur-core`, `ur-deepseek`, and `ur-macros` (Phase 5's nested-`if` workarounds were collapsed back into let-chains) and unblocks the `wiremock` dev-dependency, which itself requires let-chains. Verified with `cargo +1.88 test --workspace --all-features`. Updated the MSRV in `API.md` and `PLAN.md`.
+
+## Phase 8
+
+- Replaced the DeepSeek placeholder stream with real streaming HTTP execution against `POST {base_url}/chat/completions`, preserving the existing public client/builder surface and keeping the new executor/SSE machinery private to `ur-deepseek`.
+- Implemented SSE parsing that ignores comments and blank lines, accepts `[DONE]` with or without a final blank line, buffers bytes across network chunks before UTF-8 decoding, and maps text, reasoning, tool-call fragments, finish reasons, and usage into the normalized `RawEvent` seam.
+- Kept usage separate from finish-reason state internally after review flagged that usage-only chunks could otherwise synthesize `FinishReason::Stop`; malformed streams with no finish reason now surface `Error::Decode`.
+- Implemented status and error-body mapping for DeepSeek/OpenAI-style error responses: 400 `BadRequest`, 401 `Auth`, 402 `InsufficientFunds`, 422 `InvalidParams`, 429 `RateLimited`, retryable server statuses as `Server`, and other statuses as non-retryable `Server`.
+- Implemented bounded retry behavior for 408/429/500/502/503/504 and transient request-send failures. Body-stream transport failures are retried only before any normalized event has been yielded, avoiding duplicated deltas after partial output.
+- Added HTTP mock and TCP-level tests for request headers/path/body, retryable status retry, exhausted status mapping, rate-limit `Retry-After`, non-retryable status mapping, malformed JSON, EOF before `[DONE]`, usage without finish reason, split UTF-8 chunks, and pre-event body transport retry.
+- Deferred HTTP-date `Retry-After` parsing; numeric second values are honored, which covers the tested and most common provider behavior without adding a new dependency.

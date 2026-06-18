@@ -27,8 +27,7 @@ const MAX_USER_ID_LEN: usize = 512;
 /// A preconfigured HTTP client for the DeepSeek provider.
 #[derive(Clone, Debug)]
 pub struct DeepSeekHttpClient {
-    #[allow(dead_code)]
-    client: reqwest::Client,
+    pub(crate) client: reqwest::Client,
 }
 
 impl DeepSeekHttpClient {
@@ -46,15 +45,11 @@ impl Default for DeepSeekHttpClient {
 
 /// Resolved client configuration shared behind an [`Arc`].
 pub(crate) struct Config {
-    #[allow(dead_code)]
     pub(crate) http: DeepSeekHttpClient,
-    #[allow(dead_code)]
     pub(crate) api_key: String,
     pub(crate) base_url: String,
     pub(crate) user_id: Option<String>,
-    #[allow(dead_code)]
     pub(crate) timeout: Duration,
-    #[allow(dead_code)]
     pub(crate) max_retries: u32,
 }
 
@@ -99,6 +94,10 @@ impl DeepSeekClient {
 
     pub(crate) fn config(&self) -> &Config {
         &self.config
+    }
+
+    pub(crate) fn shared_config(&self) -> Arc<Config> {
+        Arc::clone(&self.config)
     }
 }
 
