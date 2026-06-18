@@ -20,6 +20,32 @@ pub(crate) struct SseDecoder {
     data_lines: Vec<String>,
 }
 
+enum LineAction {
+    Dispatch,
+    Ignore,
+    Data(String),
+}
+
+fn decode_line(line: &[u8]) -> Result<&str, Error> {
+    std::str::from_utf8(line).map_err(|source| Error::Decode {
+        context: "reading SSE line".to_owned(),
+        source: Box::new(source),
+    })
+}
+
+fn classify_line(line: &str) -> LineAction {
+    if line.is_empty() {
+        return LineAction::Dispatch;
+    }
+    if line.starts_with(':') {
+        return LineAction::Ignore;
+    }
+    let Some(data) = line.strip_prefix("data:") else {
+        return LineAction::Ignore;
+    };
+    LineAction::Data(data.strip_prefix(' ').unwrap_or(data).to_owned())
+}
+
 impl SseDecoder {
     pub(crate) fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseItem>, Error> {
         self.buffer.extend_from_slice(bytes);
@@ -33,7 +59,8 @@ impl SseDecoder {
             if line.ends_with(b"\r") {
                 line.pop();
             }
-            items.extend(self.process_line_bytes(&line)?);
+            let action = classify_line(decode_line(&line)?);
+            items.extend(self.apply_line(action)?);
         }
 
         if !self.data_lines.is_empty() {
@@ -46,39 +73,26 @@ impl SseDecoder {
     fn drain_lines(&mut self) -> Result<Vec<SseItem>, Error> {
         let mut items = Vec::new();
         while let Some(position) = self.buffer.iter().position(|byte| *byte == b'\n') {
-            let mut line = self.buffer.drain(..=position).collect::<Vec<_>>();
-            line.pop();
-            if line.ends_with(b"\r") {
-                line.pop();
+            let mut end = position;
+            if end > 0 && self.buffer[end - 1] == b'\r' {
+                end -= 1;
             }
-            items.extend(self.process_line_bytes(&line)?);
+            let action = classify_line(decode_line(&self.buffer[..end])?);
+            self.buffer.drain(..=position);
+            items.extend(self.apply_line(action)?);
         }
         Ok(items)
     }
 
-    fn process_line_bytes(&mut self, line: &[u8]) -> Result<Vec<SseItem>, Error> {
-        let line = std::str::from_utf8(line).map_err(|source| Error::Decode {
-            context: "reading SSE line".to_owned(),
-            source: Box::new(source),
-        })?;
-        self.process_line(line)
-    }
-
-    fn process_line(&mut self, line: &str) -> Result<Vec<SseItem>, Error> {
-        if line.is_empty() {
-            return self.dispatch_event();
+    fn apply_line(&mut self, action: LineAction) -> Result<Vec<SseItem>, Error> {
+        match action {
+            LineAction::Dispatch => self.dispatch_event(),
+            LineAction::Ignore => Ok(Vec::new()),
+            LineAction::Data(data) => {
+                self.data_lines.push(data);
+                Ok(Vec::new())
+            }
         }
-
-        if line.starts_with(':') {
-            return Ok(Vec::new());
-        }
-
-        let Some(data) = line.strip_prefix("data:") else {
-            return Ok(Vec::new());
-        };
-        self.data_lines
-            .push(data.strip_prefix(' ').unwrap_or(data).to_owned());
-        Ok(Vec::new())
     }
 
     fn dispatch_event(&mut self) -> Result<Vec<SseItem>, Error> {
