@@ -86,7 +86,12 @@ impl SseDecoder {
             return Ok(Vec::new());
         }
 
-        let data = std::mem::take(&mut self.data_lines).join("\n");
+        let mut lines = std::mem::take(&mut self.data_lines);
+        let data = if lines.len() == 1 {
+            lines.pop().unwrap()
+        } else {
+            lines.join("\n")
+        };
         if data == "[DONE]" {
             return Ok(vec![SseItem::Done]);
         }
@@ -165,17 +170,15 @@ fn decode_chunk(data: &str) -> Result<Vec<SseItem>, Error> {
                 });
             }
             for call in delta.tool_calls.unwrap_or_default() {
+                let (name, arguments) = match call.function {
+                    Some(WireFunction { name, arguments }) => (name, arguments.unwrap_or_default()),
+                    None => (None, String::new()),
+                };
                 events.push(RawEvent::ToolCallDelta {
                     index: call.index,
                     id: call.id,
-                    name: call
-                        .function
-                        .as_ref()
-                        .and_then(|function| function.name.clone()),
-                    arguments: call
-                        .function
-                        .and_then(|function| function.arguments)
-                        .unwrap_or_default(),
+                    name,
+                    arguments,
                 });
             }
         }

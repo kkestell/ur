@@ -87,7 +87,12 @@ impl SseDecoder {
             return Ok(Vec::new());
         }
 
-        let data = std::mem::take(&mut self.data_lines).join("\n");
+        let mut lines = std::mem::take(&mut self.data_lines);
+        let data = if lines.len() == 1 {
+            lines.pop().unwrap()
+        } else {
+            lines.join("\n")
+        };
         if data == "[DONE]" {
             return Ok(vec![SseItem::Done]);
         }
