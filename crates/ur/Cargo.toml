@@ -37,5 +37,29 @@ name = "deepseek"
 required-features = ["deepseek"]
 
 [[example]]
+name = "deepseek_minimal"
+required-features = ["deepseek"]
+
+[[example]]
+name = "deepseek_builder"
+required-features = ["deepseek"]
+
+[[example]]
+name = "deepseek_thinking"
+required-features = ["deepseek"]
+
+[[example]]
+name = "deepseek_json"
+required-features = ["deepseek"]
+
+[[example]]
+name = "deepseek_strict"
+required-features = ["deepseek"]
+
+[[example]]
+name = "deepseek_session"
+required-features = ["deepseek"]
+
+[[example]]
 name = "openai"
 required-features = ["openai"]

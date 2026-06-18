@@ -140,3 +140,9 @@
 - Removed the `tool_schemas` `debug_assert!` that looked up the runtime name against the schema-name index: on a runtime-name/schema-name mismatch it panicked in debug builds on exactly the input the adjacent `runtime_name != schema.name` check converts into `Error::Config`. The explicit check is the authoritative guard; `tool_by_name` is now test-only.
 - The agent loop holds pending tool calls in a `VecDeque` drained with `pop_front`, replacing the `Vec` plus `next_tool_index` cursor and dropping the second per-call `ToolCall` clone. Strict ascending execution order is unchanged.
 - Deferred: extracting the byte-identical `SseDecoder` framing and the `strict_schema`/`make_nullable` rewriters into a shared home. The duplication is real and zero-divergence, but no shared crate exists today and the providers diverge in every other respect; the relocation is left for a future consolidation.
+
+## DeepSeek examples
+
+- Added six runnable DeepSeek example targets under `crates/ur/examples`, each gated on `required-features = ["deepseek"]`: `deepseek_minimal` (smallest text-only loop), `deepseek_builder` (client builder knobs with env key fallback), `deepseek_thinking` (`Thinking::Enabled` + `reasoning_effort`), `deepseek_json` (`ResponseFormat::JsonObject`), `deepseek_strict` (hand-written strict tool on the beta host), and `deepseek_session` (multi-turn replay). These complement the existing full-flow `deepseek` example rather than expanding the doc prose.
+- The strict example uses a hand-written `Tool` impl because the `#[ur::tool]` macro always emits a non-strict schema; `ToolSchema::strict(true)` is the only way to request the strict subset, and the beta base URL is required.
+- Verified all six compile, pass `cargo clippy --examples --features deepseek -- -D warnings`, and run live against the DeepSeek API (key sourced from `.env`). `deepseek.md` §8 now lists the example targets and cross-references the relevant sections.
