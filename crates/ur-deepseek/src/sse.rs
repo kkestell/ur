@@ -160,17 +160,15 @@ fn decode_chunk(data: &str) -> Result<Vec<SseItem>, Error> {
                 events.push(RawEvent::ReasoningDelta(reasoning_content));
             }
             for call in delta.tool_calls.unwrap_or_default() {
+                let (name, arguments) = match call.function {
+                    Some(WireFunction { name, arguments }) => (name, arguments.unwrap_or_default()),
+                    None => (None, String::new()),
+                };
                 events.push(RawEvent::ToolCallDelta {
                     index: call.index,
                     id: call.id,
-                    name: call
-                        .function
-                        .as_ref()
-                        .and_then(|function| function.name.clone()),
-                    arguments: call
-                        .function
-                        .and_then(|function| function.arguments)
-                        .unwrap_or_default(),
+                    name,
+                    arguments,
                 });
             }
         }

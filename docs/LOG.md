@@ -103,3 +103,8 @@
 - Audited the exported facade/core/provider surface against `docs/API.md` while adding docs. A temporary root re-export expansion in `ur-core` was reverted to keep the public surface aligned with the documented module layout.
 - Verified normal and MSRV validation: `cargo fmt --all --check`, `cargo clippy --workspace --all-features --all-targets -- -D warnings`, `cargo test --workspace --all-features`, `cargo +1.88 test --workspace --all-features`, `cargo doc --workspace --all-features --no-deps`, and the ignored live DeepSeek smoke tests.
 - Deferred the pre-1.0 stability decision for `DeepSeekHttpClient::from_reqwest(reqwest::Client)`. It remains the only public signature naming `reqwest`; before 1.0 it should either move behind a compatibility boundary or wait for a 1.x `reqwest`.
+
+## Phase 10
+
+- Added a project `README.md` with a quick-start example, feature summary, crate layout table, provider seam sketch, settings example, MSRV, and license notice.
+- Kept the README concise; it links to `docs/API.md` and `docs/DEEPSEEK.md` for the full contract rather than duplicating them.

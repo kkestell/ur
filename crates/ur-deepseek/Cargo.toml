@@ -17,6 +17,7 @@ default = ["serde"]
 serde = ["ur-core/serde"]
 
 [dependencies]
+bytes.workspace = true
 futures-util.workspace = true
 reqwest.workspace = true
 serde.workspace = true

@@ -1347,6 +1347,7 @@ dependencies = [
 name = "ur-deepseek"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "futures-util",
  "reqwest",
  "serde",
