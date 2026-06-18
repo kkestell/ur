@@ -19,3 +19,15 @@
 - Implemented `Hash` for `ToolSchema` with an order-stable recursive JSON hash instead of serializing `JsonValue`; this avoids violating `Eq` if another crate enables `serde_json/preserve_order`.
 - Updated the DeepSeek placeholder provider to satisfy the new `Provider` seam with an empty stream and no catalog facts, deferring real DeepSeek behavior to later phases.
 - Deferred agent/model/session behavior, request construction, tool registration validation, macro expansion, and provider networking to their planned phases.
+
+## Phase 3
+
+- Replaced the placeholder handles with real `Model<P>`, `Agent<P>`, and `Session<P>` state matching the documented constructor and builder surface.
+- `Model::new` now resolves `model_spec` and `model_notice` exactly once, caches the optional `ModelSpec`, and emits deprecation notices through `tracing::warn!`; later accessors and request construction use only cached data.
+- Stored providers behind `Arc<P>` inside `Model` so cloning models, agents, and sessions stays cheap and does not require `P: Clone`; public `Debug` for handles remains opaque and does not require `P: Debug`.
+- Kept generation-setting builders infallible. `Session::send` performs the local `max_tokens` checks and surfaces `Error::Config` through `EventStream` before provider `chat` is called.
+- Cached tool schemas at registration time so requests preserve registration order. Tool name validation, duplicate detection, and runtime-name/schema-name mismatch checks are deferred to `send`, keeping `Agent::tool` infallible.
+- Implemented session initialization with a system message, read-only history access, reset to the system prompt, and request construction that stages the current user turn without committing history.
+- Added a minimal `EventStream<'_>` implementation for Phase 3 preflight errors. The full provider event loop, successful-turn event emission, history commit/rollback, and tool execution remain deferred to Phase 4.
+- Removed leftover placeholder-era accessors that were not part of `docs/API.md`, avoiding accidental public API expansion before the public surface is locked.
+- Added coverage for registered-tool lookup by name, deprecated-model warning emission, and constructing `Model<Arc<dyn Provider>>` through the facade compile contracts after independent review flagged those gaps.

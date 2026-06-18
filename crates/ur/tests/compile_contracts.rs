@@ -109,7 +109,9 @@ impl ur::Tool for EchoTool {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _provider: Arc<dyn ur::Provider> = Arc::new(FakeProvider);
+    let provider: Arc<dyn ur::Provider> = Arc::new(FakeProvider);
+    let model = ur::Model::new(provider, "known");
+    let _agent = ur::Agent::new("system", model);
     let _tool: Arc<dyn ur::Tool> = Arc::new(EchoTool);
 
     serde_json::to_string(&ur::UserMessage::from("hello"))?;

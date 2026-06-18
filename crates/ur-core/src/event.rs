@@ -1,12 +1,48 @@
 //! Event types produced by the agent loop.
 
 use std::hash::Hash;
+use std::marker::PhantomData;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use crate::tool::ToolArguments;
+use crate::{Result, Stream};
 
 /// Opaque stream of events returned by a session.
-#[derive(Debug)]
-pub struct EventStream;
+pub struct EventStream<'a> {
+    pending: Option<Result<Event>>,
+    _session: PhantomData<&'a mut ()>,
+}
+
+impl<'a> EventStream<'a> {
+    pub(crate) fn empty() -> Self {
+        Self {
+            pending: None,
+            _session: PhantomData,
+        }
+    }
+
+    pub(crate) fn from_error(error: crate::Error) -> Self {
+        Self {
+            pending: Some(Err(error)),
+            _session: PhantomData,
+        }
+    }
+}
+
+impl std::fmt::Debug for EventStream<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventStream").finish_non_exhaustive()
+    }
+}
+
+impl Stream for EventStream<'_> {
+    type Item = Result<Event>;
+
+    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(self.pending.take())
+    }
+}
 
 /// An event yielded by the provider-agnostic agent loop.
 #[derive(Clone, Debug, Eq, PartialEq)]

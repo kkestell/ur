@@ -62,6 +62,8 @@ Done when:
 
 ## Phase 3: Model, Agent, Session state, and request construction
 
+Status: Complete.
+
 Build:
 
 - Implement `Model<P>` with provider-bound model id, read-only catalog facts, chainable generation settings, and local `max_tokens` validation rules.
