@@ -101,6 +101,36 @@ let model = ur::Model::new(provider, "gpt-5.5")
     .response_format(ur::ResponseFormat::JsonObject);
 ```
 
+## Examples
+
+Runnable examples live in [`crates/ur/examples`](crates/ur/examples). Run one with `cargo run`:
+
+```sh
+# Provider-agnostic; runs offline against a scripted fake provider.
+cargo run -p ur --example agent
+
+# OpenAI examples (default features); need OPENAI_API_KEY.
+cargo run -p ur --example minimal
+
+# DeepSeek examples; need the `deepseek` feature and DEEPSEEK_API_KEY.
+cargo run -p ur --example thinking --features deepseek
+```
+
+| Example    | Provider     | Shows                                                       |
+| ---------- | ------------ | ----------------------------------------------------------- |
+| `agent`    | fake (local) | The full agent loop with tools, no network or key required. |
+| `minimal`  | OpenAI       | The smallest send-and-stream program.                       |
+| `openai`   | OpenAI       | The complete OpenAI flow with tool calls.                   |
+| `builder`  | OpenAI       | Configuring `OpenAiClient` through its builder.             |
+| `session`  | OpenAI       | A multi-turn conversation with retained history.            |
+| `json`     | OpenAI       | Requesting a JSON-object response.                          |
+| `effort`   | OpenAI       | Tuning `ReasoningEffort`.                                   |
+| `strict`   | OpenAI       | A hand-written strict-mode tool schema.                     |
+| `deepseek` | DeepSeek     | The complete DeepSeek flow with tool calls.                 |
+| `thinking` | DeepSeek     | Toggling `Thinking` mode.                                   |
+
+Every example except `agent` calls a live API and requires the matching API key in the environment. The DeepSeek examples also require `--features deepseek`.
+
 ## Minimum supported Rust version
 
 MSRV is Rust 1.88.

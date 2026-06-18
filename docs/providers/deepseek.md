@@ -260,15 +260,12 @@ Error body is the OpenAI shape `{"error": {"message", "type", "code"}}`. For the
 
 ## 8. Complete example
 
-Runnable example targets live in [`crates/ur/examples`](../../crates/ur/examples) (all require the `deepseek` feature and `$DEEPSEEK_API_KEY`):
+The DeepSeek example targets in [`crates/ur/examples`](../../crates/ur/examples) require the `deepseek` feature and `$DEEPSEEK_API_KEY`:
 
-- `deepseek_minimal` — the smallest text-only request and stream loop.
-- `deepseek_builder` — configuring the client builder (timeout, retries, `user_id`, key fallback).
-- `deepseek_thinking` — `Thinking::Enabled` with `reasoning_effort` (§2).
-- `deepseek_json` — `ResponseFormat::JsonObject` output.
-- `deepseek_strict` — a hand-written strict-mode tool on the beta host (§4).
-- `deepseek_session` — a multi-turn conversation with automatic reasoning-content replay (§3).
+- `thinking` — the `Thinking::Enabled` toggle (§2), which DeepSeek honors and OpenAI ignores.
 - `deepseek` — the full tool-using flow below.
+
+The provider-agnostic `ur` features (minimal flow, client builder, JSON output, multi-turn sessions, strict tools, reasoning effort) are shown with OpenAI in the same directory.
 
 ```rust
 use futures_util::StreamExt;

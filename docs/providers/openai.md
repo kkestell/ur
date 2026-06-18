@@ -145,18 +145,28 @@ Message shapes:
 
 Streaming chunk mapping:
 
-| Chunk field                           | `RawEvent`                                           |
-| ------------------------------------- | ---------------------------------------------------- |
-| `choices[0].delta.content`            | `TextDelta(content)`                                 |
-| `choices[0].delta.tool_calls[i]`      | `ToolCallDelta { index, id, name, arguments }`       |
-| deprecated `choices[0].delta.function_call` | `ToolCallDelta` at index `0` with a synthetic id       |
-| `choices[0].finish_reason`            | terminal reason recorded for `Done`                  |
-| final chunk `usage` with empty choices | `Usage` carried on `Done`                            |
-| `data: [DONE]`                        | end of provider stream                               |
+| Chunk field                                 | `RawEvent`                                       |
+| ------------------------------------------- | ------------------------------------------------ |
+| `choices[0].delta.content`                  | `TextDelta(content)`                             |
+| `choices[0].delta.tool_calls[i]`            | `ToolCallDelta { index, id, name, arguments }`   |
+| deprecated `choices[0].delta.function_call` | `ToolCallDelta` at index `0` with a synthetic id |
+| `choices[0].finish_reason`                  | terminal reason recorded for `Done`              |
+| final chunk `usage` with empty choices      | `Usage` carried on `Done`                        |
+| `data: [DONE]`                              | end of provider stream                           |
 
 Finish reasons map as: `stop` -> `Stop`, `length` -> `Length`, `content_filter` -> `ContentFilter`, `tool_calls` and deprecated `function_call` -> `ToolCalls`, unknown strings -> `Other`. The deprecated `delta.function_call` stream shape is accepted only as a compatibility path; new requests use modern `tools`.
 
 ## 6. Complete example
+
+Focused example targets in [`crates/ur/examples`](../../crates/ur/examples) demonstrate one `ur` feature each (all require the `openai` feature and `$OPENAI_API_KEY`):
+
+- `minimal` — the smallest text-only request and stream loop.
+- `builder` — configuring the client builder (timeout, retries, `user`, key fallback).
+- `json` — `ResponseFormat::JsonObject` output (§2).
+- `session` — a multi-turn conversation with automatic history replay.
+- `strict` — a hand-written strict-mode tool (§3).
+- `effort` — `ReasoningEffort` control (§2).
+- `openai` — the full tool-using flow below.
 
 ```rust
 use futures_util::StreamExt;

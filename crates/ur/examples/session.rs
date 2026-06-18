@@ -1,14 +1,10 @@
-//! A multi-turn conversation. `Session` retains history (including each
-//! assistant turn's `reasoning_content`) and replays it on every turn, so the
-//! reasoning-content 400 described in the provider docs cannot occur. Requires
-//! `DEEPSEEK_API_KEY`; built but not run as part of the test suite.
+//! A multi-turn conversation. `Session` retains the full message history and
+//! replays it on every turn, so the model keeps earlier context. Requires
+//! `OPENAI_API_KEY`; built but not run as part of the test suite.
 
 use futures_util::StreamExt;
 
-async fn turn(
-    session: &mut ur::Session<ur::deepseek::DeepSeekClient>,
-    prompt: &str,
-) -> ur::Result<()> {
+async fn turn(session: &mut ur::Session<ur::openai::OpenAiClient>, prompt: &str) -> ur::Result<()> {
     println!("> {prompt}");
     let mut events = session.send(prompt);
     while let Some(event) = events.next().await {
@@ -22,8 +18,8 @@ async fn turn(
 
 #[tokio::main]
 async fn main() -> ur::Result<()> {
-    let client = ur::deepseek::DeepSeekClient::try_from_env()?;
-    let model = ur::Model::new(client, "deepseek-v4-pro");
+    let client = ur::openai::OpenAiClient::try_from_env()?;
+    let model = ur::Model::new(client, "gpt-5.4-nano");
     let agent = ur::Agent::new("You are a concise assistant.", model);
 
     let mut session = agent.session();

@@ -1,18 +1,17 @@
-//! Thinking and reasoning effort. With thinking enabled the backend ignores
-//! `temperature`/`top_p`, so `ur` omits them; `reasoning_effort` is aliased
-//! (Low/Medium -> High, ExtraHigh -> Max). Requires `DEEPSEEK_API_KEY`; built
-//! but not run as part of the test suite.
+//! Thinking mode. DeepSeek honors the `Thinking` toggle (OpenAI's Chat
+//! Completions ignores it). With thinking enabled the backend ignores
+//! `temperature`/`top_p`, so `ur` omits them; `Thinking::Disabled` turns
+//! reasoning off and lets sampling settings through. Requires
+//! `DEEPSEEK_API_KEY`; built but not run as part of the test suite.
 
 use futures_util::StreamExt;
 
-use ur::{Model, ReasoningEffort, Thinking};
+use ur::{Model, Thinking};
 
 #[tokio::main]
 async fn main() -> ur::Result<()> {
     let client = ur::deepseek::DeepSeekClient::try_from_env()?;
-    let model = Model::new(client, "deepseek-v4-pro")
-        .thinking(Thinking::Enabled)
-        .reasoning_effort(ReasoningEffort::Max);
+    let model = Model::new(client, "deepseek-v4-pro").thinking(Thinking::Enabled);
 
     let agent = ur::Agent::new("You are a careful reasoner.", model);
 

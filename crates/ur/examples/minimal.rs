@@ -1,13 +1,13 @@
-//! The smallest useful DeepSeek program: build a client from the environment,
-//! send one message, and stream the text back. Requires `DEEPSEEK_API_KEY`;
-//! built but not run as part of the test suite.
+//! The smallest useful program: build a client from the environment, send one
+//! message, and stream the text back. Requires `OPENAI_API_KEY`; built but not
+//! run as part of the test suite.
 
 use futures_util::StreamExt;
 
 #[tokio::main]
 async fn main() -> ur::Result<()> {
-    let client = ur::deepseek::DeepSeekClient::try_from_env()?;
-    let model = ur::Model::new(client, "deepseek-v4-pro");
+    let client = ur::openai::OpenAiClient::try_from_env()?;
+    let model = ur::Model::new(client, "gpt-5.4-nano");
     let agent = ur::Agent::new("You are a concise assistant.", model);
 
     let mut session = agent.session();

@@ -1,7 +1,9 @@
-//! Strict-mode tools. Strict requires the beta host and applies to the whole
-//! tool set. The `#[ur::tool]` macro always emits a non-strict schema, so a
-//! strict tool is written by hand with `ToolSchema::strict(true)`. Requires
-//! `DEEPSEEK_API_KEY`; built but not run as part of the test suite.
+//! Strict-mode tools. A strict `ToolSchema` constrains the model's tool-call
+//! arguments to the schema. The `#[ur::tool]` macro always emits a non-strict
+//! schema, so a strict tool is written by hand with `ToolSchema::strict(true)`.
+//! OpenAI accepts strict and non-strict tools in the same request and needs no
+//! special host. Requires `OPENAI_API_KEY`; built but not run as part of the
+//! test suite.
 
 use futures_util::StreamExt;
 
@@ -36,9 +38,8 @@ impl Tool for GetUser {
 
 #[tokio::main]
 async fn main() -> ur::Result<()> {
-    // Strict mode requires the beta base URL.
-    let client = ur::deepseek::DeepSeekClient::builder().beta(true).build()?;
-    let model = Model::new(client, "deepseek-v4-pro");
+    let client = ur::openai::OpenAiClient::try_from_env()?;
+    let model = Model::new(client, "gpt-5.4-nano");
     let agent = Agent::new("Use tools when useful.", model).tool(GetUser);
 
     let mut session = agent.session();
