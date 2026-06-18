@@ -209,11 +209,8 @@ fn generate(func: &ItemFn, params: &[Param], config: &ToolConfig) -> TokenStream
     let fields = params.iter().map(|p| {
         let ident = &p.ident;
         let ty = &p.ty;
-        match config
-            .param_docs
-            .iter()
-            .find(|(n, _)| n == &ident.to_string())
-        {
+        let ident_str = ident.to_string();
+        match config.param_docs.iter().find(|(n, _)| *n == ident_str) {
             Some((_, desc)) => quote! { #[schemars(description = #desc)] #ident: #ty },
             None => quote! { #ident: #ty },
         }
