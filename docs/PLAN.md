@@ -38,6 +38,8 @@ Done when:
 
 ## Phase 2: Core data model, settings, and errors
 
+Status: Complete.
+
 Build:
 
 - Implement `ur-core` public aliases, `Error`, `Result`, `UserMessage`, model/settings enums, `Usage`, `FinishReason`, `ToolOutput`, `ToolSchema`, `ToolArguments`, `MessageRole`, `ToolCall`, `Message`, `Request`, `RawEvent`, `ModelSpec`, and `ModelNotice`.
