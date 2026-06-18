@@ -6,7 +6,7 @@
 //! provider crates depend on `ur-core` directly.
 //!
 //! The full provider-agnostic contract is maintained in the repository
-//! [API specification](https://github.com/kkestell/ur/blob/main/docs/API.md).
+//! [API specification](https://github.com/kkestell/ur/blob/main/.k/API.md).
 //!
 //! # Example
 //!

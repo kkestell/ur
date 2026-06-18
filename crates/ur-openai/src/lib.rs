@@ -5,7 +5,7 @@
 //! `ur::openai` with the `openai` feature enabled.
 //!
 //! See the repository
-//! [OpenAI provider specification](https://github.com/kkestell/ur/blob/main/docs/OPENAI.md)
+//! [OpenAI provider specification](https://github.com/kkestell/ur/blob/main/docs/providers/openai.md)
 //! for the wire mapping, generation-setting semantics, strict mode, and retry
 //! behavior this crate implements.
 

@@ -7,9 +7,9 @@
 //! available as [`openai`].
 //!
 //! The full public contract is maintained in the repository
-//! [API specification](https://github.com/kkestell/ur/blob/main/docs/API.md).
+//! [API specification](https://github.com/kkestell/ur/blob/main/.k/API.md).
 //! Provider-specific behavior is documented by each provider, for example
-//! [DeepSeek](https://github.com/kkestell/ur/blob/main/docs/DEEPSEEK.md).
+//! [DeepSeek](https://github.com/kkestell/ur/blob/main/docs/providers/deepseek.md).
 //!
 //! # Example
 //!

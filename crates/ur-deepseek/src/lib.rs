@@ -5,7 +5,7 @@
 //! `ur::deepseek` with the `deepseek` feature enabled.
 //!
 //! See the repository
-//! [DeepSeek provider specification](https://github.com/kkestell/ur/blob/main/docs/DEEPSEEK.md)
+//! [DeepSeek provider specification](https://github.com/kkestell/ur/blob/main/docs/providers/deepseek.md)
 //! for the wire mapping, generation-setting semantics, strict mode, and retry
 //! behavior this crate implements.
 //!

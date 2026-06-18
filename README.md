@@ -54,13 +54,13 @@ Set `OPENAI_API_KEY` in your environment (or pass the key explicitly to `OpenAiC
 
 ## Crates
 
-| Crate | Role |
-| --- | --- |
-| `ur` | Facade: re-exports `ur-core` and enabled provider crates. |
-| `ur-core` | Provider-agnostic types: `Agent`, `Model`, `Session`, events, the `Provider` trait, `Error`. |
-| `ur-macros` | The `#[ur::tool]` proc-macro. |
-| `ur-openai` | OpenAI `Provider` implementation. |
-| `ur-deepseek` | DeepSeek `Provider` implementation. |
+| Crate         | Role                                                                                         |
+| ------------- | -------------------------------------------------------------------------------------------- |
+| `ur`          | Facade: re-exports `ur-core` and enabled provider crates.                                    |
+| `ur-core`     | Provider-agnostic types: `Agent`, `Model`, `Session`, events, the `Provider` trait, `Error`. |
+| `ur-macros`   | The `#[ur::tool]` proc-macro.                                                                |
+| `ur-openai`   | OpenAI `Provider` implementation.                                                            |
+| `ur-deepseek` | DeepSeek `Provider` implementation.                                                          |
 
 ## Provider seam
 
@@ -84,7 +84,7 @@ impl Provider for MyProvider {
 }
 ```
 
-See [`docs/API.md`](docs/API.md) for the full contract, [`docs/OPENAI.md`](docs/OPENAI.md) for the default provider, and [`docs/DEEPSEEK.md`](docs/DEEPSEEK.md) for the DeepSeek provider.
+See [`docs/providers/openai.md`](docs/providers/openai.md) for the default provider and [`docs/providers/deepseek.md`](docs/providers/deepseek.md) for the DeepSeek provider.
 
 ## Settings
 
