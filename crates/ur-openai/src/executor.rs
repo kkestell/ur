@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use futures_util::TryStreamExt;
+use bytes::Bytes;
 use reqwest::header::RETRY_AFTER;
 use serde::Deserialize;
 use serde_json::Value;
@@ -42,7 +42,7 @@ struct ChatStream {
 
 enum State {
     Connecting(BoxFuture<'static, Result<reqwest::Response>>),
-    Reading(BoxStream<'static, std::result::Result<Vec<u8>, reqwest::Error>>),
+    Reading(BoxStream<'static, std::result::Result<Bytes, reqwest::Error>>),
     Done,
 }
 
@@ -79,9 +79,7 @@ impl Stream for ChatStream {
             match &mut this.state {
                 State::Connecting(future) => match future.as_mut().poll(cx) {
                     Poll::Ready(Ok(response)) => {
-                        this.state = State::Reading(Box::pin(
-                            response.bytes_stream().map_ok(|bytes| bytes.to_vec()),
-                        ));
+                        this.state = State::Reading(Box::pin(response.bytes_stream()));
                     }
                     Poll::Ready(Err(error)) => {
                         this.state = State::Done;
