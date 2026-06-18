@@ -201,7 +201,7 @@ impl<'a> EventStream<'a> {
         let Some(tool) = self
             .tools
             .iter()
-            .find(|tool| tool.schema.name == call.name)
+            .find(|tool| tool.name == call.name)
             .map(|tool| Arc::clone(&tool.tool))
         else {
             let output = ToolOutput::Err(format!("unknown tool '{}'", call.name));
@@ -235,7 +235,7 @@ impl<'a> EventStream<'a> {
 
     fn commit(&mut self) {
         if let Some(history) = self.session_history.as_mut() {
-            **history = self.pending_history.clone();
+            **history = std::mem::take(&mut self.pending_history);
         }
         self.session_history = None;
     }
@@ -332,7 +332,7 @@ impl Stream for EventStream<'_> {
 
 pub(crate) struct StreamTool {
     pub(crate) tool: Arc<dyn Tool>,
-    pub(crate) schema: ToolSchema,
+    pub(crate) name: String,
 }
 
 struct RunningTool {

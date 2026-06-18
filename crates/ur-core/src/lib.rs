@@ -398,7 +398,7 @@ impl<P: Provider> Session<P> {
             .iter()
             .map(|registered| StreamTool {
                 tool: Arc::clone(&registered.tool),
-                schema: registered.schema.clone(),
+                name: registered.schema.name.clone(),
             })
             .collect();
 
