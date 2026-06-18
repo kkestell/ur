@@ -307,7 +307,6 @@ impl<P: Provider> Agent<P> {
             let runtime_name = registered.tool.name();
             validate_tool_name(runtime_name)?;
             validate_tool_name(&registered.schema.name)?;
-            debug_assert!(self.tool_by_name(runtime_name).is_some());
 
             if runtime_name != registered.schema.name {
                 return Err(Error::Config {
@@ -330,6 +329,7 @@ impl<P: Provider> Agent<P> {
         Ok(schemas)
     }
 
+    #[cfg(test)]
     fn tool_by_name(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools
             .iter()
