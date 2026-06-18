@@ -2,18 +2,6 @@
 
 This plan implements the public contract in `API.md` and the DeepSeek-specific contract in `DEEPSEEK.md`. The phase descriptions intentionally avoid restating every API detail; `API.md` remains the source of truth for exact public signatures and semantics.
 
-## Workflow
-
-1. Do the work using the `/krust` skill.
-   - Code comments must not reference phases or the plan itself.
-2. Run `cargo fmt`, `cargo clippy`, and `cargo test` for the relevant scope and fix any issues.
-3. Update the phase status in this document.
-4. Run `/kreview` and address any feedback.
-5. Log decisions, trade-offs, and deferred work in `docs/LOG.md` under a "Phase X" section.
-6. Commit changes to version control following the 7 rules of great commit messages. No Co-authored-by or commit message attribution.
-
-When testing the DeepSeek provider, use the `DEEPSEEK_API_KEY` in `.env` for live tests. Cost is not a concern.
-
 ## Global completion criteria
 
 The project is complete when all of these hold:
@@ -29,6 +17,8 @@ The project is complete when all of these hold:
 - Optional live DeepSeek smoke tests are ignored by default and run only when `DEEPSEEK_API_KEY` is set.
 
 ## Phase 1: Workspace and crate skeleton
+
+Status: Complete.
 
 Build:
 

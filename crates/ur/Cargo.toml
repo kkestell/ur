@@ -1,0 +1,24 @@
+[package]
+name = "ur"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+description = "Async tool-using LLM agents over a pluggable provider backend"
+keywords = ["llm", "agent", "ai", "tools", "async"]
+categories = ["api-bindings", "asynchronous"]
+
+[features]
+default = ["serde", "deepseek"]
+serde = ["ur-core/serde", "ur-deepseek?/serde"]
+deepseek = ["dep:ur-deepseek"]
+
+[dependencies]
+ur-core = { version = "0.1.0", path = "../ur-core", default-features = false }
+ur-deepseek = { version = "0.1.0", path = "../ur-deepseek", default-features = false, optional = true }
+ur-macros = { version = "0.1.0", path = "../ur-macros" }
+

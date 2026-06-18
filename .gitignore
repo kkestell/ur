@@ -1,2 +1,5 @@
 # Secrets
 .env
+
+# Rust build output
+target/
