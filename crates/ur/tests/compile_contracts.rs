@@ -55,14 +55,17 @@ fn ur_dependency(features: &[&str]) -> String {
         .join(", ");
 
     format!(
-        r#"path = "{}", default-features = false, features = [{features}]"#,
+        r#"package = "ur-rs", path = "{}", default-features = false, features = [{features}]"#,
         root.join("crates").join("ur").display()
     )
 }
 
 fn ur_dependency_with_default_features() -> String {
     let root = workspace_root();
-    format!(r#"path = "{}""#, root.join("crates").join("ur").display())
+    format!(
+        r#"package = "ur-rs", path = "{}""#,
+        root.join("crates").join("ur").display()
+    )
 }
 
 #[test]

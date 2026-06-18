@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-documentation.workspace = true
 homepage.workspace = true
 description = "Provider-agnostic core types for ur"
 keywords = ["llm", "agent", "ai", "tools", "async"]
@@ -23,7 +22,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-ur-macros = { version = "0.1.0", path = "../ur-macros" }
+ur-macros = { version = "0.1.0-alpha.1", path = "../ur-macros" }
 
 [dev-dependencies]
 futures-util.workspace = true

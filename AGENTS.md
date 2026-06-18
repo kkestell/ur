@@ -18,15 +18,15 @@ This is a Cargo workspace of five crates plus docs.
 - `crates/ur-macros/` — The `#[ur::tool]` proc-macro that turns an `async fn` into a registrable tool with a derived JSON Schema. Has `trybuild` UI tests under `tests/ui`.
 - `crates/ur-openai/` — OpenAI `Provider` implementation: HTTP client, request mapping, SSE parsing, and tool-call executor.
 - `crates/ur-deepseek/` — DeepSeek `Provider` implementation, plus a model `catalog`; same client/request/sse/executor shape as the OpenAI crate.
-- `crates/ur/` — Public facade crate: re-exports `ur-core`, `ur-macros`, and feature-enabled providers. Holds the runnable `examples/` and the workspace integration/compile tests under `tests/`.
+- `crates/ur/` — Public facade crate, published to crates.io as `ur-rs` but imported as `ur` (via `[lib] name = "ur"`). Re-exports `ur-core`, `ur-macros`, and feature-enabled providers. Holds the runnable `examples/` and the workspace integration/compile tests under `tests/`.
 - `docs/providers/` — Per-provider reference docs (`openai.md`, `deepseek.md`).
 
 ## Commands
 
-Standard Cargo across the workspace. The `ur` facade defaults to the `openai` feature; enable `deepseek` explicitly when needed.
+Standard Cargo across the workspace. The facade (package `ur-rs`) defaults to the `openai` feature; enable `deepseek` explicitly when needed.
 
-- Build: `cargo build` (whole workspace) — provider-feature combos: `cargo build -p ur --features deepseek`
+- Build: `cargo build` (whole workspace) — provider-feature combos: `cargo build -p ur-rs --features deepseek`
 - Test: `cargo test`
-- Run an example: `cargo run -p ur --example <name>` (e.g. `agent` runs offline; OpenAI examples need `OPENAI_API_KEY`; DeepSeek examples need `--features deepseek` and `DEEPSEEK_API_KEY`)
+- Run an example: `cargo run -p ur-rs --example <name>` (e.g. `agent` runs offline; OpenAI examples need `OPENAI_API_KEY`; DeepSeek examples need `--features deepseek` and `DEEPSEEK_API_KEY`)
 - Lint: `cargo clippy --all-targets`
 - Format: `cargo fmt`

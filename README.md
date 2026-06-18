@@ -41,11 +41,11 @@ async fn main() -> ur::Result<()> {
 
 ## Quick start
 
-Add `ur` to your `Cargo.toml`:
+Add the crate to your `Cargo.toml`. It is published as `ur-rs` and imported as `ur`:
 
 ```toml
 [dependencies]
-ur = "0.1"
+ur = { package = "ur-rs", version = "0.1" }
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 ```
@@ -56,7 +56,7 @@ Set `OPENAI_API_KEY` in your environment (or pass the key explicitly to `OpenAiC
 
 | Crate         | Role                                                                                         |
 | ------------- | -------------------------------------------------------------------------------------------- |
-| `ur`          | Facade: re-exports `ur-core` and enabled provider crates.                                    |
+| `ur-rs`       | Facade (imported as `ur`): re-exports `ur-core` and enabled provider crates.                 |
 | `ur-core`     | Provider-agnostic types: `Agent`, `Model`, `Session`, events, the `Provider` trait, `Error`. |
 | `ur-macros`   | The `#[ur::tool]` proc-macro.                                                                |
 | `ur-openai`   | OpenAI `Provider` implementation.                                                            |

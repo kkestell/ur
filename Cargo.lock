@@ -1315,24 +1315,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
-name = "ur"
-version = "0.1.0"
-dependencies = [
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "trybuild",
- "ur-core",
- "ur-deepseek",
- "ur-macros",
- "ur-openai",
- "wiremock",
-]
-
-[[package]]
 name = "ur-core"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -1346,7 +1330,7 @@ dependencies = [
 
 [[package]]
 name = "ur-deepseek"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "bytes",
  "futures-util",
@@ -1361,7 +1345,7 @@ dependencies = [
 
 [[package]]
 name = "ur-macros"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1371,7 +1355,7 @@ dependencies = [
 
 [[package]]
 name = "ur-openai"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "bytes",
  "futures-util",
@@ -1380,6 +1364,22 @@ dependencies = [
  "serde_json",
  "tokio",
  "ur-core",
+ "wiremock",
+]
+
+[[package]]
+name = "ur-rs"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "trybuild",
+ "ur-core",
+ "ur-deepseek",
+ "ur-macros",
+ "ur-openai",
  "wiremock",
 ]
 

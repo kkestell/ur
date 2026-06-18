@@ -1,16 +1,22 @@
 [package]
-name = "ur"
+name = "ur-rs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-documentation.workspace = true
 homepage.workspace = true
 description = "Async tool-using LLM agents over a pluggable provider backend"
 keywords = ["llm", "agent", "ai", "tools", "async"]
 categories = ["api-bindings", "asynchronous"]
+readme = "../../README.md"
+
+[lib]
+name = "ur"
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = ["serde", "openai"]
@@ -19,10 +25,10 @@ deepseek = ["dep:ur-deepseek"]
 openai = ["dep:ur-openai"]
 
 [dependencies]
-ur-core = { version = "0.1.0", path = "../ur-core", default-features = false }
-ur-deepseek = { version = "0.1.0", path = "../ur-deepseek", default-features = false, optional = true }
-ur-macros = { version = "0.1.0", path = "../ur-macros" }
-ur-openai = { version = "0.1.0", path = "../ur-openai", default-features = false, optional = true }
+ur-core = { version = "0.1.0-alpha.1", path = "../ur-core", default-features = false }
+ur-deepseek = { version = "0.1.0-alpha.1", path = "../ur-deepseek", default-features = false, optional = true }
+ur-macros = { version = "0.1.0-alpha.1", path = "../ur-macros" }
+ur-openai = { version = "0.1.0-alpha.1", path = "../ur-openai", default-features = false, optional = true }
 
 [dev-dependencies]
 futures-util.workspace = true

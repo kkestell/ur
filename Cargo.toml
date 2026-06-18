@@ -9,13 +9,12 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 authors = ["Kyle Kestell <kyle@kestell.org>"]
 repository = "https://github.com/kkestell/ur"
-documentation = "https://docs.rs/ur"
 homepage = "https://github.com/kkestell/ur"
 
 [workspace.dependencies]
