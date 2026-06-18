@@ -3,8 +3,8 @@
 //! `ur` owns the provider-agnostic agent loop: conversation history, streaming
 //! events, reasoning content, tool dispatch, and rollback if a turn fails. The
 //! facade re-exports the core API, the [`tool`] macro, and provider crates
-//! enabled by Cargo features. With default features, the DeepSeek provider is
-//! available as [`deepseek`].
+//! enabled by Cargo features. With default features, the OpenAI provider is
+//! available as [`openai`].
 //!
 //! The full public contract is maintained in the repository
 //! [API specification](https://github.com/kkestell/ur/blob/main/docs/API.md).
@@ -15,7 +15,7 @@
 //!
 //! This uses a small scripted provider so it runs without network access. Swap
 //! the provider construction for a concrete provider such as
-//! [`deepseek::DeepSeekClient`] to call a live model.
+//! [`openai::OpenAiClient`] to call a live model.
 //!
 //! ```no_run
 //! use std::collections::VecDeque;
@@ -110,6 +110,9 @@ pub use ur_core::__rt;
 
 #[cfg(feature = "deepseek")]
 pub use ur_deepseek as deepseek;
+
+#[cfg(feature = "openai")]
+pub use ur_openai as openai;
 
 #[cfg(test)]
 mod tests {

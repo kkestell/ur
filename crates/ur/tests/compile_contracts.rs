@@ -60,6 +60,11 @@ fn ur_dependency(features: &[&str]) -> String {
     )
 }
 
+fn ur_dependency_with_default_features() -> String {
+    let root = workspace_root();
+    format!(r#"path = "{}""#, root.join("crates").join("ur").display())
+}
+
 #[test]
 fn serde_feature_exposes_serializable_public_records_and_object_safe_traits() {
     let output = check_fixture(
@@ -259,6 +264,73 @@ fn main() {
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("deepseek"),
         "fixture failed for an unexpected reason\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn openai_module_is_available_with_default_features() {
+    let output = check_fixture(
+        "openai_default",
+        &ur_dependency_with_default_features(),
+        r##"
+fn main() {
+    let client = ur::openai::OpenAiClient::new("key");
+    let _model = ur::Model::new(client, "gpt-5.5");
+}
+"##,
+    );
+
+    assert!(
+        output.status.success(),
+        "fixture failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn deepseek_module_is_absent_with_default_features() {
+    let output = check_fixture(
+        "deepseek_default_absent",
+        &ur_dependency_with_default_features(),
+        r##"
+fn main() {
+    let _ = ur::deepseek::DeepSeekClient::new("key");
+}
+"##,
+    );
+
+    assert!(
+        !output.status.success(),
+        "fixture unexpectedly compiled\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("deepseek"),
+        "fixture failed for an unexpected reason\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn deepseek_module_is_available_with_feature() {
+    let output = check_fixture(
+        "deepseek_present",
+        &ur_dependency(&["deepseek"]),
+        r##"
+fn main() {
+    let client = ur::deepseek::DeepSeekClient::new("key");
+    let _model = ur::Model::new(client, "deepseek-v4-pro");
+}
+"##,
+    );
+
+    assert!(
+        output.status.success(),
+        "fixture failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
 }

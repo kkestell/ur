@@ -13,14 +13,16 @@ keywords = ["llm", "agent", "ai", "tools", "async"]
 categories = ["api-bindings", "asynchronous"]
 
 [features]
-default = ["serde", "deepseek"]
-serde = ["ur-core/serde", "ur-deepseek?/serde"]
+default = ["serde", "openai"]
+serde = ["ur-core/serde", "ur-deepseek?/serde", "ur-openai?/serde"]
 deepseek = ["dep:ur-deepseek"]
+openai = ["dep:ur-openai"]
 
 [dependencies]
 ur-core = { version = "0.1.0", path = "../ur-core", default-features = false }
 ur-deepseek = { version = "0.1.0", path = "../ur-deepseek", default-features = false, optional = true }
 ur-macros = { version = "0.1.0", path = "../ur-macros" }
+ur-openai = { version = "0.1.0", path = "../ur-openai", default-features = false, optional = true }
 
 [dev-dependencies]
 futures-util.workspace = true
@@ -33,3 +35,7 @@ wiremock.workspace = true
 [[example]]
 name = "deepseek"
 required-features = ["deepseek"]
+
+[[example]]
+name = "openai"
+required-features = ["openai"]

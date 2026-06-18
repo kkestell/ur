@@ -4,6 +4,7 @@ members = [
     "crates/ur-core",
     "crates/ur-deepseek",
     "crates/ur-macros",
+    "crates/ur-openai",
 ]
 resolver = "3"
 

@@ -33,7 +33,7 @@ Done when:
 - `cargo test --workspace --all-targets` succeeds with placeholder crates.
 - `cargo test -p ur --no-default-features` succeeds, proving the facade compiles without any provider enabled.
 - `cargo doc --workspace --no-deps` succeeds.
-- The facade has the intended feature graph: `serde` default-on, `deepseek` default-on, and provider-free builds still expose the core API.
+- The facade has the intended feature graph: `serde` and the selected default provider are default-on, optional providers are feature-gated, and provider-free builds still expose the core API.
 - `cargo tree -p ur-core -e normal` contains no `tokio` or `reqwest`, proving the provider-agnostic core stays runtime/HTTP-agnostic.
 
 ## Phase 2: Core data model, settings, and errors
@@ -133,7 +133,7 @@ Status: Complete.
 Build:
 
 - Re-export the provider-agnostic surface from `ur-core`, the `#[ur::tool]` macro from `ur-macros`, public dependency aliases, and enabled provider crates under their facade modules.
-- Wire feature flags so `ur` compiles provider-free and with DeepSeek enabled by default.
+- Wire feature flags so `ur` compiles provider-free and with the default provider enabled.
 - Add examples that match `API.md` and `DEEPSEEK.md`, using `futures_util::StreamExt`.
 - Add public API lock tests using compile-pass examples and, if practical, `rustdoc`/`trybuild` assertions rather than brittle textual snapshots.
 - Add the macro pass/runtime tests that require `::ur` to resolve: the `API.md` macro examples, `agent.tool(add)` registration, sync and async invocation, `Option<T>` optionality, successful output JSON serialization, error stringification, generated schema assertions, and preservation of visibility/doc comments/`#[cfg]`/ordinary item attributes.
@@ -141,7 +141,7 @@ Build:
 Done when:
 
 - `cargo test -p ur --no-default-features` passes and examples using only a fake provider compile.
-- `cargo test -p ur --all-features` passes and `ur::deepseek::DeepSeekClient` is available only when the `deepseek` feature is enabled.
+- `cargo test -p ur --all-features` passes and provider modules are available only when their matching features are enabled.
 - The complete examples in `API.md` and `DEEPSEEK.md` compile as doctests or example targets.
 - `trybuild` pass tests prove the `#[ur::tool]` examples from `API.md` compile through the facade and can be registered with `agent.tool(add)`.
 - `trybuild` compile-fail tests through the facade prove non-serializable returns and non-deserializable/non-schema parameters fail with clear diagnostics.
@@ -210,6 +210,24 @@ Done when:
 - Ignored live tests are documented, require `DEEPSEEK_API_KEY`, and do not run in normal CI.
 - Every invariant from `API.md` that is behavioral rather than purely documentary has at least one focused unit, compile, integration, or provider test.
 - The remaining known gaps, if any, are documented explicitly as deferred work rather than implicit TODOs, including the pre-1.0 stability decision for `DeepSeekHttpClient::from_reqwest(reqwest::Client)`.
+
+## Phase 11: OpenAI provider
+
+Status: Complete.
+
+Build:
+
+- Add `ur-openai` as an OpenAI Chat Completions provider with client/builder API, request encoding, streaming SSE decoding, retry/error mapping, docs, examples, and facade feature wiring.
+- Make `openai` default-on in the `ur` facade and keep `deepseek` optional-only.
+- Keep the OpenAI model catalog empty for v1; callers may use current OpenAI model ids and unknown ids remain constructible.
+
+Done when:
+
+- `cargo test -p ur-openai --all-features` passes.
+- Facade compile contracts prove `ur::openai` is available with default features, `ur::deepseek` is absent by default, DeepSeek is present with `deepseek`, and provider-free builds still compile.
+- Mocked OpenAI integration drives a full tool round trip through `Session::send`.
+- Ignored live OpenAI smoke tests load `OPENAI_API_KEY` from the environment or workspace `.env`.
+- `docs/OPENAI.md`, `README.md`, and provider feature docs describe OpenAI as the default provider and DeepSeek as optional.
 
 ## Suggested implementation order
 

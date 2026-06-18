@@ -76,6 +76,8 @@ categories = ["api-bindings", "asynchronous"]
 
 Each provider is an optional-dependency feature on the facade in the shape `ur-<name> = { optional = true }`, `<name> = ["dep:ur-<name>"]`. Enabling the feature pulls in the provider crate and re-exports it as `ur::<name>`. A provider feature may be included in `default` for turnkey use; whether it is, and the model ids it offers, are documented by that provider crate.
 
+In this workspace, `openai` is default-on for turnkey `cargo add ur` usage and `deepseek` is optional-only. Provider-free builds still work with `default-features = false`.
+
 `ur-macros` and `serde` are pulled in by `ur-core` unconditionally for tool support (`schemars` for JSON-Schema generation, `serde` for argument de/serialization); tools cannot work without them. `ur-core` also depends on `tracing` to emit model-construction notices such as provider deprecation warnings. The facade's `serde` feature only toggles the _public_ `Serialize`/`Deserialize` impls listed in the feature table above. The intent is that callers can serialize conversations, provider test fixtures, and settings snapshots when the feature is enabled.
 
 Public aliases keep common dependency names under the `ur` namespace:

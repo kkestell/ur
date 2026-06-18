@@ -109,6 +109,19 @@
 - Added a project `README.md` with a quick-start example, feature summary, crate layout table, provider seam sketch, settings example, MSRV, and license notice.
 - Kept the README concise; it links to `docs/API.md` and `docs/DEEPSEEK.md` for the full contract rather than duplicating them.
 
+## Phase 11
+
+- Added `ur-openai`, a Chat Completions provider crate with `OpenAiClient`, `OpenAiClientBuilder`, and `OpenAiHttpClient`, following Rust casing guidance while exposing it through the facade as `ur::openai`.
+- Switched facade defaults from DeepSeek to OpenAI: `default = ["serde", "openai"]`; DeepSeek remains available behind `features = ["deepseek"]`.
+- Kept `Provider::model_spec` empty for OpenAI v1 rather than hardcoding fast-moving model windows and output caps. Unknown model ids remain constructible, and max-token upper bounds are left to OpenAI.
+- Implemented OpenAI request encoding for Chat Completions: streaming envelope, `max_completion_tokens`, `reasoning_effort`, sampling settings, JSON-object response format, tool declarations, per-tool strict mode, and complete assistant/tool history replay. `Thinking` is intentionally ignored because Chat Completions has no matching request field.
+- Implemented OpenAI SSE normalization with content deltas, function tool-call fragments, usage-on-final-chunk handling, `[DONE]` termination, deprecated `function_call` finish mapping to `ToolCalls`, and unknown finish reasons as `Other`.
+- After independent review, added compatibility decoding for deprecated streamed `delta.function_call` fragments. Because the legacy shape has no tool-call id, the provider synthesizes a stable id for the normalized core seam.
+- Implemented retry/error mapping for OpenAI statuses: retry `408/409/429/500/502/503/504`, map `401/403` to `Auth`, `404/422` to `InvalidParams`, and preserve numeric `Retry-After`.
+- Live OpenAI smoke tests were run against the workspace `.env` key and passed for both text-only and tool-call flows. The text smoke sets `ReasoningEffort::Low` with a 256-token cap so the test checks visible text rather than failing when a reasoning model spends a tiny cap internally.
+- Added `docs/OPENAI.md`, an `openai` example target, mocked facade integration coverage, feature-gating compile contracts, and ignored live OpenAI smoke tests that read `OPENAI_API_KEY` from the environment or `.env`.
+- Deferred a pre-1.0 decision mirroring DeepSeek: `OpenAiHttpClient::from_reqwest(reqwest::Client)` names `reqwest` in public API and should be reviewed before stabilization.
+
 ## Simplification review
 
 - A whole-codebase, behavior-preserving simplification review surfaced ten candidate findings; four batches were applied and verified, each with `cargo fmt`, `cargo clippy --all-features --all-targets -- -D warnings`, and `cargo test` plus the full workspace suite and `cargo +1.88` MSRV run. The ignored live DeepSeek smoke tests were re-run because the streaming byte path changed.

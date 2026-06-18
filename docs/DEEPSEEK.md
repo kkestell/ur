@@ -9,17 +9,17 @@ This document covers everything DeepSeek-specific: the client and its builder, h
 
 ## Installation
 
-The `deepseek` feature is **on by default**, so `cargo add ur` is turnkey:
+The `deepseek` feature is optional. OpenAI is the default provider, so enable DeepSeek explicitly:
 
 ```toml
 [dependencies]
-# default: DeepSeek included
+# default: OpenAI included
 ur = "0.1"
-# or: a different provider only
-ur = { version = "0.1", default-features = false, features = ["openai"] }
+# DeepSeek instead
+ur = { version = "0.1", default-features = false, features = ["serde", "deepseek"] }
 ```
 
-On the facade it is an optional-dependency feature in `default`: `ur-deepseek = { optional = true }`, `deepseek = ["dep:ur-deepseek"]`, and `default = ["serde", "deepseek"]`.
+On the facade it is an optional-dependency feature: `ur-deepseek = { optional = true }` and `deepseek = ["dep:ur-deepseek"]`.
 
 ---
 
