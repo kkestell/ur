@@ -17,6 +17,9 @@ pub use ur_core::{
 };
 pub use ur_macros::tool;
 
+#[doc(hidden)]
+pub use ur_core::__rt;
+
 #[cfg(feature = "deepseek")]
 pub use ur_deepseek as deepseek;
 

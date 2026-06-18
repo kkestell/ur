@@ -22,3 +22,10 @@ ur-core = { version = "0.1.0", path = "../ur-core", default-features = false }
 ur-deepseek = { version = "0.1.0", path = "../ur-deepseek", default-features = false, optional = true }
 ur-macros = { version = "0.1.0", path = "../ur-macros" }
 
+[dev-dependencies]
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+trybuild = "1.0.116"
+

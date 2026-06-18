@@ -14,6 +14,15 @@ pub use futures_core::Stream;
 pub use schemars::JsonSchema;
 pub use serde_json::{Error as JsonError, Value as JsonValue};
 
+#[doc(hidden)]
+pub mod __rt {
+    //! Plumbing referenced by code generated from `#[ur::tool]`. Not a stable
+    //! public API; the macro expands to paths under `::ur::__rt`.
+    pub use ::schemars;
+    pub use ::serde;
+    pub use ::serde_json;
+}
+
 pub use event::EventStream;
 use event::StreamTool;
 use provider::{Message, ModelNotice, ModelSpec, Provider, Settings};

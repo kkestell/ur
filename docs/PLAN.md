@@ -128,6 +128,8 @@ Done when:
 
 ## Phase 6: Facade crate and public API lock
 
+Status: Complete.
+
 Build:
 
 - Re-export the provider-agnostic surface from `ur-core`, the `#[ur::tool]` macro from `ur-macros`, public dependency aliases, and enabled provider crates under their facade modules.

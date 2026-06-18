@@ -1318,6 +1318,11 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 name = "ur"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "trybuild",
  "ur-core",
  "ur-deepseek",
  "ur-macros",

@@ -178,6 +178,92 @@ fn main() {
 }
 
 #[test]
+fn macro_non_serializable_return_fails_with_serialize_diagnostic() {
+    let output = check_fixture(
+        "macro_non_serializable_return",
+        &ur_dependency(&["serde"]),
+        r##"
+struct NotSerializable;
+
+#[ur::tool]
+async fn bad() -> NotSerializable {
+    NotSerializable
+}
+
+fn main() {}
+"##,
+    );
+
+    assert!(
+        !output.status.success(),
+        "fixture unexpectedly compiled\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Serialize"),
+        "fixture failed for an unexpected reason\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn macro_non_schema_parameter_fails_with_schema_diagnostic() {
+    let output = check_fixture(
+        "macro_non_schema_parameter",
+        &ur_dependency(&["serde"]),
+        r##"
+struct Opaque;
+
+#[ur::tool]
+async fn bad(value: Opaque) -> i64 {
+    let _ = value;
+    0
+}
+
+fn main() {}
+"##,
+    );
+
+    assert!(
+        !output.status.success(),
+        "fixture unexpectedly compiled\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("JsonSchema") && stderr.contains("Deserialize"),
+        "fixture failed for an unexpected reason\nstderr:\n{stderr}"
+    );
+}
+
+#[test]
+fn deepseek_module_is_absent_without_feature() {
+    let output = check_fixture(
+        "deepseek_absent",
+        &ur_dependency(&[]),
+        r##"
+fn main() {
+    let _ = ur::deepseek::DeepSeekClient::default();
+}
+"##,
+    );
+
+    assert!(
+        !output.status.success(),
+        "fixture unexpectedly compiled\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("deepseek"),
+        "fixture failed for an unexpected reason\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn user_message_has_no_default() {
     let output = check_fixture(
         "user_message_no_default",
