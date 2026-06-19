@@ -6,6 +6,7 @@ use ur_core::model::{ReasoningEffort, ResponseFormat, Thinking};
 use ur_core::provider::{Message, MessageRole, Request, Settings};
 use ur_core::schema::strict_schema;
 use ur_core::tool::ToolSchema;
+use ur_openai_compat::request::{content_value, encode_stop};
 
 use crate::catalog;
 
@@ -61,7 +62,7 @@ fn encode_settings(body: &mut Map<String, Value>, request: &Request) -> Result<(
     }
 
     encode_max_tokens(body, request)?;
-    encode_stop(body, settings)?;
+    encode_stop(body, settings, MAX_STOP_SEQUENCES)?;
 
     match &settings.response_format {
         ResponseFormat::Text => {}
@@ -109,24 +110,6 @@ fn encode_max_tokens(body: &mut Map<String, Value>, request: &Request) -> Result
     }
 
     body.insert("max_tokens".to_owned(), Value::from(max_tokens));
-    Ok(())
-}
-
-fn encode_stop(body: &mut Map<String, Value>, settings: &Settings) -> Result<(), Error> {
-    if settings.stop.is_empty() {
-        return Ok(());
-    }
-
-    if settings.stop.len() > MAX_STOP_SEQUENCES {
-        return Err(Error::Config {
-            message: format!(
-                "at most {MAX_STOP_SEQUENCES} stop sequences are allowed, got {}",
-                settings.stop.len()
-            ),
-        });
-    }
-
-    body.insert("stop".to_owned(), json!(settings.stop));
     Ok(())
 }
 
@@ -219,10 +202,6 @@ fn encode_message(message: &Message) -> Value {
     }
 
     Value::Object(object)
-}
-
-fn content_value(content: Option<&str>) -> Value {
-    content.map_or(Value::Null, |text| Value::String(text.to_owned()))
 }
 
 fn encode_tools(tools: &[ToolSchema], beta: bool) -> Result<Option<Value>, Error> {

@@ -1,263 +1,74 @@
-//! HTTP execution, retry policy, and provider error mapping.
+//! HTTP execution wired to the shared executor: DeepSeek's retry policy and
+//! error mapping.
 
-use std::collections::VecDeque;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Duration;
 
-use bytes::Bytes;
-use reqwest::header::RETRY_AFTER;
 use serde_json::Value;
 use ur_core::provider::RawEvent;
-use ur_core::{BoxFuture, BoxStream, Error, Result, Stream};
+use ur_core::{BoxStream, Error, Result};
+use ur_openai_compat::executor::Dialect;
+use ur_openai_compat::sse::DecodeChunk;
 
 use crate::client::Config;
-use crate::sse::{CompletionState, SseDecoder};
 
 pub(crate) fn chat(config: Arc<Config>, body: Value) -> BoxStream<'static, Result<RawEvent>> {
-    Box::pin(ChatStream {
-        state: State::Connecting(Box::pin(connect(Arc::clone(&config), body.clone()))),
-        config,
-        body,
-        decoder: SseDecoder::default(),
-        completion: CompletionState::default(),
-        ready: VecDeque::new(),
-        stream_retries: 0,
-        emitted_events: false,
-    })
+    ur_openai_compat::executor::chat(config, body)
 }
 
-struct ChatStream {
-    state: State,
-    config: Arc<Config>,
-    body: Value,
-    decoder: SseDecoder,
-    completion: CompletionState,
-    ready: VecDeque<RawEvent>,
-    stream_retries: u32,
-    emitted_events: bool,
-}
-
-enum State {
-    Connecting(BoxFuture<'static, Result<reqwest::Response>>),
-    Reading(BoxStream<'static, std::result::Result<Bytes, reqwest::Error>>),
-    Done,
-}
-
-impl ChatStream {
-    fn can_retry_stream_error(&self) -> bool {
-        !self.emitted_events && self.stream_retries < self.config.max_retries
+impl Dialect for Config {
+    fn http(&self) -> &reqwest::Client {
+        &self.http.client
     }
 
-    fn retry_after_stream_error(&mut self) {
-        self.stream_retries += 1;
-        self.decoder = SseDecoder::default();
-        self.completion = CompletionState::default();
-        self.ready.clear();
-        self.state = State::Connecting(Box::pin(connect_after_delay(
-            Arc::clone(&self.config),
-            self.body.clone(),
-            self.stream_retries - 1,
-        )));
+    fn api_key(&self) -> &str {
+        &self.api_key
     }
-}
 
-impl Stream for ChatStream {
-    type Item = Result<RawEvent>;
+    fn base_url(&self) -> &str {
+        &self.base_url
+    }
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
+    fn timeout(&self) -> Duration {
+        self.timeout
+    }
 
-        loop {
-            if let Some(event) = this.ready.pop_front() {
-                this.emitted_events = true;
-                return Poll::Ready(Some(Ok(event)));
-            }
+    fn max_retries(&self) -> u32 {
+        self.max_retries
+    }
 
-            match &mut this.state {
-                State::Connecting(future) => match future.as_mut().poll(cx) {
-                    Poll::Ready(Ok(response)) => {
-                        this.state = State::Reading(Box::pin(response.bytes_stream()));
-                    }
-                    Poll::Ready(Err(error)) => {
-                        this.state = State::Done;
-                        return Poll::Ready(Some(Err(error)));
-                    }
-                    Poll::Pending => return Poll::Pending,
-                },
-                State::Reading(stream) => match stream.as_mut().poll_next(cx) {
-                    Poll::Ready(Some(Ok(bytes))) => {
-                        if let Err(error) = push_items(
-                            &mut this.decoder,
-                            &mut this.completion,
-                            &mut this.ready,
-                            &bytes,
-                        ) {
-                            this.state = State::Done;
-                            return Poll::Ready(Some(Err(error)));
-                        }
+    fn decode_chunk(&self) -> DecodeChunk {
+        crate::sse::decode_chunk
+    }
 
-                        if this.completion.is_done() {
-                            this.state = State::Done;
-                        }
-                    }
-                    Poll::Ready(Some(Err(_error))) if this.can_retry_stream_error() => {
-                        this.retry_after_stream_error();
-                    }
-                    Poll::Ready(Some(Err(error))) => {
-                        this.state = State::Done;
-                        return Poll::Ready(Some(Err(transport(error))));
-                    }
-                    Poll::Ready(None) => {
-                        match finish_items(&mut this.decoder, &mut this.completion, &mut this.ready)
-                        {
-                            Ok(()) if this.completion.is_done() => {
-                                this.state = State::Done;
-                            }
-                            Ok(()) => {
-                                this.state = State::Done;
-                                return Poll::Ready(Some(Err(unexpected_eof())));
-                            }
-                            Err(error) => {
-                                this.state = State::Done;
-                                return Poll::Ready(Some(Err(error)));
-                            }
-                        }
-                    }
-                    Poll::Pending => return Poll::Pending,
-                },
-                State::Done => return Poll::Ready(None),
-            }
+    fn missing_finish_context(&self) -> &'static str {
+        "finishing DeepSeek SSE stream"
+    }
+
+    fn eof_context(&self) -> &'static str {
+        "reading DeepSeek SSE stream"
+    }
+
+    fn is_retryable_status(&self, status: u16) -> bool {
+        matches!(status, 408 | 429 | 500 | 502 | 503 | 504)
+    }
+
+    async fn status_error(
+        &self,
+        response: reqwest::Response,
+        retry_after: Option<Duration>,
+    ) -> Error {
+        let status = response.status().as_u16();
+        let message = error_message(response).await;
+
+        match status {
+            400 => Error::BadRequest { message },
+            401 => Error::Auth,
+            402 => Error::InsufficientFunds,
+            422 => Error::InvalidParams { message },
+            429 => Error::RateLimited { retry_after },
+            _ => Error::Server { status, message },
         }
-    }
-}
-
-async fn connect_after_delay(
-    config: Arc<Config>,
-    body: Value,
-    retry_attempt: u32,
-) -> Result<reqwest::Response> {
-    sleep_before_retry(retry_attempt, None).await;
-    connect(config, body).await
-}
-
-fn push_items(
-    decoder: &mut SseDecoder,
-    completion: &mut CompletionState,
-    ready: &mut VecDeque<RawEvent>,
-    bytes: &[u8],
-) -> Result<()> {
-    for item in decoder.push(bytes)? {
-        ready.extend(completion.apply(item)?);
-    }
-    Ok(())
-}
-
-fn finish_items(
-    decoder: &mut SseDecoder,
-    completion: &mut CompletionState,
-    ready: &mut VecDeque<RawEvent>,
-) -> Result<()> {
-    for item in decoder.finish()? {
-        ready.extend(completion.apply(item)?);
-    }
-    Ok(())
-}
-
-async fn connect(config: Arc<Config>, body: Value) -> Result<reqwest::Response> {
-    let url = endpoint_url(&config)?;
-    let mut attempt = 0;
-
-    loop {
-        let result = config
-            .http
-            .client
-            .post(url.clone())
-            .bearer_auth(&config.api_key)
-            .timeout(config.timeout)
-            .json(&body)
-            .send()
-            .await;
-
-        match result {
-            Ok(response) if response.status().is_success() => return Ok(response),
-            Ok(response) => {
-                let retry_after = retry_after(response.headers());
-                let status = response.status().as_u16();
-                let retryable = retryable_status(status);
-                let error = status_error(response, retry_after).await;
-                if retryable && attempt < config.max_retries {
-                    sleep_before_retry(attempt, retry_after).await;
-                    attempt += 1;
-                    continue;
-                }
-                return Err(error);
-            }
-            Err(error) => {
-                if retryable_transport_error(&error) && attempt < config.max_retries {
-                    sleep_before_retry(attempt, None).await;
-                    attempt += 1;
-                    continue;
-                }
-                return Err(transport(error));
-            }
-        }
-    }
-}
-
-fn endpoint_url(config: &Config) -> Result<reqwest::Url> {
-    let mut base = config.base_url.clone();
-    if !base.ends_with('/') {
-        base.push('/');
-    }
-    let base = reqwest::Url::parse(&base).map_err(|source| Error::Config {
-        message: format!(
-            "base_url '{}' is not a valid URL: {source}",
-            config.base_url
-        ),
-    })?;
-    base.join("chat/completions")
-        .map_err(|source| Error::Config {
-            message: format!(
-                "base_url '{}' cannot form chat endpoint: {source}",
-                config.base_url
-            ),
-        })
-}
-
-fn retryable_status(status: u16) -> bool {
-    matches!(status, 408 | 429 | 500 | 502 | 503 | 504)
-}
-
-fn retryable_transport_error(error: &reqwest::Error) -> bool {
-    error.is_timeout() || error.is_connect()
-}
-
-async fn sleep_before_retry(attempt: u32, retry_after: Option<Duration>) {
-    let backoff = Duration::from_millis(10 * 2_u64.pow(attempt.min(10)));
-    tokio::time::sleep(retry_after.unwrap_or(backoff)).await;
-}
-
-fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
-    headers
-        .get(RETRY_AFTER)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .map(Duration::from_secs)
-}
-
-async fn status_error(response: reqwest::Response, retry_after: Option<Duration>) -> Error {
-    let status = response.status().as_u16();
-    let message = error_message(response).await;
-
-    match status {
-        400 => Error::BadRequest { message },
-        401 => Error::Auth,
-        402 => Error::InsufficientFunds,
-        422 => Error::InvalidParams { message },
-        429 => Error::RateLimited { retry_after },
-        _ => Error::Server { status, message },
     }
 }
 
@@ -292,20 +103,6 @@ async fn error_message(response: reqwest::Response) -> String {
         default
     } else {
         message.to_owned()
-    }
-}
-
-fn transport(error: reqwest::Error) -> Error {
-    Error::Transport(Box::new(error))
-}
-
-fn unexpected_eof() -> Error {
-    Error::Decode {
-        context: "reading DeepSeek SSE stream".to_owned(),
-        source: Box::new(std::io::Error::new(
-            std::io::ErrorKind::UnexpectedEof,
-            "SSE stream ended before data: [DONE]",
-        )),
     }
 }
 

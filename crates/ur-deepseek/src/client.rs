@@ -202,12 +202,7 @@ impl DeepSeekClientBuilder {
 /// Resolves the API key from an explicit value, falling back to the
 /// environment. An empty value is treated as absent.
 fn resolve_api_key(explicit: Option<String>, from_env: Option<String>) -> Result<String> {
-    explicit
-        .or(from_env)
-        .filter(|key| !key.is_empty())
-        .ok_or_else(|| Error::Config {
-            message: format!("no API key set and {API_KEY_ENV} is empty or unset"),
-        })
+    ur_openai_compat::keys::resolve_api_key(explicit, from_env, API_KEY_ENV)
 }
 
 fn validate_user_id(user_id: &str) -> Result<()> {

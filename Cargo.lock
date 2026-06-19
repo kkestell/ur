@@ -1340,6 +1340,7 @@ dependencies = [
  "tokio",
  "tracing",
  "ur-core",
+ "ur-openai-compat",
  "wiremock",
 ]
 
@@ -1364,7 +1365,21 @@ dependencies = [
  "serde_json",
  "tokio",
  "ur-core",
+ "ur-openai-compat",
  "wiremock",
+]
+
+[[package]]
+name = "ur-openai-compat"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "ur-core",
 ]
 
 [[package]]
@@ -1378,6 +1393,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "ur-core",
+ "ur-openai-compat",
  "wiremock",
 ]
 

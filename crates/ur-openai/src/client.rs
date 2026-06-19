@@ -170,28 +170,11 @@ impl OpenAiClientBuilder {
 }
 
 fn resolve_api_key(explicit: Option<String>, from_env: Option<String>) -> Result<String> {
-    explicit
-        .or(from_env)
-        .filter(|key| !key.is_empty())
-        .ok_or_else(|| Error::Config {
-            message: format!("no API key set and {API_KEY_ENV} is empty or unset"),
-        })
+    ur_openai_compat::keys::resolve_api_key(explicit, from_env, API_KEY_ENV)
 }
 
 fn validate_user(user: &str) -> Result<()> {
-    let valid = !user.is_empty()
-        && user.len() <= MAX_USER_LEN
-        && user
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'));
-
-    if valid {
-        Ok(())
-    } else {
-        Err(Error::Config {
-            message: format!("invalid user '{user}'"),
-        })
-    }
+    ur_openai_compat::keys::validate_user(user, MAX_USER_LEN)
 }
 
 #[cfg(test)]

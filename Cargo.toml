@@ -5,6 +5,7 @@ members = [
     "crates/ur-deepseek",
     "crates/ur-macros",
     "crates/ur-openai",
+    "crates/ur-openai-compat",
     "crates/ur-openrouter",
 ]
 resolver = "3"

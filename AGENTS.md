@@ -12,13 +12,14 @@ THIS FILE MUST BE KEPT UP TO DATE AT ALL TIMES
 
 ## Codebase Map
 
-This is a Cargo workspace of six crates plus docs.
+This is a Cargo workspace of seven crates plus docs.
 
 - `crates/ur-core/` — Provider-agnostic core: `Agent`, `Model`, `Session`, the event stream, the `Provider` trait, tool plumbing (`tool.rs`), the shared strict-mode JSON Schema rewriter (`schema.rs`, used by every provider for strict tools and `json_schema` response formats), and `Error`.
 - `crates/ur-macros/` — The `#[ur::tool]` proc-macro that turns an `async fn` into a registrable tool with a derived JSON Schema. Has `trybuild` UI tests under `tests/ui`.
-- `crates/ur-openai/` — OpenAI `Provider` implementation: HTTP client, request mapping, SSE parsing, and tool-call executor.
-- `crates/ur-deepseek/` — DeepSeek `Provider` implementation, plus a model `catalog`; same client/request/sse/executor shape as the OpenAI crate.
-- `crates/ur-openrouter/` — OpenRouter `Provider` implementation (OpenAI-compatible aggregator); same client/request/sse/executor shape as the OpenAI crate, adding app-attribution headers (`HTTP-Referer`/`X-Title`), a `reasoning` object, and `ProviderRouting`.
+- `crates/ur-openai-compat/` — Shared plumbing for the OpenAI-compatible providers: API-key/user validation (`keys.rs`), request-body encode helpers (`request.rs`), SSE line framing + completion folding + generic wire structs (`sse.rs`), and the HTTP retry/stream state machine (`executor.rs`). Each provider supplies its deltas via the `executor::Dialect` trait and its own `decode_chunk`.
+- `crates/ur-openai/` — OpenAI `Provider` implementation over `ur-openai-compat`: client/config, request mapping, the `decode_chunk`/wire shapes, and a `Dialect` impl (retry table, error mapping).
+- `crates/ur-deepseek/` — DeepSeek `Provider` implementation over `ur-openai-compat`, plus a model `catalog`; keeps its divergent pieces local (reasoning_content, all-or-nothing strict tools, catalog max_tokens, thinking-gated sampling, untyped error-body extraction).
+- `crates/ur-openrouter/` — OpenRouter `Provider` implementation over `ur-openai-compat` (OpenAI-compatible aggregator), adding app-attribution headers (`HTTP-Referer`/`X-Title`) via the `Dialect`'s `decorate` hook, a `reasoning` object, and `ProviderRouting`.
 - `crates/ur/` — Public facade crate, published to crates.io as `ur-rs` but imported as `ur` (via `[lib] name = "ur"`). Re-exports `ur-core`, `ur-macros`, and feature-enabled providers. Holds the runnable `examples/` and the workspace integration/compile tests under `tests/`.
 - `docs/providers/` — Per-provider reference docs (`openai.md`, `deepseek.md`, `openrouter.md`).
 

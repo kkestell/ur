@@ -1,173 +1,17 @@
-//! SSE parsing and OpenRouter Chat Completions chunk normalization.
-
-use std::collections::VecDeque;
+//! OpenRouter Chat Completions chunk normalization over the shared SSE framing.
 
 use serde::Deserialize;
 use ur_core::Error;
 use ur_core::event::{FinishReason, Usage};
 use ur_core::provider::RawEvent;
+use ur_openai_compat::sse::{Chunk, SseItem, WireFunction, WireToolCall};
 
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) enum SseItem {
-    Events(Vec<RawEvent>),
-    Usage(Usage),
-    Done,
-}
-
-#[derive(Default)]
-pub(crate) struct SseDecoder {
-    buffer: Vec<u8>,
-    data_lines: Vec<String>,
-}
-
-enum LineAction {
-    Dispatch,
-    Ignore,
-    Data(String),
-}
-
-fn decode_line(line: &[u8]) -> Result<&str, Error> {
-    std::str::from_utf8(line).map_err(|source| Error::Decode {
-        context: "reading SSE line".to_owned(),
-        source: Box::new(source),
-    })
-}
-
-fn classify_line(line: &str) -> LineAction {
-    if line.is_empty() {
-        return LineAction::Dispatch;
-    }
-    // OpenRouter interleaves `: OPENROUTER PROCESSING` keep-alive comments that
-    // must be ignored like any other SSE comment line.
-    if line.starts_with(':') {
-        return LineAction::Ignore;
-    }
-    let Some(data) = line.strip_prefix("data:") else {
-        return LineAction::Ignore;
-    };
-    LineAction::Data(data.strip_prefix(' ').unwrap_or(data).to_owned())
-}
-
-impl SseDecoder {
-    pub(crate) fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseItem>, Error> {
-        self.buffer.extend_from_slice(bytes);
-        self.drain_lines()
-    }
-
-    pub(crate) fn finish(&mut self) -> Result<Vec<SseItem>, Error> {
-        let mut items = Vec::new();
-        if !self.buffer.is_empty() {
-            let mut line = std::mem::take(&mut self.buffer);
-            if line.ends_with(b"\r") {
-                line.pop();
-            }
-            let action = classify_line(decode_line(&line)?);
-            items.extend(self.apply_line(action)?);
-        }
-
-        if !self.data_lines.is_empty() {
-            items.extend(self.dispatch_event()?);
-        }
-
-        Ok(items)
-    }
-
-    fn drain_lines(&mut self) -> Result<Vec<SseItem>, Error> {
-        let mut items = Vec::new();
-        while let Some(position) = self.buffer.iter().position(|byte| *byte == b'\n') {
-            let mut end = position;
-            if end > 0 && self.buffer[end - 1] == b'\r' {
-                end -= 1;
-            }
-            let action = classify_line(decode_line(&self.buffer[..end])?);
-            self.buffer.drain(..=position);
-            items.extend(self.apply_line(action)?);
-        }
-        Ok(items)
-    }
-
-    fn apply_line(&mut self, action: LineAction) -> Result<Vec<SseItem>, Error> {
-        match action {
-            LineAction::Dispatch => self.dispatch_event(),
-            LineAction::Ignore => Ok(Vec::new()),
-            LineAction::Data(data) => {
-                self.data_lines.push(data);
-                Ok(Vec::new())
-            }
-        }
-    }
-
-    fn dispatch_event(&mut self) -> Result<Vec<SseItem>, Error> {
-        if self.data_lines.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut lines = std::mem::take(&mut self.data_lines);
-        let data = if lines.len() == 1 {
-            lines.pop().unwrap()
-        } else {
-            lines.join("\n")
-        };
-        if data == "[DONE]" {
-            return Ok(vec![SseItem::Done]);
-        }
-
-        decode_chunk(&data)
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct CompletionState {
-    finish_reason: Option<FinishReason>,
-    usage: Option<Usage>,
-    done: bool,
-}
-
-impl CompletionState {
-    pub(crate) fn apply(&mut self, item: SseItem) -> Result<VecDeque<RawEvent>, Error> {
-        let mut events = VecDeque::new();
-        match item {
-            SseItem::Events(raw_events) => {
-                for event in raw_events {
-                    match event {
-                        RawEvent::Done {
-                            finish_reason,
-                            usage: _,
-                        } => {
-                            self.finish_reason = Some(finish_reason);
-                        }
-                        other => events.push_back(other),
-                    }
-                }
-            }
-            SseItem::Usage(usage) => {
-                self.usage = Some(usage);
-            }
-            SseItem::Done => {
-                let finish_reason = self
-                    .finish_reason
-                    .take()
-                    .ok_or_else(missing_finish_reason)?;
-                events.push_back(RawEvent::Done {
-                    finish_reason,
-                    usage: self.usage.take(),
-                });
-                self.done = true;
-            }
-        }
-        Ok(events)
-    }
-
-    pub(crate) fn is_done(&self) -> bool {
-        self.done
-    }
-}
-
-fn decode_chunk(data: &str) -> Result<Vec<SseItem>, Error> {
-    let chunk: Chunk = serde_json::from_str(data).map_err(|source| Error::Decode {
-        context: "decoding OpenRouter SSE chunk".to_owned(),
-        source: Box::new(source),
-    })?;
+pub(crate) fn decode_chunk(data: &str) -> Result<Vec<SseItem>, Error> {
+    let chunk: Chunk<Delta, WireUsage> =
+        serde_json::from_str(data).map_err(|source| Error::Decode {
+            context: "decoding OpenRouter SSE chunk".to_owned(),
+            source: Box::new(source),
+        })?;
 
     let mut items = Vec::new();
     let mut events = Vec::new();
@@ -231,48 +75,12 @@ fn finish_reason(reason: &str) -> FinishReason {
     }
 }
 
-fn missing_finish_reason() -> Error {
-    Error::Decode {
-        context: "finishing OpenRouter SSE stream".to_owned(),
-        source: Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "SSE stream ended before a finish_reason chunk",
-        )),
-    }
-}
-
-#[derive(Deserialize)]
-struct Chunk {
-    #[serde(default)]
-    choices: Vec<Choice>,
-    usage: Option<WireUsage>,
-}
-
-#[derive(Deserialize)]
-struct Choice {
-    delta: Option<Delta>,
-    finish_reason: Option<String>,
-}
-
 #[derive(Deserialize)]
 struct Delta {
     content: Option<String>,
     reasoning: Option<String>,
     function_call: Option<WireFunction>,
     tool_calls: Option<Vec<WireToolCall>>,
-}
-
-#[derive(Deserialize)]
-struct WireToolCall {
-    index: u32,
-    id: Option<String>,
-    function: Option<WireFunction>,
-}
-
-#[derive(Deserialize)]
-struct WireFunction {
-    name: Option<String>,
-    arguments: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -317,32 +125,40 @@ struct CompletionTokensDetails {
 mod tests {
     use super::*;
     use serde_json::json;
+    use ur_openai_compat::sse::{CompletionState, Frame, SseDecoder, SseItem};
+
+    fn drive(
+        state: &mut CompletionState,
+        events: &mut Vec<RawEvent>,
+        frames: Vec<Frame>,
+    ) -> Result<(), Error> {
+        for frame in frames {
+            match frame {
+                Frame::Done => events.extend(state.apply(SseItem::Done)?),
+                Frame::Data(data) => {
+                    for item in decode_chunk(&data)? {
+                        events.extend(state.apply(item)?);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 
     fn decode(input: &str) -> Result<Vec<RawEvent>, Error> {
-        let mut decoder = SseDecoder::default();
-        let mut state = CompletionState::default();
-        let mut events = Vec::new();
-        for item in decoder.push(input.as_bytes())? {
-            events.extend(state.apply(item)?);
-        }
-        for item in decoder.finish()? {
-            events.extend(state.apply(item)?);
-        }
-        Ok(events)
+        decode_chunks(&[input.as_bytes()])
     }
 
     fn decode_chunks(chunks: &[&[u8]]) -> Result<Vec<RawEvent>, Error> {
         let mut decoder = SseDecoder::default();
-        let mut state = CompletionState::default();
+        let mut state = CompletionState::new("finishing OpenRouter SSE stream");
         let mut events = Vec::new();
         for chunk in chunks {
-            for item in decoder.push(chunk)? {
-                events.extend(state.apply(item)?);
-            }
+            let frames = decoder.push(chunk)?;
+            drive(&mut state, &mut events, frames)?;
         }
-        for item in decoder.finish()? {
-            events.extend(state.apply(item)?);
-        }
+        let frames = decoder.finish()?;
+        drive(&mut state, &mut events, frames)?;
         Ok(events)
     }
 
