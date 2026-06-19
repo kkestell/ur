@@ -247,6 +247,81 @@ fn main() {}
 }
 
 #[test]
+fn macro_tools_non_clone_state_fails_with_clone_diagnostic() {
+    let output = check_fixture(
+        "macro_tools_non_clone_state",
+        &ur_dependency(&["serde"]),
+        r##"
+struct State;
+
+#[ur::tools]
+impl State {
+    #[ur::tool]
+    async fn ping(&self) -> i64 {
+        1
+    }
+}
+
+fn main() {}
+"##,
+    );
+
+    assert!(
+        !output.status.success(),
+        "fixture unexpectedly compiled\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`State: Clone`"),
+        "expected a `Clone` bound diagnostic pointing at the state type\nstderr:\n{stderr}"
+    );
+}
+
+#[test]
+fn macro_tools_split_impl_blocks_conflict_on_tool_set() {
+    let output = check_fixture(
+        "macro_tools_split_impls",
+        &ur_dependency(&["serde"]),
+        r##"
+#[derive(Clone)]
+struct State;
+
+#[ur::tools]
+impl State {
+    #[ur::tool]
+    async fn a(&self) -> i64 {
+        1
+    }
+}
+
+#[ur::tools]
+impl State {
+    #[ur::tool]
+    async fn b(&self) -> i64 {
+        2
+    }
+}
+
+fn main() {}
+"##,
+    );
+
+    assert!(
+        !output.status.success(),
+        "fixture unexpectedly compiled\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("ToolSet"),
+        "expected a conflicting-`ToolSet`-impl diagnostic\nstderr:\n{stderr}"
+    );
+}
+
+#[test]
 fn deepseek_module_is_absent_without_feature() {
     let output = check_fixture(
         "deepseek_absent",

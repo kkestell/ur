@@ -2,9 +2,9 @@
 //!
 //! `ur` owns the provider-agnostic agent loop: conversation history, streaming
 //! events, reasoning content, tool dispatch, and rollback if a turn fails. The
-//! facade re-exports the core API, the [`tool`] macro, and provider crates
-//! enabled by Cargo features. With default features, the OpenAI provider is
-//! available as [`openai`].
+//! facade re-exports the core API, the [`tool`] and [`tools`] macros, and
+//! provider crates enabled by Cargo features. With default features, the OpenAI
+//! provider is available as [`openai`].
 //!
 //! The full public contract is maintained in the repository
 //! [API specification](https://github.com/kkestell/ur/blob/main/.k/API.md).
@@ -90,6 +90,57 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! # Stateful tools
+//!
+//! A free `#[ur::tool]` function is stateless: every parameter is deserialized
+//! from the model's arguments. For tools that need shared state — a database
+//! handle, an HTTP client, a cancel token — put `&self` methods on an
+//! `#[ur::tools]` inherent impl block. Each `#[ur::tool]`-marked method becomes a
+//! tool backed by a clone of the owning value; unmarked methods are left
+//! untouched. Register the whole set with [`Agent::tool_set`].
+//!
+//! The state type must be `Clone + Send + Sync + 'static`. That is cheap when its
+//! fields are `Arc<_>` or already-`Clone` handles, so clones share one underlying
+//! state rather than copying it. Each marked method takes a plain `&self`
+//! receiver (use interior mutability rather than `&mut self`); its remaining
+//! parameters and return type derive a JSON Schema exactly as for a free
+//! `#[ur::tool]` function, with `self` excluded from the schema. The same
+//! `#[ur::tool(...)]` arguments (`description`, `name`, per-parameter docs) apply.
+//!
+//! ```
+//! use std::sync::Arc;
+//! use std::sync::atomic::{AtomicI64, Ordering};
+//!
+//! #[derive(Clone)]
+//! struct Counter {
+//!     count: Arc<AtomicI64>,
+//! }
+//!
+//! #[ur::tools]
+//! impl Counter {
+//!     #[ur::tool(description = "Add to the running count and return the new total.")]
+//!     async fn bump(&self, by: i64) -> i64 {
+//!         self.count.fetch_add(by, Ordering::SeqCst) + by
+//!     }
+//!
+//!     #[ur::tool(description = "Return the running count.")]
+//!     fn total(&self) -> i64 {
+//!         self.count.load(Ordering::SeqCst)
+//!     }
+//! }
+//!
+//! # fn build(model: ur::Model<impl ur::Provider>) {
+//! let counter = Counter { count: Arc::new(AtomicI64::new(0)) };
+//! let agent = ur::Agent::new("You are concise.", model).tool_set(counter);
+//! # }
+//! ```
+//!
+//! All of a state type's `#[ur::tool]` methods belong in a single `#[ur::tools]`
+//! block: the macro emits one `impl ToolSet` per block, so two blocks on the same
+//! type collide as conflicting implementations of [`ToolSet`]. To group tools that
+//! must live in separate impl blocks, keep one `#[ur::tools]` block and hand-write
+//! a [`ToolSet`] for the rest.
 
 #![forbid(unsafe_code)]
 
@@ -98,12 +149,12 @@ pub use ur_core::model::{JsonSchemaFormat, ReasoningEffort, ResponseFormat, Thin
 pub use ur_core::provider::{
     Message, MessageRole, ModelNotice, ModelSpec, Provider, RawEvent, Request, Settings, ToolCall,
 };
-pub use ur_core::tool::{Tool, ToolArguments, ToolSchema};
+pub use ur_core::tool::{Tool, ToolArguments, ToolSchema, ToolSet};
 pub use ur_core::{
     Agent, BoxFuture, BoxStream, Error, EventStream, JsonError, JsonSchema, JsonValue, Model,
     Result, Session, Stream, UserMessage,
 };
-pub use ur_macros::tool;
+pub use ur_macros::{tool, tools};
 
 #[doc(hidden)]
 pub use ur_core::__rt;

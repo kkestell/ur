@@ -1,0 +1,5 @@
+error: `#[ur::tools]` does not take arguments; configure each tool with `#[ur::tool(...)]` on its method
+ --> tests/ui/tools_nonempty_attr.rs:5:9
+  |
+5 | #[tools(name = "x")]
+  |         ^^^^^^^^^^

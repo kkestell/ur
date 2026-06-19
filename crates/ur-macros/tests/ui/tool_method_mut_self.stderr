@@ -1,0 +1,5 @@
+error: `#[ur::tool]` methods must take a plain `&self` receiver (use interior mutability instead of `&mut self`; use a free `#[ur::tool] fn` for stateless tools)
+ --> tests/ui/tool_method_mut_self.rs:8:19
+  |
+8 |     async fn ping(&mut self) -> i64 {
+  |                   ^^^^^^^^^

@@ -16,6 +16,16 @@ pub trait Tool: Send + Sync + 'static {
     fn call(&self, args: ToolArguments) -> BoxFuture<'static, std::result::Result<String, String>>;
 }
 
+/// A collection of tools sharing one owner, registered together.
+///
+/// Implemented by the `#[ur::tools]` macro for an inherent impl block whose
+/// `#[ur::tool]` methods each become a tool backed by a clone of the owning
+/// state. Register the whole set with [`Agent::tool_set`](crate::Agent::tool_set).
+pub trait ToolSet {
+    /// Consumes the set and returns its tools as registrable values.
+    fn into_tools(self) -> Vec<std::sync::Arc<dyn Tool>>;
+}
+
 impl<T: Tool + ?Sized> Tool for std::sync::Arc<T> {
     fn name(&self) -> &str {
         (**self).name()

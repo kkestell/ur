@@ -240,6 +240,135 @@ fn public_tools_are_reachable_across_modules() {
     assert_eq!(attribute_preservation::gated.name(), "gated");
 }
 
+/// A stateful tool set: two `#[ur::tool]` methods sharing one cloned `Counter`.
+/// `bump` mutates shared state across calls; `total` reads it. The state lives in
+/// `Arc` fields so the required `Clone` is cheap.
+#[derive(Clone)]
+struct Counter {
+    count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    log: std::sync::Arc<std::sync::Mutex<Vec<i64>>>,
+}
+
+#[ur::tools]
+impl Counter {
+    #[ur::tool(description = "Add to the running count and return the new total.")]
+    async fn bump(&self, by: i64) -> i64 {
+        self.log.lock().unwrap().push(by);
+        self.count
+            .fetch_add(by as usize, std::sync::atomic::Ordering::SeqCst);
+        self.count.load(std::sync::atomic::Ordering::SeqCst) as i64
+    }
+
+    #[ur::tool(description = "Return the running count.")]
+    fn total(&self) -> i64 {
+        self.count.load(std::sync::atomic::Ordering::SeqCst) as i64
+    }
+
+    // Unmarked: still a normal inherent method, not exposed as a tool.
+    #[allow(dead_code)]
+    fn reset(&self) {
+        self.count.store(0, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[tokio::test]
+async fn tool_set_methods_share_and_mutate_state() {
+    use ur::ToolSet;
+
+    let counter = Counter {
+        count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+    };
+    let tools = counter.clone().into_tools();
+    let bump = tools.iter().find(|t| t.name() == "bump").unwrap();
+    let total = tools.iter().find(|t| t.name() == "total").unwrap();
+
+    assert_eq!(
+        bump.call(ToolArguments::from(r#"{"by":5}"#)).await,
+        Ok("5".to_owned())
+    );
+    assert_eq!(
+        bump.call(ToolArguments::from(r#"{"by":3}"#)).await,
+        Ok("8".to_owned())
+    );
+    // `total` reads the same shared state mutated through `bump`.
+    assert_eq!(
+        total.call(ToolArguments::from("{}")).await,
+        Ok("8".to_owned())
+    );
+    // Mutations are visible on the original owner: shared `Arc`, not a deep copy.
+    assert_eq!(counter.count.load(std::sync::atomic::Ordering::SeqCst), 8);
+    assert_eq!(*counter.log.lock().unwrap(), vec![5, 3]);
+}
+
+#[test]
+fn tool_set_schema_omits_self_receiver() {
+    use ur::ToolSet;
+
+    let counter = Counter {
+        count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+    };
+    let tools = counter.into_tools();
+
+    let bump = tools.iter().find(|t| t.name() == "bump").unwrap().schema();
+    assert_eq!(
+        bump.description.as_deref(),
+        Some("Add to the running count and return the new total.")
+    );
+    let properties = bump.parameters["properties"].as_object().unwrap();
+    assert!(properties.contains_key("by"));
+    assert!(!properties.contains_key("self"));
+
+    let total = tools.iter().find(|t| t.name() == "total").unwrap().schema();
+    // A zero-parameter method advertises an object schema with no properties.
+    let total_props = total
+        .parameters
+        .get("properties")
+        .and_then(|p| p.as_object());
+    assert!(total_props.is_none_or(|props| props.is_empty()));
+}
+
+#[tokio::test]
+async fn tool_set_registers_and_runs_through_the_agent_loop() {
+    let counter = Counter {
+        count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+    };
+
+    let provider = FakeProvider::new([
+        vec![
+            RawEvent::ToolCallDelta {
+                index: 0,
+                id: Some("call-1".to_owned()),
+                name: Some("bump".to_owned()),
+                arguments: r#"{"by":7}"#.to_owned(),
+            },
+            done(FinishReason::ToolCalls),
+        ],
+        vec![
+            RawEvent::TextDelta("The total is 7.".to_owned()),
+            done(FinishReason::Stop),
+        ],
+    ]);
+
+    let model = Model::new(provider, "fake-model");
+    let agent = Agent::new("You are concise.", model).tool_set(counter.clone());
+    let mut session = agent.session();
+
+    let mut tool_outputs = Vec::new();
+    let mut events = session.send("Bump by 7.");
+    while let Some(event) = events.next().await {
+        if let Event::ToolResult { output, .. } = event.unwrap() {
+            tool_outputs.push(output);
+        }
+    }
+    drop(events);
+
+    assert_eq!(tool_outputs, vec![ToolOutput::Ok("7".to_owned())]);
+    assert_eq!(counter.count.load(std::sync::atomic::Ordering::SeqCst), 7);
+}
+
 /// The DeepSeek provider crate is re-exported under `ur::deepseek` when the
 /// `deepseek` feature is enabled. Its absence without the feature is locked by a
 /// compile-fail fixture in `compile_contracts.rs`.

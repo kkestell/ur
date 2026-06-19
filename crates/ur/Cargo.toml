@@ -42,18 +42,6 @@ trybuild = "1.0.116"
 wiremock.workspace = true
 
 [[example]]
-name = "deepseek"
-required-features = ["deepseek"]
-
-[[example]]
-name = "thinking"
-required-features = ["deepseek"]
-
-[[example]]
-name = "openai"
-required-features = ["openai"]
-
-[[example]]
 name = "minimal"
 required-features = ["openai"]
 
@@ -62,11 +50,19 @@ name = "builder"
 required-features = ["openai"]
 
 [[example]]
+name = "session"
+required-features = ["openai"]
+
+[[example]]
+name = "effort"
+required-features = ["openai"]
+
+[[example]]
 name = "json"
 required-features = ["openai"]
 
 [[example]]
-name = "session"
+name = "structured_outputs"
 required-features = ["openai"]
 
 [[example]]
@@ -74,17 +70,20 @@ name = "strict"
 required-features = ["openai"]
 
 [[example]]
-name = "structured_openai"
+name = "tools"
 required-features = ["openai"]
 
 [[example]]
-name = "structured_openrouter"
-required-features = ["openrouter"]
-
-[[example]]
-name = "effort"
+name = "kitchen_sink"
 required-features = ["openai"]
 
 [[example]]
-name = "openrouter"
+name = "custom_provider"
+
+[[example]]
+name = "deepseek_thinking"
+required-features = ["deepseek"]
+
+[[example]]
+name = "openrouter_structured_outputs"
 required-features = ["openrouter"]

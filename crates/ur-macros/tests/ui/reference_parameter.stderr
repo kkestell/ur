@@ -1,0 +1,5 @@
+error: `#[ur::tool]` parameters must be owned types; a borrowed parameter like `&str` or `&[u8]` cannot be deserialized from tool arguments (use `String`, `Vec<u8>`, or another owned type)
+ --> tests/ui/reference_parameter.rs:4:22
+  |
+4 | async fn lookup(key: &str) -> i64 {
+  |                      ^^^^

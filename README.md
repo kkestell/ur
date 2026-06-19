@@ -1,8 +1,6 @@
 # ur
 
-Async tool-using LLM agents over a pluggable provider backend.
-
-`ur` owns the full agent loop — streaming, reasoning, tool dispatch, multi-turn history, and rollback — over a single `Provider` trait. Providers ship as separate crates, enabled by Cargo features: OpenAI (default), DeepSeek, and OpenRouter.
+A Rust library for async agents — owns the full loop (streaming, reasoning, tool dispatch, multi-turn history, rollback on failure) over a single pluggable `Provider` trait.
 
 ```rust
 use futures_util::StreamExt;
@@ -31,12 +29,42 @@ async fn main() -> ur::Result<()> {
 }
 ```
 
+For tools that need state — a database handle, an HTTP client, a cancel token — put `&self` methods in an `#[ur::tools]` impl block and register the whole set with `agent.tool_set(...)`. The state type must be `Clone + Send + Sync + 'static`, which is cheap when its fields are `Arc<_>` or already-`Clone` handles. Each `#[ur::tool]` method becomes a tool backed by a clone of the state; unmarked methods are untouched.
+
+```rust
+use std::sync::Arc;
+
+#[derive(Clone)]
+struct Tools {
+    db: Arc<Db>,
+    http: reqwest::Client,
+}
+
+#[ur::tools]
+impl Tools {
+    #[ur::tool(description = "Look up a user by id.")]
+    async fn get_user(&self, id: u64) -> Result<User, String> {
+        self.db.fetch(id).await.map_err(|e| e.to_string())
+    }
+
+    #[ur::tool(description = "Fetch a URL and return its body.")]
+    async fn fetch(&self, url: String) -> Result<String, String> {
+        let resp = self.http.get(&url).send().await.map_err(|e| e.to_string())?;
+        resp.text().await.map_err(|e| e.to_string())
+    }
+}
+
+let agent = ur::Agent::new("You are a helpful assistant.", model)
+    .tool(add)              // stateless free-fn tool
+    .tool_set(Tools { db, http });   // both methods, sharing one `Tools`
+```
+
 ## Features
 
 - **Provider-agnostic agent loop.** `Model`, `Agent`, `Session`, and `EventStream` work identically with any `Provider` implementation.
 - **Streaming deltas.** `TextDelta`, `ReasoningDelta`, and incremental `ToolCall` assembly as events arrive.
 - **Tool dispatch with rollback.** Tools run sequentially in call order. A provider error or dropped stream rolls the session back to its last committed state.
-- **`#[ur::tool]` macro.** Annotate an `async fn` and register it with `agent.tool(add)`. Parameters and return types derive JSON Schema automatically.
+- **`#[ur::tool]` / `#[ur::tools]` macros.** Annotate a free `async fn` and register it with `agent.tool(add)`, or put `&self` methods on an `#[ur::tools]` impl block for stateful tools and register them with `agent.tool_set(...)`. Parameters and return types derive JSON Schema automatically.
 - **Structured outputs.** A `json_schema` response format constrains a reply to a schema, derived from a Rust type with `ResponseFormat::json_schema_for::<T>` or hand-built.
 - **Pluggable providers.** Implement `Provider::chat` and `Provider::model_spec` to drive any backend. OpenAI, DeepSeek, and OpenRouter ship in the workspace; additional providers live in their own crates.
 
@@ -59,13 +87,13 @@ Set `OPENAI_API_KEY` in your environment (or pass the key explicitly to `OpenAiC
 | ------------------ | -------------------------------------------------------------------------------------------- |
 | `ur-rs`            | Facade (imported as `ur`): re-exports `ur-core` and enabled provider crates.                 |
 | `ur-core`          | Provider-agnostic types: `Agent`, `Model`, `Session`, events, the `Provider` trait, `Error`. |
-| `ur-macros`        | The `#[ur::tool]` proc-macro.                                                                |
+| `ur-macros`        | The `#[ur::tool]` and `#[ur::tools]` proc-macros.                                            |
 | `ur-openai-compat` | Shared plumbing for the OpenAI-compatible providers (request/SSE/retry machinery).           |
 | `ur-openai`        | OpenAI `Provider` implementation.                                                            |
 | `ur-deepseek`      | DeepSeek `Provider` implementation.                                                          |
 | `ur-openrouter`    | OpenRouter `Provider` implementation.                                                        |
 
-## Provider seam
+## Providers
 
 Implement `Provider` to drive any LLM backend:
 
@@ -111,8 +139,8 @@ let model = ur::Model::new(provider, "gpt-5.5")
 Runnable examples live in [`crates/ur/examples`](crates/ur/examples). Run one with `cargo run`:
 
 ```sh
-# Provider-agnostic; runs offline against a scripted fake provider.
-cargo run -p ur-rs --example agent
+# Implements a custom Provider; runs offline, no API key.
+cargo run -p ur-rs --example custom
 
 # OpenAI examples (default features); need OPENAI_API_KEY.
 cargo run -p ur-rs --example minimal
@@ -126,9 +154,10 @@ cargo run -p ur-rs --example openrouter --features openrouter
 
 | Example                 | Provider     | Shows                                                       |
 | ----------------------- | ------------ | ----------------------------------------------------------- |
-| `agent`                 | fake (local) | The full agent loop with tools, no network or key required. |
+| `custom`                | none (local) | Implementing a custom `Provider`; runs offline, no key.     |
 | `minimal`               | OpenAI       | The smallest send-and-stream program.                       |
 | `openai`                | OpenAI       | The complete OpenAI flow with tool calls.                   |
+| `stateful`              | OpenAI       | Stateful tools via `#[ur::tools]` and `tool_set`.           |
 | `builder`               | OpenAI       | Configuring `OpenAiClient` through its builder.             |
 | `session`               | OpenAI       | A multi-turn conversation with retained history.            |
 | `json`                  | OpenAI       | Requesting a JSON-object response.                          |
@@ -140,7 +169,7 @@ cargo run -p ur-rs --example openrouter --features openrouter
 | `openrouter`            | OpenRouter   | The complete OpenRouter flow with tool calls.               |
 | `structured_openrouter` | OpenRouter   | A `json_schema` response format over OpenRouter.            |
 
-Every example except `agent` calls a live API and requires the matching API key in the environment. The DeepSeek examples also require `--features deepseek`, and the OpenRouter examples require `--features openrouter`.
+Every example except `custom` calls a live API and requires the matching API key in the environment. The DeepSeek examples also require `--features deepseek`, and the OpenRouter examples require `--features openrouter`.
 
 ## Minimum supported Rust version
 

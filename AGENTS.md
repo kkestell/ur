@@ -14,8 +14,8 @@ THIS FILE MUST BE KEPT UP TO DATE AT ALL TIMES
 
 This is a Cargo workspace of seven crates plus docs.
 
-- `crates/ur-core/` — Provider-agnostic core: `Agent`, `Model`, `Session`, the event stream, the `Provider` trait, tool plumbing (`tool.rs`), the shared strict-mode JSON Schema rewriter (`schema.rs`, used by every provider for strict tools and `json_schema` response formats), and `Error`.
-- `crates/ur-macros/` — The `#[ur::tool]` proc-macro that turns an `async fn` into a registrable tool with a derived JSON Schema. Has `trybuild` UI tests under `tests/ui`.
+- `crates/ur-core/` — Provider-agnostic core: `Agent`, `Model`, `Session`, the event stream, the `Provider` trait, tool plumbing (`tool.rs`: the `Tool` trait, the `ToolSet` trait registered via `Agent::tool_set`), the shared strict-mode JSON Schema rewriter (`schema.rs`, used by every provider for strict tools and `json_schema` response formats), and `Error`.
+- `crates/ur-macros/` — The `#[ur::tool]` proc-macro (`tool.rs`) that turns a free `async`/sync fn into a registrable tool with a derived JSON Schema, and `#[ur::tools]` (`tools.rs`) that turns an inherent impl block's `&self` methods into a `ToolSet`; both share the fragment emitters and signature/param parsing in `tool.rs`. Has `trybuild` UI tests under `tests/ui`.
 - `crates/ur-openai-compat/` — Shared plumbing for the OpenAI-compatible providers: API-key/user validation (`keys.rs`), request-body encode helpers including the assistant-extras message hook and `validate_sampling` (`request.rs`), SSE line framing + completion folding + generic wire structs + the shared `finish_reason` mapping and default `WireUsage` (`sse.rs`), the HTTP retry/stream state machine (`executor.rs`), and feature-gated test scaffolding shared by the providers' unit tests (`test_support.rs`, behind the `test-support` feature). Each provider supplies its deltas via the `executor::Dialect` trait and its own `decode_chunk`.
 - `crates/ur-openai/` — OpenAI `Provider` implementation over `ur-openai-compat`: client/config, request mapping, the `decode_chunk`/wire shapes, and a `Dialect` impl (retry table, error mapping).
 - `crates/ur-deepseek/` — DeepSeek `Provider` implementation over `ur-openai-compat`, plus a model `catalog`; keeps its divergent pieces local (reasoning_content via the assistant-extras hook, all-or-nothing strict tools, catalog max_tokens, thinking-gated sampling, prompt-cache-hit usage).
@@ -29,6 +29,6 @@ Standard Cargo across the workspace. The facade (package `ur-rs`) defaults to th
 
 - Build: `cargo build` (whole workspace) — provider-feature combos: `cargo build -p ur-rs --features deepseek`, `cargo build -p ur-rs --features openrouter`
 - Test: `cargo test`
-- Run an example: `cargo run -p ur-rs --example <name>` (e.g. `agent` runs offline; OpenAI examples need `OPENAI_API_KEY`; DeepSeek examples need `--features deepseek` and `DEEPSEEK_API_KEY`; the `openrouter` example needs `--features openrouter` and `OPENROUTER_API_KEY`)
+- Run an example: `cargo run -p ur-rs --example <name>` (e.g. `custom` runs offline; OpenAI examples need `OPENAI_API_KEY`; DeepSeek examples need `--features deepseek` and `DEEPSEEK_API_KEY`; the `openrouter` example needs `--features openrouter` and `OPENROUTER_API_KEY`)
 - Lint: `cargo clippy --all-targets`
 - Format: `cargo fmt`

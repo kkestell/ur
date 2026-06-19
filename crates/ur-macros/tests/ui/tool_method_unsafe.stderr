@@ -1,0 +1,5 @@
+error: `#[ur::tool]` does not support unsafe functions
+ --> tests/ui/tool_method_unsafe.rs:8:11
+  |
+8 |     async unsafe fn ping(&self) -> i64 {
+  |           ^^^^^^

@@ -1,7 +1,9 @@
-//! The provider-agnostic flow from the `ur` API documentation, driven by a small
-//! scripted fake provider so the example runs without network access. Replace the
-//! provider and model id with a real provider crate (for example
-//! `ur::deepseek::DeepSeekClient`) to talk to a live model.
+//! Implementing a custom `Provider`. The agent loop is provider-agnostic: anything
+//! that implements `Provider` drives it. This example defines a `ScriptedProvider`
+//! that replays a fixed sequence of `RawEvent`s, so it needs no network or API key
+//! and doubles as a template for wiring up a backend `ur` does not ship. Real
+//! providers (`ur::openai::OpenAiClient`, `ur::deepseek::DeepSeekClient`, ...) plug
+//! in the same way.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -30,6 +32,7 @@ async fn weather(city: String) -> std::result::Result<Weather, std::io::Error> {
 }
 
 /// A provider that replays a fixed script: one tool call, then a final answer.
+/// `chat` is called once per turn and returns the next batch of events.
 struct ScriptedProvider {
     batches: Mutex<VecDeque<Vec<RawEvent>>>,
 }
@@ -88,7 +91,6 @@ async fn main() -> ur::Result<()> {
     while let Some(event) = events.next().await {
         match event? {
             ur::Event::TextDelta { delta } => print!("{delta}"),
-            ur::Event::ReasoningDelta { .. } => {}
             ur::Event::ToolCall {
                 name, arguments, ..
             } => eprintln!("\ncall {name}({arguments})"),
@@ -96,12 +98,6 @@ async fn main() -> ur::Result<()> {
                 ur::ToolOutput::Ok(v) => eprintln!("result: {v}"),
                 ur::ToolOutput::Err(e) => eprintln!("error: {e}"),
             },
-            ur::Event::Usage { usage } => eprintln!(
-                "tokens: in={} (cached {}) out={}",
-                usage.prompt_tokens,
-                usage.cached_prompt_tokens.unwrap_or(0),
-                usage.completion_tokens,
-            ),
             ur::Event::Done { .. } => break,
             _ => {}
         }

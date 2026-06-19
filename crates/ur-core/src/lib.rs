@@ -66,7 +66,7 @@ pub mod __rt {
 pub use event::EventStream;
 use event::StreamTool;
 use provider::{Message, ModelNotice, ModelSpec, Provider, Settings};
-use tool::{Tool, ToolSchema};
+use tool::{Tool, ToolSchema, ToolSet};
 
 /// A boxed, sendable future returned by asynchronous extension points.
 pub type BoxFuture<'a, T> = futures_core::future::BoxFuture<'a, T>;
@@ -298,6 +298,11 @@ impl<P: Provider> Agent<P> {
         I: IntoIterator<Item = T>,
     {
         tools.into_iter().fold(self, Self::tool)
+    }
+
+    /// Registers every tool in a [`ToolSet`], such as one produced by `#[ur::tools]`.
+    pub fn tool_set<S: ToolSet>(self, set: S) -> Self {
+        self.tools(set.into_tools())
     }
 
     /// Starts a fresh independent conversation.

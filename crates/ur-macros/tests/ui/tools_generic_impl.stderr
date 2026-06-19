@@ -1,0 +1,5 @@
+error: `#[ur::tools]` does not support generic impl blocks
+ --> tests/ui/tools_generic_impl.rs:6:5
+  |
+6 | impl<T> Tools<T> {
+  |     ^^^

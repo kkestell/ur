@@ -1,0 +1,5 @@
+error: `#[ur::tool]` methods must take a plain `&self` receiver (use a free `#[ur::tool] fn` for stateless tools)
+ --> tests/ui/tool_method_no_receiver.rs:8:19
+  |
+8 |     async fn ping(x: i64) -> i64 {
+  |                   ^^^^^^

@@ -1,26 +1,26 @@
 //! Implementation of the `#[ur::tool]` attribute macro.
 
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{
-    Attribute, Expr, ExprLit, FnArg, ItemFn, Lit, MetaNameValue, Pat, PatType, ReturnType,
-    Signature, Token, Type, parse2,
+    Attribute, Expr, ExprLit, FnArg, ItemFn, Lit, MetaNameValue, Pat, PatType, Receiver,
+    ReturnType, Signature, Token, Type, parse2,
 };
 
 /// A single tool parameter, reduced to the binding name and its type.
-struct Param {
-    ident: syn::Ident,
-    ty: Box<Type>,
+pub(crate) struct Param {
+    pub(crate) ident: syn::Ident,
+    pub(crate) ty: Box<Type>,
 }
 
 /// Parsed `#[ur::tool(...)]` attribute arguments.
 #[cfg_attr(test, derive(Debug))]
-struct ToolConfig {
-    description: Option<String>,
-    name: Option<String>,
-    param_docs: Vec<(String, String)>,
+pub(crate) struct ToolConfig {
+    pub(crate) description: Option<String>,
+    pub(crate) name: Option<String>,
+    pub(crate) param_docs: Vec<(String, String)>,
 }
 
 /// Expands `#[ur::tool]` on a function into a same-named tool type.
@@ -34,7 +34,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
 }
 
 /// Rejects function signatures the macro cannot turn into a tool.
-fn validate_signature(sig: &Signature) -> syn::Result<()> {
+pub(crate) fn validate_signature(sig: &Signature) -> syn::Result<()> {
     if let Some(c) = &sig.constness {
         return Err(syn::Error::new_spanned(
             c,
@@ -90,33 +90,82 @@ fn parse_params(sig: &Signature) -> syn::Result<Vec<Param>> {
             FnArg::Receiver(r) => {
                 return Err(syn::Error::new_spanned(
                     r,
-                    "`#[ur::tool]` does not support methods with a `self` receiver",
+                    "`#[ur::tool]` does not support methods with a `self` receiver; \
+                     for stateful tools put the method in an `#[ur::tools]` impl block",
                 ));
             }
-            FnArg::Typed(PatType { pat, ty, .. }) => {
-                let ident = match &**pat {
-                    Pat::Ident(pi) if pi.by_ref.is_none() && pi.subpat.is_none() => {
-                        pi.ident.clone()
-                    }
-                    _ => {
-                        return Err(syn::Error::new_spanned(
-                            pat,
-                            "`#[ur::tool]` parameters must be simple `name: Type` bindings",
-                        ));
-                    }
-                };
-                params.push(Param {
-                    ident,
-                    ty: ty.clone(),
-                });
-            }
+            FnArg::Typed(pt) => params.push(parse_typed_param(pt)?),
         }
     }
     Ok(params)
 }
 
+/// Reduces a method argument list to `name: Type` bindings, requiring a leading
+/// plain `&self` receiver and rejecting anything else.
+pub(crate) fn parse_method_params(sig: &Signature) -> syn::Result<Vec<Param>> {
+    const MISSING_SELF: &str = "`#[ur::tool]` methods must take a plain `&self` receiver \
+                                (use a free `#[ur::tool] fn` for stateless tools)";
+    let mut inputs = sig.inputs.iter();
+    match inputs.next() {
+        Some(FnArg::Receiver(r)) => validate_self_receiver(r)?,
+        Some(other) => return Err(syn::Error::new_spanned(other, MISSING_SELF)),
+        None => return Err(syn::Error::new_spanned(&sig.ident, MISSING_SELF)),
+    }
+    let mut params = Vec::new();
+    for input in inputs {
+        match input {
+            FnArg::Receiver(r) => {
+                return Err(syn::Error::new_spanned(
+                    r,
+                    "`#[ur::tool]` methods take a single `&self` receiver",
+                ));
+            }
+            FnArg::Typed(pt) => params.push(parse_typed_param(pt)?),
+        }
+    }
+    Ok(params)
+}
+
+/// Reduces one typed argument to a `name: Type` binding, rejecting patterns and
+/// borrowed types.
+fn parse_typed_param(PatType { pat, ty, .. }: &PatType) -> syn::Result<Param> {
+    let ident = match &**pat {
+        Pat::Ident(pi) if pi.by_ref.is_none() && pi.subpat.is_none() => pi.ident.clone(),
+        _ => {
+            return Err(syn::Error::new_spanned(
+                pat,
+                "`#[ur::tool]` parameters must be simple `name: Type` bindings",
+            ));
+        }
+    };
+    if let Type::Reference(r) = &**ty {
+        return Err(syn::Error::new_spanned(
+            r,
+            "`#[ur::tool]` parameters must be owned types; a borrowed parameter \
+             like `&str` or `&[u8]` cannot be deserialized from tool arguments \
+             (use `String`, `Vec<u8>`, or another owned type)",
+        ));
+    }
+    Ok(Param {
+        ident,
+        ty: ty.clone(),
+    })
+}
+
+/// Requires a plain `&self` receiver, rejecting `&mut self`, `self`, typed
+/// receivers, and explicit receiver lifetimes.
+fn validate_self_receiver(r: &Receiver) -> syn::Result<()> {
+    let message = "`#[ur::tool]` methods must take a plain `&self` receiver \
+                   (use interior mutability instead of `&mut self`; \
+                   use a free `#[ur::tool] fn` for stateless tools)";
+    match &r.reference {
+        Some((_, None)) if r.mutability.is_none() && r.colon_token.is_none() => Ok(()),
+        _ => Err(syn::Error::new_spanned(r, message)),
+    }
+}
+
 /// Parses the attribute argument list, validating keys against the parameter names.
-fn parse_config(attr: TokenStream, param_names: &[String]) -> syn::Result<ToolConfig> {
+pub(crate) fn parse_config(attr: TokenStream, param_names: &[String]) -> syn::Result<ToolConfig> {
     let mut config = ToolConfig {
         description: None,
         name: None,
@@ -182,7 +231,7 @@ fn is_valid_tool_name(name: &str) -> bool {
 }
 
 /// Returns whether the return type is a `Result`, requiring error stringification.
-fn returns_result(output: &ReturnType) -> bool {
+pub(crate) fn returns_result(output: &ReturnType) -> bool {
     if let ReturnType::Type(_, ty) = output
         && let Type::Path(tp) = &**ty
         && let Some(seg) = tp.path.segments.last()
@@ -193,50 +242,30 @@ fn returns_result(output: &ReturnType) -> bool {
 }
 
 /// Returns whether an attribute should also gate the generated impl block.
-fn is_cfg_attr(attr: &Attribute) -> bool {
+pub(crate) fn is_cfg_attr(attr: &Attribute) -> bool {
     attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr")
 }
 
-/// Generates the tool type, parameter struct, and `Tool` impl.
-fn generate(func: &ItemFn, params: &[Param], config: &ToolConfig) -> TokenStream {
-    let vis = &func.vis;
-    let fn_ident = &func.sig.ident;
-    let tool_name = config.name.clone().unwrap_or_else(|| fn_ident.to_string());
+/// Builds the `__UrParams` field tokens, folding in any per-parameter docs.
+pub(crate) fn params_fields(params: &[Param], param_docs: &[(String, String)]) -> Vec<TokenStream> {
+    params
+        .iter()
+        .map(|p| {
+            let ident = &p.ident;
+            let ty = &p.ty;
+            let ident_str = ident.to_string();
+            match param_docs.iter().find(|(n, _)| *n == ident_str) {
+                Some((_, desc)) => quote! { #[schemars(description = #desc)] #ident: #ty },
+                None => quote! { #ident: #ty },
+            }
+        })
+        .collect()
+}
 
-    let attrs = &func.attrs;
-    let cfg_attrs: Vec<&Attribute> = attrs.iter().filter(|a| is_cfg_attr(a)).collect();
-
-    let fields = params.iter().map(|p| {
-        let ident = &p.ident;
-        let ty = &p.ty;
-        let ident_str = ident.to_string();
-        match config.param_docs.iter().find(|(n, _)| *n == ident_str) {
-            Some((_, desc)) => quote! { #[schemars(description = #desc)] #ident: #ty },
-            None => quote! { #ident: #ty },
-        }
-    });
-
-    let asyncness = &func.sig.asyncness;
-    let inputs = &func.sig.inputs;
-    let output = &func.sig.output;
-    let block = &func.block;
-    let inner = quote! {
-        #asyncness fn __ur_tool_body(#inputs) #output #block
-    };
-
-    let arg_idents = params.iter().map(|p| &p.ident);
-    let call = if params.is_empty() {
-        quote! { __ur_tool_body() }
-    } else {
-        quote! { __ur_tool_body( #( __ur_args.#arg_idents ),* ) }
-    };
-    let invoke = if asyncness.is_some() {
-        quote! { #call.await }
-    } else {
-        quote! { #call }
-    };
-
-    let deserialize = if params.is_empty() {
+/// The block that deserializes `__UrParams` from the raw arguments; empty when
+/// the tool takes no parameters.
+pub(crate) fn deserialize_block(params_empty: bool) -> TokenStream {
+    if params_empty {
         quote! {}
     } else {
         quote! {
@@ -247,9 +276,13 @@ fn generate(func: &ItemFn, params: &[Param], config: &ToolConfig) -> TokenStream
                 }
             };
         }
-    };
+    }
+}
 
-    let finish = if returns_result(output) {
+/// The block that serializes `__ur_outcome` into the tool result string,
+/// stringifying the error arm when the body returns a `Result`.
+pub(crate) fn finish_block(returns_result: bool) -> TokenStream {
+    if returns_result {
         quote! {
             match __ur_outcome {
                 ::core::result::Result::Ok(__v) => match ::ur::__rt::serde_json::to_string(&__v) {
@@ -269,12 +302,118 @@ fn generate(func: &ItemFn, params: &[Param], config: &ToolConfig) -> TokenStream
                     ::core::result::Result::Err(::std::string::ToString::to_string(&__e)),
             }
         }
-    };
+    }
+}
 
-    let schema_desc = match &config.description {
+/// The `schema()` method body, generating a schema for `__UrParams`.
+pub(crate) fn schema_body(tool_name: &str, description: &Option<String>) -> TokenStream {
+    let schema_desc = match description {
         Some(d) => quote! { .description(#d) },
         None => quote! {},
     };
+    quote! {
+        let __schema = ::ur::__rt::schemars::SchemaGenerator::default()
+            .into_root_schema_for::<__UrParams>()
+            .to_value();
+        ::ur::ToolSchema::new(#tool_name, __schema) #schema_desc
+    }
+}
+
+/// Assembles the `__UrParams` struct and `impl ::ur::Tool` block shared by both
+/// macros. `ty` is the implementing type; `prelude` runs inside `call` before the
+/// boxed future (the free fn defines its body there, a method clones its state);
+/// `invoke` is the expression whose value becomes `__ur_outcome`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_tool_impl(
+    ty: &impl ToTokens,
+    tool_name: &str,
+    fields: &[TokenStream],
+    schema: &TokenStream,
+    deserialize: &TokenStream,
+    finish: &TokenStream,
+    prelude: &TokenStream,
+    invoke: &TokenStream,
+) -> TokenStream {
+    quote! {
+        #[derive(::ur::__rt::serde::Deserialize, ::ur::__rt::schemars::JsonSchema)]
+        #[serde(crate = "::ur::__rt::serde")]
+        #[schemars(crate = "::ur::__rt::schemars")]
+        struct __UrParams {
+            #(#fields),*
+        }
+
+        impl ::ur::Tool for #ty {
+            fn name(&self) -> &str {
+                #tool_name
+            }
+
+            fn schema(&self) -> ::ur::ToolSchema {
+                #schema
+            }
+
+            fn call(&self, args: ::ur::ToolArguments)
+                -> ::ur::BoxFuture<
+                    'static,
+                    ::core::result::Result<::std::string::String, ::std::string::String>,
+                >
+            {
+                #prelude
+                ::std::boxed::Box::pin(async move {
+                    #deserialize
+                    let __ur_outcome = #invoke;
+                    #finish
+                })
+            }
+        }
+    }
+}
+
+/// Builds the call that drives the tool body: splats the parsed parameters out of
+/// `__ur_args` into `callee`, appending `.await` when the source is `async`.
+pub(crate) fn invoke_expr(callee: TokenStream, params: &[Param], is_async: bool) -> TokenStream {
+    let arg_idents = params.iter().map(|p| &p.ident);
+    let call = quote! { #callee( #( __ur_args.#arg_idents ),* ) };
+    if is_async {
+        quote! { #call.await }
+    } else {
+        call
+    }
+}
+
+/// Generates the tool type, parameter struct, and `Tool` impl.
+fn generate(func: &ItemFn, params: &[Param], config: &ToolConfig) -> TokenStream {
+    let vis = &func.vis;
+    let fn_ident = &func.sig.ident;
+    let tool_name = config.name.clone().unwrap_or_else(|| fn_ident.to_string());
+
+    let attrs = &func.attrs;
+    let cfg_attrs: Vec<&Attribute> = attrs.iter().filter(|a| is_cfg_attr(a)).collect();
+
+    let fields = params_fields(params, &config.param_docs);
+
+    let asyncness = &func.sig.asyncness;
+    let inputs = &func.sig.inputs;
+    let output = &func.sig.output;
+    let block = &func.block;
+    let inner = quote! {
+        #asyncness fn __ur_tool_body(#inputs) #output #block
+    };
+
+    let invoke = invoke_expr(quote! { __ur_tool_body }, params, asyncness.is_some());
+
+    let deserialize = deserialize_block(params.is_empty());
+    let finish = finish_block(returns_result(output));
+    let schema = schema_body(&tool_name, &config.description);
+    let tool_impl = emit_tool_impl(
+        fn_ident,
+        &tool_name,
+        &fields,
+        &schema,
+        &deserialize,
+        &finish,
+        &inner,
+        &invoke,
+    );
 
     quote! {
         #[allow(non_camel_case_types)]
@@ -283,39 +422,7 @@ fn generate(func: &ItemFn, params: &[Param], config: &ToolConfig) -> TokenStream
 
         #(#cfg_attrs)*
         const _: () = {
-            #[derive(::ur::__rt::serde::Deserialize, ::ur::__rt::schemars::JsonSchema)]
-            #[serde(crate = "::ur::__rt::serde")]
-            #[schemars(crate = "::ur::__rt::schemars")]
-            struct __UrParams {
-                #(#fields),*
-            }
-
-            impl ::ur::Tool for #fn_ident {
-                fn name(&self) -> &str {
-                    #tool_name
-                }
-
-                fn schema(&self) -> ::ur::ToolSchema {
-                    let __schema = ::ur::__rt::schemars::SchemaGenerator::default()
-                        .into_root_schema_for::<__UrParams>()
-                        .to_value();
-                    ::ur::ToolSchema::new(#tool_name, __schema) #schema_desc
-                }
-
-                fn call(&self, args: ::ur::ToolArguments)
-                    -> ::ur::BoxFuture<
-                        'static,
-                        ::core::result::Result<::std::string::String, ::std::string::String>,
-                    >
-                {
-                    #inner
-                    ::std::boxed::Box::pin(async move {
-                        #deserialize
-                        let __ur_outcome = #invoke;
-                        #finish
-                    })
-                }
-            }
+            #tool_impl
         };
     }
 }
@@ -371,6 +478,17 @@ mod tests {
         let f: ItemFn = parse2(ts("fn f(&self) {}")).unwrap();
         assert!(parse_params(&f.sig).is_err());
         let f: ItemFn = parse2(ts("fn f((a, b): (i64, i64)) {}")).unwrap();
+        assert!(parse_params(&f.sig).is_err());
+    }
+
+    #[test]
+    fn rejects_reference_parameters() {
+        let f: ItemFn = parse2(ts("fn f(key: &str) {}")).unwrap();
+        match parse_params(&f.sig) {
+            Ok(_) => panic!("reference parameter should be rejected"),
+            Err(err) => assert!(err.to_string().contains("owned types")),
+        }
+        let f: ItemFn = parse2(ts("fn f(bytes: &[u8]) {}")).unwrap();
         assert!(parse_params(&f.sig).is_err());
     }
 
