@@ -48,7 +48,7 @@ pub fn strict_schema(schema: &JsonValue) -> JsonValue {
         }
     }
 
-    if let Some(Value::Object(properties)) = object.get("properties").cloned() {
+    if let Some(Value::Object(properties)) = object.remove("properties") {
         let required: Vec<String> = object
             .get("required")
             .and_then(Value::as_array)

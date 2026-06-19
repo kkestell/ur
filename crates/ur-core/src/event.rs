@@ -150,7 +150,8 @@ impl<'a> EventStream<'a> {
                 }
 
                 let is_tool_call_turn = finish_reason == FinishReason::ToolCalls;
-                let tool_calls = match self.assistant.tool_calls() {
+                let assistant = std::mem::take(&mut self.assistant);
+                let tool_calls = match assistant.tool_calls() {
                     Ok(tool_calls) => tool_calls,
                     Err(error) => {
                         self.fail(error);
@@ -159,12 +160,11 @@ impl<'a> EventStream<'a> {
                 };
 
                 self.pending_history.push(Message::assistant(
-                    non_empty_string(&self.assistant.content),
-                    non_empty_string(&self.assistant.reasoning_content),
+                    non_empty(assistant.content),
+                    non_empty(assistant.reasoning_content),
                     tool_calls.clone(),
                 ));
                 self.provider_stream = None;
-                self.assistant = AssistantTurn::default();
 
                 if is_tool_call_turn {
                     if tool_calls.is_empty() {
@@ -206,9 +206,10 @@ impl<'a> EventStream<'a> {
             return;
         };
 
+        let arguments = call.arguments.clone();
         self.running_tool = Some(RunningTool {
-            call: call.clone(),
-            future: tool.call(call.arguments),
+            call,
+            future: tool.call(arguments),
         });
     }
 
@@ -392,8 +393,8 @@ struct ToolCallBuilder {
     arguments: String,
 }
 
-fn non_empty_string(value: &str) -> Option<String> {
-    (!value.is_empty()).then(|| value.to_owned())
+fn non_empty(value: String) -> Option<String> {
+    (!value.is_empty()).then_some(value)
 }
 
 fn missing_tool_field(index: u32, field: &str) -> Error {
