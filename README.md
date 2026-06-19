@@ -2,7 +2,7 @@
 
 Async tool-using LLM agents over a pluggable provider backend.
 
-`ur` owns the full agent loop — streaming, reasoning, tool dispatch, multi-turn history, and rollback — over a single `Provider` trait. Providers ship as separate crates, enabled by Cargo features. The OpenAI provider is included by default.
+`ur` owns the full agent loop — streaming, reasoning, tool dispatch, multi-turn history, and rollback — over a single `Provider` trait. Providers ship as separate crates, enabled by Cargo features: OpenAI (default), DeepSeek, and OpenRouter.
 
 ```rust
 use futures_util::StreamExt;
@@ -37,7 +37,8 @@ async fn main() -> ur::Result<()> {
 - **Streaming deltas.** `TextDelta`, `ReasoningDelta`, and incremental `ToolCall` assembly as events arrive.
 - **Tool dispatch with rollback.** Tools run sequentially in call order. A provider error or dropped stream rolls the session back to its last committed state.
 - **`#[ur::tool]` macro.** Annotate an `async fn` and register it with `agent.tool(add)`. Parameters and return types derive JSON Schema automatically.
-- **Pluggable providers.** Implement `Provider::chat` and `Provider::model_spec` to drive any backend. OpenAI and DeepSeek ship in the workspace; additional providers live in their own crates.
+- **Structured outputs.** A `json_schema` response format constrains a reply to a schema, derived from a Rust type with `ResponseFormat::json_schema_for::<T>` or hand-built.
+- **Pluggable providers.** Implement `Provider::chat` and `Provider::model_spec` to drive any backend. OpenAI, DeepSeek, and OpenRouter ship in the workspace; additional providers live in their own crates.
 
 ## Quick start
 
@@ -54,13 +55,15 @@ Set `OPENAI_API_KEY` in your environment (or pass the key explicitly to `OpenAiC
 
 ## Crates
 
-| Crate         | Role                                                                                         |
-| ------------- | -------------------------------------------------------------------------------------------- |
-| `ur-rs`       | Facade (imported as `ur`): re-exports `ur-core` and enabled provider crates.                 |
-| `ur-core`     | Provider-agnostic types: `Agent`, `Model`, `Session`, events, the `Provider` trait, `Error`. |
-| `ur-macros`   | The `#[ur::tool]` proc-macro.                                                                |
-| `ur-openai`   | OpenAI `Provider` implementation.                                                            |
-| `ur-deepseek` | DeepSeek `Provider` implementation.                                                          |
+| Crate              | Role                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------- |
+| `ur-rs`            | Facade (imported as `ur`): re-exports `ur-core` and enabled provider crates.                 |
+| `ur-core`          | Provider-agnostic types: `Agent`, `Model`, `Session`, events, the `Provider` trait, `Error`. |
+| `ur-macros`        | The `#[ur::tool]` proc-macro.                                                                |
+| `ur-openai-compat` | Shared plumbing for the OpenAI-compatible providers (request/SSE/retry machinery).           |
+| `ur-openai`        | OpenAI `Provider` implementation.                                                            |
+| `ur-deepseek`      | DeepSeek `Provider` implementation.                                                          |
+| `ur-openrouter`    | OpenRouter `Provider` implementation.                                                        |
 
 ## Provider seam
 
@@ -84,7 +87,7 @@ impl Provider for MyProvider {
 }
 ```
 
-See [`docs/providers/openai.md`](docs/providers/openai.md) for the default provider and [`docs/providers/deepseek.md`](docs/providers/deepseek.md) for the DeepSeek provider.
+See [`docs/providers/openai.md`](docs/providers/openai.md) for the default provider, [`docs/providers/deepseek.md`](docs/providers/deepseek.md) for the DeepSeek provider, and [`docs/providers/openrouter.md`](docs/providers/openrouter.md) for the OpenRouter provider.
 
 ## Settings
 
@@ -101,35 +104,43 @@ let model = ur::Model::new(provider, "gpt-5.5")
     .response_format(ur::ResponseFormat::JsonObject);
 ```
 
+`ResponseFormat` also has `JsonSchema` for structured outputs — build it with `ResponseFormat::json_schema_for::<T>(name)` to derive the schema from a Rust type, or `ResponseFormat::json_schema(name, schema)` for a hand-built schema.
+
 ## Examples
 
 Runnable examples live in [`crates/ur/examples`](crates/ur/examples). Run one with `cargo run`:
 
 ```sh
 # Provider-agnostic; runs offline against a scripted fake provider.
-cargo run -p ur --example agent
+cargo run -p ur-rs --example agent
 
 # OpenAI examples (default features); need OPENAI_API_KEY.
-cargo run -p ur --example minimal
+cargo run -p ur-rs --example minimal
 
 # DeepSeek examples; need the `deepseek` feature and DEEPSEEK_API_KEY.
-cargo run -p ur --example thinking --features deepseek
+cargo run -p ur-rs --example thinking --features deepseek
+
+# OpenRouter examples; need the `openrouter` feature and OPENROUTER_API_KEY.
+cargo run -p ur-rs --example openrouter --features openrouter
 ```
 
-| Example    | Provider     | Shows                                                       |
-| ---------- | ------------ | ----------------------------------------------------------- |
-| `agent`    | fake (local) | The full agent loop with tools, no network or key required. |
-| `minimal`  | OpenAI       | The smallest send-and-stream program.                       |
-| `openai`   | OpenAI       | The complete OpenAI flow with tool calls.                   |
-| `builder`  | OpenAI       | Configuring `OpenAiClient` through its builder.             |
-| `session`  | OpenAI       | A multi-turn conversation with retained history.            |
-| `json`     | OpenAI       | Requesting a JSON-object response.                          |
-| `effort`   | OpenAI       | Tuning `ReasoningEffort`.                                   |
-| `strict`   | OpenAI       | A hand-written strict-mode tool schema.                     |
-| `deepseek` | DeepSeek     | The complete DeepSeek flow with tool calls.                 |
-| `thinking` | DeepSeek     | Toggling `Thinking` mode.                                   |
+| Example                 | Provider     | Shows                                                       |
+| ----------------------- | ------------ | ----------------------------------------------------------- |
+| `agent`                 | fake (local) | The full agent loop with tools, no network or key required. |
+| `minimal`               | OpenAI       | The smallest send-and-stream program.                       |
+| `openai`                | OpenAI       | The complete OpenAI flow with tool calls.                   |
+| `builder`               | OpenAI       | Configuring `OpenAiClient` through its builder.             |
+| `session`               | OpenAI       | A multi-turn conversation with retained history.            |
+| `json`                  | OpenAI       | Requesting a JSON-object response.                          |
+| `effort`                | OpenAI       | Tuning `ReasoningEffort`.                                   |
+| `strict`                | OpenAI       | A hand-written strict-mode tool schema.                     |
+| `structured_openai`     | OpenAI       | A `json_schema` response format derived from a Rust type.   |
+| `deepseek`              | DeepSeek     | The complete DeepSeek flow with tool calls.                 |
+| `thinking`              | DeepSeek     | Toggling `Thinking` mode.                                   |
+| `openrouter`            | OpenRouter   | The complete OpenRouter flow with tool calls.               |
+| `structured_openrouter` | OpenRouter   | A `json_schema` response format over OpenRouter.            |
 
-Every example except `agent` calls a live API and requires the matching API key in the environment. The DeepSeek examples also require `--features deepseek`.
+Every example except `agent` calls a live API and requires the matching API key in the environment. The DeepSeek examples also require `--features deepseek`, and the OpenRouter examples require `--features openrouter`.
 
 ## Minimum supported Rust version
 
