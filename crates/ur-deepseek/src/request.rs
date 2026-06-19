@@ -212,10 +212,7 @@ fn encode_message(message: &Message) -> Value {
             object.insert("role".to_owned(), Value::String("tool".to_owned()));
             object.insert(
                 "tool_call_id".to_owned(),
-                message
-                    .tool_call_id()
-                    .map(|id| Value::String(id.to_owned()))
-                    .unwrap_or(Value::Null),
+                content_value(message.tool_call_id()),
             );
             object.insert("content".to_owned(), content_value(message.content()));
         }

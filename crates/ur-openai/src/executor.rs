@@ -264,7 +264,6 @@ async fn status_error(response: reqwest::Response, retry_after: Option<Duration>
     }
 }
 
-#[derive(Default)]
 struct ProviderErrorBody {
     message: String,
     code: Option<String>,
