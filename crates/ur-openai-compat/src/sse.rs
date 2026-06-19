@@ -14,6 +14,7 @@ use ur_core::provider::RawEvent;
 #[derive(Debug, Eq, PartialEq)]
 pub enum SseItem {
     Events(Vec<RawEvent>),
+    FinishReason(FinishReason),
     Usage(Usage),
     Done,
 }
@@ -137,18 +138,19 @@ pub struct CompletionState {
     finish_reason: Option<FinishReason>,
     usage: Option<Usage>,
     done: bool,
-    missing_context: &'static str,
+    provider: &'static str,
 }
 
 impl CompletionState {
-    /// Creates a completion folder. `missing_context` names the provider in the
-    /// decode error raised when the stream ends without a `finish_reason`.
-    pub fn new(missing_context: &'static str) -> Self {
+    /// Creates a completion folder. `provider` names the provider (e.g.
+    /// `"DeepSeek"`) in the decode error raised when the stream ends without a
+    /// `finish_reason`.
+    pub fn new(provider: &'static str) -> Self {
         Self {
             finish_reason: None,
             usage: None,
             done: false,
-            missing_context,
+            provider,
         }
     }
 
@@ -156,17 +158,10 @@ impl CompletionState {
         let mut events = VecDeque::new();
         match item {
             SseItem::Events(raw_events) => {
-                for event in raw_events {
-                    match event {
-                        RawEvent::Done {
-                            finish_reason,
-                            usage: _,
-                        } => {
-                            self.finish_reason = Some(finish_reason);
-                        }
-                        other => events.push_back(other),
-                    }
-                }
+                events.extend(raw_events);
+            }
+            SseItem::FinishReason(finish_reason) => {
+                self.finish_reason = Some(finish_reason);
             }
             SseItem::Usage(usage) => {
                 self.usage = Some(usage);
@@ -175,7 +170,7 @@ impl CompletionState {
                 let finish_reason = self
                     .finish_reason
                     .take()
-                    .ok_or_else(|| missing_finish_reason(self.missing_context))?;
+                    .ok_or_else(|| missing_finish_reason(self.provider))?;
                 events.push_back(RawEvent::Done {
                     finish_reason,
                     usage: self.usage.take(),
@@ -191,9 +186,9 @@ impl CompletionState {
     }
 }
 
-fn missing_finish_reason(context: &'static str) -> Error {
+fn missing_finish_reason(provider: &str) -> Error {
     Error::Decode {
-        context: context.to_owned(),
+        context: format!("finishing {provider} SSE stream"),
         source: Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "SSE stream ended before a finish_reason chunk",
@@ -202,10 +197,11 @@ fn missing_finish_reason(context: &'static str) -> Error {
 }
 
 /// One streamed Chat Completions chunk, generic over the per-provider `delta`
-/// shape `D` and usage shape `U`.
+/// shape `D` and usage shape `U`. `U` defaults to the OpenAI-shaped
+/// [`WireUsage`]; providers with a divergent usage payload (DeepSeek) supply
+/// their own.
 #[derive(Deserialize)]
-#[serde(bound(deserialize = "D: Deserialize<'de>, U: Deserialize<'de>"))]
-pub struct Chunk<D, U> {
+pub struct Chunk<D, U = WireUsage> {
     #[serde(default = "Vec::new")]
     pub choices: Vec<Choice<D>>,
     pub usage: Option<U>,
@@ -228,4 +224,59 @@ pub struct WireToolCall {
 pub struct WireFunction {
     pub name: Option<String>,
     pub arguments: Option<String>,
+}
+
+/// Maps a Chat Completions `finish_reason` string to a [`FinishReason`]. When
+/// `legacy_function_call` is set, the deprecated `function_call` value is folded
+/// into [`FinishReason::ToolCalls`] (OpenAI and OpenRouter); otherwise it falls
+/// through to [`FinishReason::Other`] (DeepSeek).
+pub fn finish_reason(reason: &str, legacy_function_call: bool) -> FinishReason {
+    match reason {
+        "stop" => FinishReason::Stop,
+        "length" => FinishReason::Length,
+        "content_filter" => FinishReason::ContentFilter,
+        "tool_calls" => FinishReason::ToolCalls,
+        "function_call" if legacy_function_call => FinishReason::ToolCalls,
+        other => FinishReason::Other(other.to_owned()),
+    }
+}
+
+/// The OpenAI-shaped `usage` payload shared by the providers whose token
+/// accounting matches OpenAI's (OpenAI, OpenRouter). Unknown fields are ignored.
+#[derive(Deserialize)]
+pub struct WireUsage {
+    #[serde(default)]
+    pub prompt_tokens: u32,
+    #[serde(default)]
+    pub completion_tokens: u32,
+    #[serde(default)]
+    pub total_tokens: u32,
+    pub prompt_tokens_details: Option<PromptTokensDetails>,
+    pub completion_tokens_details: Option<CompletionTokensDetails>,
+}
+
+impl From<WireUsage> for Usage {
+    fn from(value: WireUsage) -> Self {
+        let mut usage = Self::default();
+        usage.prompt_tokens = value.prompt_tokens;
+        usage.completion_tokens = value.completion_tokens;
+        usage.total_tokens = value.total_tokens;
+        usage.cached_prompt_tokens = value
+            .prompt_tokens_details
+            .and_then(|details| details.cached_tokens);
+        usage.reasoning_tokens = value
+            .completion_tokens_details
+            .and_then(|details| details.reasoning_tokens);
+        usage
+    }
+}
+
+#[derive(Deserialize)]
+pub struct PromptTokensDetails {
+    pub cached_tokens: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub struct CompletionTokensDetails {
+    pub reasoning_tokens: Option<u32>,
 }

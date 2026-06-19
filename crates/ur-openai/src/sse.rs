@@ -2,19 +2,18 @@
 
 use serde::Deserialize;
 use ur_core::Error;
-use ur_core::event::{FinishReason, Usage};
 use ur_core::provider::RawEvent;
-use ur_openai_compat::sse::{Chunk, SseItem, WireFunction, WireToolCall};
+use ur_openai_compat::sse::{Chunk, SseItem, WireFunction, WireToolCall, finish_reason};
 
 pub(crate) fn decode_chunk(data: &str) -> Result<Vec<SseItem>, Error> {
-    let chunk: Chunk<Delta, WireUsage> =
-        serde_json::from_str(data).map_err(|source| Error::Decode {
-            context: "decoding OpenAI SSE chunk".to_owned(),
-            source: Box::new(source),
-        })?;
+    let chunk: Chunk<Delta> = serde_json::from_str(data).map_err(|source| Error::Decode {
+        context: "decoding OpenAI SSE chunk".to_owned(),
+        source: Box::new(source),
+    })?;
 
     let mut items = Vec::new();
     let mut events = Vec::new();
+    let mut finish = None;
 
     for choice in chunk.choices {
         if let Some(delta) = choice.delta {
@@ -44,31 +43,21 @@ pub(crate) fn decode_chunk(data: &str) -> Result<Vec<SseItem>, Error> {
         }
 
         if let Some(reason) = choice.finish_reason {
-            events.push(RawEvent::Done {
-                finish_reason: finish_reason(&reason),
-                usage: None,
-            });
+            finish = Some(finish_reason(&reason, true));
         }
     }
 
     if !events.is_empty() {
         items.push(SseItem::Events(events));
     }
+    if let Some(reason) = finish {
+        items.push(SseItem::FinishReason(reason));
+    }
     if let Some(usage) = chunk.usage {
         items.push(SseItem::Usage(usage.into()));
     }
 
     Ok(items)
-}
-
-fn finish_reason(reason: &str) -> FinishReason {
-    match reason {
-        "stop" => FinishReason::Stop,
-        "length" => FinishReason::Length,
-        "content_filter" => FinishReason::ContentFilter,
-        "tool_calls" | "function_call" => FinishReason::ToolCalls,
-        other => FinishReason::Other(other.to_owned()),
-    }
 }
 
 #[derive(Deserialize)]
@@ -78,67 +67,13 @@ struct Delta {
     tool_calls: Option<Vec<WireToolCall>>,
 }
 
-#[derive(Deserialize)]
-struct WireUsage {
-    #[serde(default)]
-    prompt_tokens: u32,
-    #[serde(default)]
-    completion_tokens: u32,
-    #[serde(default)]
-    total_tokens: u32,
-    prompt_tokens_details: Option<PromptTokensDetails>,
-    completion_tokens_details: Option<CompletionTokensDetails>,
-}
-
-impl From<WireUsage> for Usage {
-    fn from(value: WireUsage) -> Self {
-        let mut usage = Self::default();
-        usage.prompt_tokens = value.prompt_tokens;
-        usage.completion_tokens = value.completion_tokens;
-        usage.total_tokens = value.total_tokens;
-        usage.cached_prompt_tokens = value
-            .prompt_tokens_details
-            .and_then(|details| details.cached_tokens);
-        usage.reasoning_tokens = value
-            .completion_tokens_details
-            .and_then(|details| details.reasoning_tokens);
-        usage
-    }
-}
-
-#[derive(Deserialize)]
-struct PromptTokensDetails {
-    cached_tokens: Option<u32>,
-}
-
-#[derive(Deserialize)]
-struct CompletionTokensDetails {
-    reasoning_tokens: Option<u32>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-    use ur_openai_compat::sse::{CompletionState, Frame, SseDecoder, SseItem};
-
-    fn drive(
-        state: &mut CompletionState,
-        events: &mut Vec<RawEvent>,
-        frames: Vec<Frame>,
-    ) -> Result<(), Error> {
-        for frame in frames {
-            match frame {
-                Frame::Done => events.extend(state.apply(SseItem::Done)?),
-                Frame::Data(data) => {
-                    for item in decode_chunk(&data)? {
-                        events.extend(state.apply(item)?);
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
+    use ur_core::event::{FinishReason, Usage};
+    use ur_openai_compat::sse::{CompletionState, SseDecoder};
+    use ur_openai_compat::test_support::drive;
 
     fn decode(input: &str) -> Result<Vec<RawEvent>, Error> {
         decode_chunks(&[input.as_bytes()])
@@ -146,14 +81,14 @@ mod tests {
 
     fn decode_chunks(chunks: &[&[u8]]) -> Result<Vec<RawEvent>, Error> {
         let mut decoder = SseDecoder::default();
-        let mut state = CompletionState::new("finishing OpenAI SSE stream");
+        let mut state = CompletionState::new("OpenAI");
         let mut events = Vec::new();
         for chunk in chunks {
             let frames = decoder.push(chunk)?;
-            drive(&mut state, &mut events, frames)?;
+            drive(decode_chunk, &mut state, &mut events, frames)?;
         }
         let frames = decoder.finish()?;
-        drive(&mut state, &mut events, frames)?;
+        drive(decode_chunk, &mut state, &mut events, frames)?;
         Ok(events)
     }
 

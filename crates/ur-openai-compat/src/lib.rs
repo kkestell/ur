@@ -13,3 +13,5 @@ pub mod executor;
 pub mod keys;
 pub mod request;
 pub mod sse;
+#[cfg(feature = "test-support")]
+pub mod test_support;

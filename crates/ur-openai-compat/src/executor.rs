@@ -33,11 +33,10 @@ pub trait Dialect: Send + Sync + 'static {
     fn max_retries(&self) -> u32;
     /// The provider's chunk decoder.
     fn decode_chunk(&self) -> DecodeChunk;
-    /// Context string for the decode error raised when the stream ends without
-    /// a `finish_reason`.
-    fn missing_finish_context(&self) -> &'static str;
-    /// Context string for the decode error raised on EOF before `[DONE]`.
-    fn eof_context(&self) -> &'static str;
+    /// The provider's display name (e.g. `"DeepSeek"`), woven into the decode
+    /// errors raised when a stream ends without a `finish_reason` or before
+    /// `[DONE]`.
+    fn provider_name(&self) -> &'static str;
 
     /// Decorates the outgoing request (e.g. with attribution headers). Bearer
     /// auth is already applied.
@@ -58,7 +57,7 @@ pub trait Dialect: Send + Sync + 'static {
 
 /// Streams a Chat Completions request to completion under `config`.
 pub fn chat<D: Dialect>(config: Arc<D>, body: Value) -> BoxStream<'static, Result<RawEvent>> {
-    let completion = CompletionState::new(config.missing_finish_context());
+    let completion = CompletionState::new(config.provider_name());
     Box::pin(ChatStream {
         state: State::Connecting(Box::pin(connect(Arc::clone(&config), body.clone()))),
         config,
@@ -96,7 +95,7 @@ impl<D: Dialect> ChatStream<D> {
     fn retry_after_stream_error(&mut self) {
         self.stream_retries += 1;
         self.decoder = SseDecoder::default();
-        self.completion = CompletionState::new(self.config.missing_finish_context());
+        self.completion = CompletionState::new(self.config.provider_name());
         self.ready.clear();
         self.state = State::Connecting(Box::pin(connect_after_delay(
             Arc::clone(&self.config),
@@ -167,7 +166,7 @@ impl<D: Dialect> Stream for ChatStream<D> {
                             Ok(()) => {
                                 this.state = State::Done;
                                 return Poll::Ready(Some(Err(unexpected_eof(
-                                    this.config.eof_context(),
+                                    this.config.provider_name(),
                                 ))));
                             }
                             Err(error) => {
@@ -388,9 +387,9 @@ pub fn transport(error: reqwest::Error) -> Error {
     Error::Transport(Box::new(error))
 }
 
-fn unexpected_eof(context: &'static str) -> Error {
+fn unexpected_eof(provider: &str) -> Error {
     Error::Decode {
-        context: context.to_owned(),
+        context: format!("reading {provider} SSE stream"),
         source: Box::new(std::io::Error::new(
             std::io::ErrorKind::UnexpectedEof,
             "SSE stream ended before data: [DONE]",

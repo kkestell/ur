@@ -15,11 +15,35 @@ pub fn content_value(content: Option<&str>) -> Value {
 
 /// Encodes a slice of messages into the Chat Completions `messages` array.
 pub fn encode_messages(messages: &[Message]) -> Value {
-    Value::Array(messages.iter().map(encode_message).collect())
+    encode_messages_with(messages, |_, _| {})
+}
+
+/// Encodes a slice of messages, calling `assistant_extras` to add
+/// provider-specific fields (e.g. DeepSeek's `reasoning_content`) to each
+/// assistant message object.
+pub fn encode_messages_with(
+    messages: &[Message],
+    assistant_extras: impl Fn(&Message, &mut Map<String, Value>) + Copy,
+) -> Value {
+    Value::Array(
+        messages
+            .iter()
+            .map(|message| encode_message_with(message, assistant_extras))
+            .collect(),
+    )
 }
 
 /// Encodes a single message into its Chat Completions object.
 pub fn encode_message(message: &Message) -> Value {
+    encode_message_with(message, |_, _| {})
+}
+
+/// Encodes a single message, calling `assistant_extras` to add
+/// provider-specific fields to an assistant message object.
+pub fn encode_message_with(
+    message: &Message,
+    assistant_extras: impl Fn(&Message, &mut Map<String, Value>),
+) -> Value {
     let mut object = Map::new();
 
     match message.role() {
@@ -34,6 +58,7 @@ pub fn encode_message(message: &Message) -> Value {
         MessageRole::Assistant => {
             object.insert("role".to_owned(), Value::String("assistant".to_owned()));
             object.insert("content".to_owned(), content_value(message.content()));
+            assistant_extras(message, &mut object);
             if !message.tool_calls().is_empty() {
                 let calls = message
                     .tool_calls()
@@ -154,23 +179,36 @@ pub fn encode_stop(
     Ok(())
 }
 
-/// Encodes `temperature` and `top_p`, validating their ranges.
-pub fn encode_sampling(body: &mut Map<String, Value>, settings: &Settings) -> Result<(), Error> {
-    if let Some(temperature) = settings.temperature {
-        if !(0.0..=2.0).contains(&temperature) {
-            return Err(Error::Config {
-                message: format!("temperature {temperature} is outside the range 0.0..=2.0"),
-            });
-        }
-        body.insert("temperature".to_owned(), json!(temperature));
+/// Validates that `temperature` (0.0..=2.0) and `top_p` (0.0..=1.0) fall within
+/// their accepted ranges, without encoding anything.
+pub fn validate_sampling(settings: &Settings) -> Result<(), Error> {
+    if let Some(temperature) = settings.temperature
+        && !(0.0..=2.0).contains(&temperature)
+    {
+        return Err(Error::Config {
+            message: format!("temperature {temperature} is outside the range 0.0..=2.0"),
+        });
     }
 
+    if let Some(top_p) = settings.top_p
+        && !(0.0..=1.0).contains(&top_p)
+    {
+        return Err(Error::Config {
+            message: format!("top_p {top_p} is outside the range 0.0..=1.0"),
+        });
+    }
+
+    Ok(())
+}
+
+/// Encodes `temperature` and `top_p`, validating their ranges.
+pub fn encode_sampling(body: &mut Map<String, Value>, settings: &Settings) -> Result<(), Error> {
+    validate_sampling(settings)?;
+
+    if let Some(temperature) = settings.temperature {
+        body.insert("temperature".to_owned(), json!(temperature));
+    }
     if let Some(top_p) = settings.top_p {
-        if !(0.0..=1.0).contains(&top_p) {
-            return Err(Error::Config {
-                message: format!("top_p {top_p} is outside the range 0.0..=1.0"),
-            });
-        }
         body.insert("top_p".to_owned(), json!(top_p));
     }
 

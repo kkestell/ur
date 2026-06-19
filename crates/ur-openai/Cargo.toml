@@ -26,4 +26,5 @@ ur-core = { version = "0.1.0-alpha.1", path = "../ur-core", default-features = f
 ur-openai-compat = { version = "0.1.0-alpha.1", path = "../ur-openai-compat", default-features = false }
 
 [dev-dependencies]
+ur-openai-compat = { version = "0.1.0-alpha.1", path = "../ur-openai-compat", default-features = false, features = ["test-support"] }
 wiremock.workspace = true

@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde_json::Value;
 use ur_core::provider::RawEvent;
 use ur_core::{BoxStream, Error, Result};
-use ur_openai_compat::executor::Dialect;
+use ur_openai_compat::executor::{Dialect, error_body};
 use ur_openai_compat::sse::DecodeChunk;
 
 use crate::client::Config;
@@ -41,12 +41,8 @@ impl Dialect for Config {
         crate::sse::decode_chunk
     }
 
-    fn missing_finish_context(&self) -> &'static str {
-        "finishing DeepSeek SSE stream"
-    }
-
-    fn eof_context(&self) -> &'static str {
-        "reading DeepSeek SSE stream"
+    fn provider_name(&self) -> &'static str {
+        "DeepSeek"
     }
 
     fn is_retryable_status(&self, status: u16) -> bool {
@@ -59,7 +55,7 @@ impl Dialect for Config {
         retry_after: Option<Duration>,
     ) -> Error {
         let status = response.status().as_u16();
-        let message = error_message(response).await;
+        let message = error_body(response).await.message;
 
         match status {
             400 => Error::BadRequest { message },
@@ -72,51 +68,15 @@ impl Dialect for Config {
     }
 }
 
-async fn error_message(response: reqwest::Response) -> String {
-    let default = response
-        .status()
-        .canonical_reason()
-        .unwrap_or("provider error")
-        .to_owned();
-
-    let Ok(body) = response.text().await else {
-        return default;
-    };
-
-    if body.trim().is_empty() {
-        return default;
-    }
-
-    let message = serde_json::from_str::<Value>(&body)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("error")
-                .and_then(|error| error.get("message"))
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .unwrap_or(body);
-
-    let message = message.trim();
-    if message.is_empty() {
-        default
-    } else {
-        message.to_owned()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures_util::StreamExt as _;
     use serde_json::json;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
+    use std::sync::atomic::Ordering;
     use ur_core::provider::Provider;
     use ur_core::provider::{Message, Request, Settings};
+    use ur_openai_compat::test_support::flaky_body_server;
     use wiremock::matchers::{body_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -426,49 +386,5 @@ mod tests {
             }
             other => panic!("expected decode error, got {other:?}"),
         }
-    }
-
-    async fn flaky_body_server(success_body: String) -> (String, Arc<AtomicUsize>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let requests = Arc::new(AtomicUsize::new(0));
-        let observed = Arc::clone(&requests);
-
-        tokio::spawn(async move {
-            for attempt in 0..2 {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                observed.fetch_add(1, Ordering::Relaxed);
-                let mut request = Vec::new();
-                let mut buffer = [0_u8; 1024];
-                loop {
-                    let n = socket.read(&mut buffer).await.unwrap();
-                    if n == 0 {
-                        break;
-                    }
-                    request.extend_from_slice(&buffer[..n]);
-                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-
-                if attempt == 0 {
-                    socket
-                        .write_all(
-                            b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: 100\r\n\r\ndata: ",
-                        )
-                        .await
-                        .unwrap();
-                } else {
-                    let response = format!(
-                        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\n\r\n{}",
-                        success_body.len(),
-                        success_body
-                    );
-                    socket.write_all(response.as_bytes()).await.unwrap();
-                }
-            }
-        });
-
-        (format!("http://{address}"), requests)
     }
 }

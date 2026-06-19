@@ -42,12 +42,8 @@ impl Dialect for Config {
         crate::sse::decode_chunk
     }
 
-    fn missing_finish_context(&self) -> &'static str {
-        "finishing OpenRouter SSE stream"
-    }
-
-    fn eof_context(&self) -> &'static str {
-        "reading OpenRouter SSE stream"
+    fn provider_name(&self) -> &'static str {
+        "OpenRouter"
     }
 
     // OpenRouter attributes requests to an app via these optional headers.

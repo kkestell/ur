@@ -3,10 +3,12 @@
 use serde_json::{Map, Value, json};
 use ur_core::Error;
 use ur_core::model::{ReasoningEffort, ResponseFormat, Thinking};
-use ur_core::provider::{Message, MessageRole, Request, Settings};
+use ur_core::provider::{Request, Settings};
 use ur_core::schema::strict_schema;
 use ur_core::tool::ToolSchema;
-use ur_openai_compat::request::{content_value, encode_stop};
+use ur_openai_compat::request::{
+    content_value, encode_messages_with, encode_stop, validate_sampling,
+};
 
 use crate::catalog;
 
@@ -19,7 +21,15 @@ pub(crate) fn encode(request: &Request, user_id: Option<&str>, beta: bool) -> Re
     let mut body = Map::new();
 
     body.insert("model".to_owned(), Value::String(request.model.clone()));
-    body.insert("messages".to_owned(), encode_messages(&request.messages));
+    body.insert(
+        "messages".to_owned(),
+        encode_messages_with(&request.messages, |message, object| {
+            object.insert(
+                "reasoning_content".to_owned(),
+                content_value(message.reasoning_content()),
+            );
+        }),
+    );
     body.insert("stream".to_owned(), Value::Bool(true));
     body.insert(
         "stream_options".to_owned(),
@@ -114,21 +124,7 @@ fn encode_max_tokens(body: &mut Map<String, Value>, request: &Request) -> Result
 }
 
 fn encode_sampling(body: &mut Map<String, Value>, settings: &Settings) -> Result<(), Error> {
-    if let Some(temperature) = settings.temperature
-        && !(0.0..=2.0).contains(&temperature)
-    {
-        return Err(Error::Config {
-            message: format!("temperature {temperature} is outside the range 0.0..=2.0"),
-        });
-    }
-
-    if let Some(top_p) = settings.top_p
-        && !(0.0..=1.0).contains(&top_p)
-    {
-        return Err(Error::Config {
-            message: format!("top_p {top_p} is outside the range 0.0..=1.0"),
-        });
-    }
+    validate_sampling(settings)?;
 
     if settings.thinking == Thinking::Disabled {
         if let Some(temperature) = settings.temperature {
@@ -148,60 +144,6 @@ fn reasoning_effort(effort: ReasoningEffort) -> &'static str {
         ReasoningEffort::ExtraHigh | ReasoningEffort::Max => "max",
         _ => "high",
     }
-}
-
-fn encode_messages(messages: &[Message]) -> Value {
-    Value::Array(messages.iter().map(encode_message).collect())
-}
-
-fn encode_message(message: &Message) -> Value {
-    let mut object = Map::new();
-
-    match message.role() {
-        MessageRole::System => {
-            object.insert("role".to_owned(), Value::String("system".to_owned()));
-            object.insert("content".to_owned(), content_value(message.content()));
-        }
-        MessageRole::User => {
-            object.insert("role".to_owned(), Value::String("user".to_owned()));
-            object.insert("content".to_owned(), content_value(message.content()));
-        }
-        MessageRole::Assistant => {
-            object.insert("role".to_owned(), Value::String("assistant".to_owned()));
-            object.insert("content".to_owned(), content_value(message.content()));
-            object.insert(
-                "reasoning_content".to_owned(),
-                content_value(message.reasoning_content()),
-            );
-            if !message.tool_calls().is_empty() {
-                let calls = message
-                    .tool_calls()
-                    .iter()
-                    .map(|call| {
-                        json!({
-                            "id": call.id,
-                            "type": "function",
-                            "function": {
-                                "name": call.name,
-                                "arguments": call.arguments.as_str(),
-                            },
-                        })
-                    })
-                    .collect();
-                object.insert("tool_calls".to_owned(), Value::Array(calls));
-            }
-        }
-        MessageRole::Tool => {
-            object.insert("role".to_owned(), Value::String("tool".to_owned()));
-            object.insert(
-                "tool_call_id".to_owned(),
-                content_value(message.tool_call_id()),
-            );
-            object.insert("content".to_owned(), content_value(message.content()));
-        }
-    }
-
-    Value::Object(object)
 }
 
 fn encode_tools(tools: &[ToolSchema], beta: bool) -> Result<Option<Value>, Error> {
@@ -255,7 +197,7 @@ fn encode_tool(tool: &ToolSchema, strict: bool) -> Value {
 #[cfg(all(test, feature = "serde"))]
 mod tests {
     use super::*;
-    use ur_core::provider::ToolCall;
+    use ur_core::provider::{Message, ToolCall};
 
     /// Builds a request fixture. `Request` is `#[non_exhaustive]`, so its parts
     /// are assembled through their serde representations.
