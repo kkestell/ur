@@ -124,6 +124,22 @@ impl ResponseFormat {
     }
 }
 
+/// Controls whether and which tool the model may call on a turn.
+#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum ToolChoice {
+    /// Let the model decide whether to call a tool.
+    #[default]
+    Auto,
+    /// Forbid tool calls for this turn.
+    None,
+    /// Require the model to call some tool.
+    Required,
+    /// Require the model to call the named tool.
+    Tool(String),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,9 +156,12 @@ mod tests {
         // `ResponseFormat` owns a schema, so it is not `Copy`.
         assert_owned::<ResponseFormat>();
         assert_owned::<JsonSchemaFormat>();
+        // `ToolChoice` owns a tool name, so it is not `Copy`.
+        assert_owned::<ToolChoice>();
 
         assert_eq!(Thinking::default(), Thinking::Default);
         assert_eq!(ResponseFormat::default(), ResponseFormat::Text);
+        assert_eq!(ToolChoice::default(), ToolChoice::Auto);
     }
 
     #[test]

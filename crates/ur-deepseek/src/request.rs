@@ -7,7 +7,7 @@ use ur_core::provider::{Request, Settings};
 use ur_core::schema::strict_schema;
 use ur_core::tool::ToolSchema;
 use ur_openai_compat::request::{
-    content_value, encode_messages_with, encode_stop, validate_sampling,
+    content_value, encode_messages_with, encode_stop, encode_tool_choice, validate_sampling,
 };
 
 use crate::catalog;
@@ -40,7 +40,7 @@ pub(crate) fn encode(request: &Request, user_id: Option<&str>, beta: bool) -> Re
 
     if let Some(tools) = encode_tools(&request.tools, beta)? {
         body.insert("tools".to_owned(), tools);
-        body.insert("tool_choice".to_owned(), Value::String("auto".to_owned()));
+        encode_tool_choice(&mut body, &request.settings.tool_choice);
     }
 
     if let Some(user_id) = user_id {
@@ -282,6 +282,31 @@ mod tests {
             }])
         );
         assert_eq!(body["tool_choice"], json!("auto"));
+    }
+
+    #[test]
+    fn tool_choice_setting_forces_a_named_tool() {
+        use ur_core::model::ToolChoice;
+
+        let tool = ToolSchema::new("add", json!({ "type": "object" }));
+        let mut settings = Settings::default();
+        settings.tool_choice = ToolChoice::Tool("add".to_owned());
+        let body = encode(
+            &request(
+                "deepseek-v4-pro",
+                vec![Message::user("hi")],
+                vec![tool],
+                settings,
+            ),
+            None,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(
+            body["tool_choice"],
+            json!({ "type": "function", "function": { "name": "add" } })
+        );
     }
 
     #[test]

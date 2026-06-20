@@ -1,7 +1,7 @@
 //! Provider seam and request/response records.
 
 use crate::event::{FinishReason, Usage};
-use crate::model::{ReasoningEffort, ResponseFormat, Thinking};
+use crate::model::{ReasoningEffort, ResponseFormat, Thinking, ToolChoice};
 use crate::tool::{ToolArguments, ToolSchema};
 use crate::{BoxStream, Result};
 
@@ -248,6 +248,8 @@ pub struct Settings {
     pub temperature: Option<f32>,
     /// Nucleus sampling probability.
     pub top_p: Option<f32>,
+    /// Tool selection policy.
+    pub tool_choice: ToolChoice,
 }
 
 #[cfg(test)]

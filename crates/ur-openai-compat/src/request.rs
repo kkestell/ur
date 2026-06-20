@@ -3,7 +3,7 @@
 
 use serde_json::{Map, Value, json};
 use ur_core::Error;
-use ur_core::model::ResponseFormat;
+use ur_core::model::{ResponseFormat, ToolChoice};
 use ur_core::provider::{Message, MessageRole, Settings};
 use ur_core::schema::strict_schema;
 use ur_core::tool::ToolSchema;
@@ -154,6 +154,21 @@ pub fn encode_response_format(body: &mut Map<String, Value>, format: &ResponseFo
         }
         _ => {}
     }
+}
+
+/// Encodes the OpenAI-format `tool_choice` field.
+pub fn encode_tool_choice(body: &mut Map<String, Value>, choice: &ToolChoice) {
+    let value = match choice {
+        ToolChoice::Auto => Value::String("auto".to_owned()),
+        ToolChoice::None => Value::String("none".to_owned()),
+        ToolChoice::Required => Value::String("required".to_owned()),
+        ToolChoice::Tool(name) => json!({
+            "type": "function",
+            "function": { "name": name },
+        }),
+        _ => Value::String("auto".to_owned()),
+    };
+    body.insert("tool_choice".to_owned(), value);
 }
 
 /// Encodes `stop` sequences, rejecting more than `max` of them.

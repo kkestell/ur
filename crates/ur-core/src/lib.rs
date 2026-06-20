@@ -198,6 +198,12 @@ impl<P: Provider> Model<P> {
         self
     }
 
+    /// Sets the tool selection policy for future requests.
+    pub fn tool_choice(mut self, choice: model::ToolChoice) -> Self {
+        self.settings.tool_choice = choice;
+        self
+    }
+
     fn validate_settings(&self) -> Result<()> {
         if let model::ResponseFormat::JsonSchema(format) = &self.settings.response_format
             && !is_valid_name(&format.name)

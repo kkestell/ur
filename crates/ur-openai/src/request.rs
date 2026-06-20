@@ -5,7 +5,8 @@ use ur_core::Error;
 use ur_core::model::ReasoningEffort;
 use ur_core::provider::{Request, Settings};
 use ur_openai_compat::request::{
-    encode_messages, encode_response_format, encode_sampling, encode_stop, encode_tools,
+    encode_messages, encode_response_format, encode_sampling, encode_stop, encode_tool_choice,
+    encode_tools,
 };
 
 const MAX_STOP_SEQUENCES: usize = 4;
@@ -25,7 +26,7 @@ pub(crate) fn encode(request: &Request, user: Option<&str>) -> Result<Value, Err
 
     if let Some(tools) = encode_tools(&request.tools) {
         body.insert("tools".to_owned(), tools);
-        body.insert("tool_choice".to_owned(), Value::String("auto".to_owned()));
+        encode_tool_choice(&mut body, &request.settings.tool_choice);
     }
 
     if let Some(user) = user {
@@ -155,6 +156,38 @@ mod tests {
             }])
         );
         assert_eq!(body["tool_choice"], json!("auto"));
+    }
+
+    #[test]
+    fn tool_choice_settings_map_to_openai_wire_shapes() {
+        use ur_core::model::ToolChoice;
+
+        let cases = [
+            (ToolChoice::Auto, json!("auto")),
+            (ToolChoice::None, json!("none")),
+            (ToolChoice::Required, json!("required")),
+            (
+                ToolChoice::Tool("add".to_owned()),
+                json!({ "type": "function", "function": { "name": "add" } }),
+            ),
+        ];
+
+        for (choice, expected) in cases {
+            let tool = ToolSchema::new("add", json!({ "type": "object" }));
+            let mut settings = Settings::default();
+            settings.tool_choice = choice;
+            let body = encode(
+                &request(
+                    "gpt-5.5",
+                    vec![Message::user("hi")],
+                    vec![tool],
+                    settings,
+                ),
+                None,
+            )
+            .unwrap();
+            assert_eq!(body["tool_choice"], expected);
+        }
     }
 
     #[test]

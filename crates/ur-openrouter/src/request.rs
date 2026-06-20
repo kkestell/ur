@@ -5,7 +5,8 @@ use ur_core::Error;
 use ur_core::model::{ReasoningEffort, Thinking};
 use ur_core::provider::{Request, Settings};
 use ur_openai_compat::request::{
-    encode_messages, encode_response_format, encode_sampling, encode_stop, encode_tools,
+    encode_messages, encode_response_format, encode_sampling, encode_stop, encode_tool_choice,
+    encode_tools,
 };
 
 use crate::client::ProviderRouting;
@@ -31,7 +32,7 @@ pub(crate) fn encode(
 
     if let Some(tools) = encode_tools(&request.tools) {
         body.insert("tools".to_owned(), tools);
-        body.insert("tool_choice".to_owned(), Value::String("auto".to_owned()));
+        encode_tool_choice(&mut body, &request.settings.tool_choice);
     }
 
     if let Some(routing) = provider_routing {
@@ -217,6 +218,31 @@ mod tests {
             }])
         );
         assert_eq!(body["tool_choice"], json!("auto"));
+    }
+
+    #[test]
+    fn tool_choice_setting_forces_a_named_tool() {
+        use ur_core::model::ToolChoice;
+
+        let tool = ToolSchema::new("add", json!({ "type": "object" }));
+        let mut settings = Settings::default();
+        settings.tool_choice = ToolChoice::Tool("add".to_owned());
+        let body = encode(
+            &request(
+                "openai/gpt-5.5",
+                vec![Message::user("hi")],
+                vec![tool],
+                settings,
+            ),
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            body["tool_choice"],
+            json!({ "type": "function", "function": { "name": "add" } })
+        );
     }
 
     #[test]
