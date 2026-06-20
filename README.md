@@ -64,6 +64,7 @@ let agent = ur::Agent::new("You are a helpful assistant.", model)
 - **Provider-agnostic agent loop.** `Model`, `Agent`, `Session`, and `EventStream` work identically with any `Provider` implementation.
 - **Streaming deltas.** `TextDelta`, `ReasoningDelta`, and incremental `ToolCall` assembly as events arrive.
 - **Tool dispatch with rollback.** Tools run sequentially in call order. A provider error or dropped stream rolls the session back to its last committed state.
+- **Cancellable turns.** Drop the `EventStream` to cancel, or call `stream.abort_handle()` to obtain a cheap, clonable `AbortHandle` that cancels the turn from another task or thread. Either way in-flight provider and tool work is abandoned and the turn rolls back.
 - **`#[ur::tool]` / `#[ur::tools]` macros.** Annotate a free `async fn` and register it with `agent.tool(add)`, or put `&self` methods on an `#[ur::tools]` impl block for stateful tools and register them with `agent.tool_set(...)`. Parameters and return types derive JSON Schema automatically.
 - **Structured outputs.** A `json_schema` response format constrains a reply to a schema, derived from a Rust type with `ResponseFormat::json_schema_for::<T>` or hand-built.
 - **Pluggable providers.** Implement `Provider::chat` and `Provider::model_spec` to drive any backend. OpenAI, DeepSeek, and OpenRouter ship in the workspace; additional providers live in their own crates.

@@ -63,8 +63,8 @@ pub mod __rt {
     pub use ::serde_json;
 }
 
-pub use event::EventStream;
 use event::StreamTool;
+pub use event::{AbortHandle, EventStream};
 use provider::{Message, ModelNotice, ModelSpec, Provider, Settings};
 use tool::{Tool, ToolSchema, ToolSet};
 
@@ -1570,6 +1570,143 @@ mod tests {
         drop(stream);
 
         assert_eq!(session.history(), before.as_slice());
+    }
+
+    #[test]
+    fn abort_before_done_rolls_back_pending_turn() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [ok_response([
+                    RawEvent::TextDelta("partial".to_owned()),
+                    done_event(),
+                ])],
+            ),
+            "known",
+        );
+        let mut session = Agent::new("system", model).session();
+        let before = session.history().to_vec();
+
+        let mut stream = session.send("hello");
+        let handle = stream.abort_handle();
+        assert_eq!(
+            next_event(&mut stream).unwrap().unwrap(),
+            event::Event::TextDelta {
+                delta: "partial".to_owned()
+            }
+        );
+        handle.abort();
+        assert!(next_event(&mut stream).is_none());
+
+        assert_eq!(session.history(), before.as_slice());
+    }
+
+    #[test]
+    fn abort_after_tool_result_rolls_back_whole_turn() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [
+                    ok_response([
+                        RawEvent::ToolCallDelta {
+                            index: 0,
+                            id: Some("call-1".to_owned()),
+                            name: Some("add".to_owned()),
+                            arguments: "{}".to_owned(),
+                        },
+                        RawEvent::Done {
+                            finish_reason: event::FinishReason::ToolCalls,
+                            usage: None,
+                        },
+                    ]),
+                    ok_response([
+                        RawEvent::TextDelta("partial retry".to_owned()),
+                        done_event(),
+                    ]),
+                ],
+            ),
+            "known",
+        );
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut session = Agent::new("system", model)
+            .tool(RecordingTool {
+                name: "add",
+                output: Ok("1".to_owned()),
+                calls,
+            })
+            .session();
+        let before = session.history().to_vec();
+
+        let mut stream = session.send("tool then abort");
+        let handle = stream.abort_handle();
+        assert!(matches!(
+            next_event(&mut stream),
+            Some(Ok(event::Event::ToolCall { .. }))
+        ));
+        assert!(matches!(
+            next_event(&mut stream),
+            Some(Ok(event::Event::ToolResult { .. }))
+        ));
+        assert_eq!(
+            next_event(&mut stream).unwrap().unwrap(),
+            event::Event::TextDelta {
+                delta: "partial retry".to_owned()
+            }
+        );
+        handle.abort();
+        assert!(next_event(&mut stream).is_none());
+
+        assert_eq!(session.history(), before.as_slice());
+    }
+
+    #[test]
+    fn abort_after_done_is_noop() {
+        let state = Arc::new(FakeProviderState::default());
+        let model = Model::new(
+            FakeProvider::with_responses(
+                Arc::clone(&state),
+                [ok_response([
+                    RawEvent::TextDelta("answer".to_owned()),
+                    done_event(),
+                ])],
+            ),
+            "known",
+        );
+        let mut session = Agent::new("system", model).session();
+
+        let mut stream = session.send("hello");
+        let handle = stream.abort_handle();
+        assert_eq!(
+            next_event(&mut stream).unwrap().unwrap(),
+            event::Event::TextDelta {
+                delta: "answer".to_owned()
+            }
+        );
+        assert_done(&mut stream);
+
+        // Aborting an already-committed turn is a harmless no-op: the stream
+        // stays exhausted and history stays committed.
+        handle.abort();
+        assert!(next_event(&mut stream).is_none());
+        drop(stream);
+
+        assert_eq!(session.history().len(), 3);
+        assert_eq!(session.history()[1].content(), Some("hello"));
+        assert_eq!(session.history()[2].content(), Some("answer"));
+    }
+
+    #[test]
+    fn abort_handle_is_clone_send_sync_static() {
+        fn assert_traits<T: Clone + Send + Sync + 'static>() {}
+        assert_traits::<AbortHandle>();
+
+        let stream = EventStream::empty();
+        let handle = stream.abort_handle();
+        assert!(!handle.is_aborted());
+        handle.abort();
+        assert!(handle.is_aborted());
     }
 
     #[test]

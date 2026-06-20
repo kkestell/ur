@@ -6,12 +6,93 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use futures_util::stream::Abortable;
+
 use crate::provider::{Message, Provider, RawEvent, Request, Settings, ToolCall};
 use crate::tool::{Tool, ToolArguments, ToolSchema};
 use crate::{BoxFuture, BoxStream, Error, Result, Stream, UserMessage};
 
+/// A cheap, clonable handle that cancels a running [`EventStream`] turn.
+///
+/// Obtain one with [`EventStream::abort_handle`]. Calling [`AbortHandle::abort`]
+/// ends the turn the same way dropping the stream does: in-flight provider and
+/// tool work is abandoned and the turn rolls back, leaving session history
+/// untouched. The stream then ends with `None`.
+pub use futures_util::stream::AbortHandle;
+
 /// Opaque stream of events returned by a session.
+///
+/// A turn can be cancelled either by dropping the stream or, from elsewhere, via
+/// a handle obtained from [`EventStream::abort_handle`].
 pub struct EventStream<'a> {
+    inner: Abortable<TurnStream<'a>>,
+    abort_handle: AbortHandle,
+}
+
+impl<'a> EventStream<'a> {
+    fn wrap(inner: TurnStream<'a>) -> Self {
+        let (abort_handle, registration) = AbortHandle::new_pair();
+        Self {
+            inner: Abortable::new(inner, registration),
+            abort_handle,
+        }
+    }
+
+    pub(crate) fn new(
+        session_history: &'a mut Vec<Message>,
+        provider: Arc<dyn Provider>,
+        model: String,
+        tools: Vec<StreamTool>,
+        tool_schemas: Vec<ToolSchema>,
+        settings: Settings,
+        message: UserMessage,
+    ) -> Self {
+        Self::wrap(TurnStream::new(
+            session_history,
+            provider,
+            model,
+            tools,
+            tool_schemas,
+            settings,
+            message,
+        ))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn empty() -> Self {
+        Self::wrap(TurnStream::empty())
+    }
+
+    pub(crate) fn from_error(error: crate::Error) -> Self {
+        Self::wrap(TurnStream::from_error(error))
+    }
+
+    /// Returns a handle that can cancel this turn from elsewhere.
+    ///
+    /// The handle is cheap to clone and may be sent across threads, letting a
+    /// consumer that has moved the stream into a `tokio::select!`, a spawned
+    /// task, or another thread cancel the turn without owning the stream.
+    pub fn abort_handle(&self) -> AbortHandle {
+        self.abort_handle.clone()
+    }
+}
+
+impl Stream for EventStream<'_> {
+    type Item = Result<Event>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.get_mut().inner).poll_next(cx)
+    }
+}
+
+impl std::fmt::Debug for EventStream<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventStream").finish_non_exhaustive()
+    }
+}
+
+/// The provider/tool agent loop backing an [`EventStream`].
+struct TurnStream<'a> {
     session_history: Option<&'a mut Vec<Message>>,
     pending_history: Vec<Message>,
     provider: Option<Arc<dyn Provider>>,
@@ -29,8 +110,8 @@ pub struct EventStream<'a> {
     finished: bool,
 }
 
-impl<'a> EventStream<'a> {
-    pub(crate) fn new(
+impl<'a> TurnStream<'a> {
+    fn new(
         session_history: &'a mut Vec<Message>,
         provider: Arc<dyn Provider>,
         model: String,
@@ -239,15 +320,9 @@ impl<'a> EventStream<'a> {
     }
 }
 
-impl std::fmt::Debug for EventStream<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EventStream").finish_non_exhaustive()
-    }
-}
+impl Unpin for TurnStream<'_> {}
 
-impl Unpin for EventStream<'_> {}
-
-impl Stream for EventStream<'_> {
+impl Stream for TurnStream<'_> {
     type Item = Result<Event>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

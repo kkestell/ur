@@ -151,8 +151,8 @@ pub use ur_core::provider::{
 };
 pub use ur_core::tool::{Tool, ToolArguments, ToolSchema, ToolSet};
 pub use ur_core::{
-    Agent, BoxFuture, BoxStream, Error, EventStream, JsonError, JsonSchema, JsonValue, Model,
-    Result, Session, Stream, UserMessage,
+    AbortHandle, Agent, BoxFuture, BoxStream, Error, EventStream, JsonError, JsonSchema, JsonValue,
+    Model, Result, Session, Stream, UserMessage,
 };
 pub use ur_macros::{tool, tools};
 
