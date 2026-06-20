@@ -177,12 +177,7 @@ mod tests {
             let mut settings = Settings::default();
             settings.tool_choice = choice;
             let body = encode(
-                &request(
-                    "gpt-5.5",
-                    vec![Message::user("hi")],
-                    vec![tool],
-                    settings,
-                ),
+                &request("gpt-5.5", vec![Message::user("hi")], vec![tool], settings),
                 None,
             )
             .unwrap();

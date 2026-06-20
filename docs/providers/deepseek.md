@@ -21,6 +21,12 @@ DeepSeek-specific interpretation and validation of each provider-agnostic settin
 ### Thinking-gated sampling
 `temperature`/`top_p` are omitted when thinking is on; aliases and range checks.
 
+Reasoning tokens count against `max_tokens`. With `Thinking::Default` or
+`Thinking::Enabled`, a tight output cap can be spent entirely on reasoning and
+finish with `FinishReason::Length` before any non-empty `TextDelta` arrives.
+Use `Thinking::Disabled` for deterministic text-only smoke tests, or allow a
+larger `max_tokens` budget when testing thinking output.
+
 ### `ReasoningEffort` aliasing
 `Low`/`Medium`→`High`, `ExtraHigh`→`Max`, full set preserved.
 
