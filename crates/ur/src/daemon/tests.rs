@@ -636,7 +636,7 @@ async fn cancel_answers_every_pending_request() {
 }
 
 #[tokio::test]
-async fn unread_follows_focus() {
+async fn unread_follows_focus_and_prompts() {
     // (case, whether a daemon client focuses the session, whether it
     // disconnects before the turn ends, whether the session ends unread)
     let cases = [
@@ -672,6 +672,13 @@ async fn unread_follows_focus() {
         assert_eq!(summary.status, idle(StopReason::EndTurn), "{case}");
         assert_eq!(summary.unread, unread, "{case}");
         if unread {
+            // A prompt clears it, and the turn it starts ends unread again.
+            assert_eq!(prompt(&client, &session, "again").await, Response::Done);
+            let summary = watcher.next_change(&session).await;
+            assert_eq!(summary.status, Status::Working, "{case}");
+            assert!(!summary.unread, "{case}");
+            assert!(watcher.next_change(&session).await.unread, "{case}");
+
             assert_eq!(focus(&client, &session).await, Response::Done, "{case}");
             assert!(!watcher.next_change(&session).await.unread, "{case}");
         }

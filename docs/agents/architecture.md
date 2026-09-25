@@ -114,7 +114,8 @@ A prompt sent to a session whose load failed loads it first; if the load fails
 again, the session returns to `Failed`.
 
 Each session also has an `unread` flag. It turns on when a turn ends or fails
-while no client has the session focused, and turns off when a client focuses it.
+while no client has the session focused, and turns off when a client focuses it
+or sends it a prompt.
 A session **needs attention** when it is `NeedsPermission`, `Failed`, or unread.
 The sidebar sorts workspaces and sessions by this.
 

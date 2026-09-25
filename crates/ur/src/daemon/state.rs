@@ -247,7 +247,8 @@ impl State {
 
     /// Answers busy while the session's operation guard is held. Otherwise
     /// calls `send` to send `session/prompt`, then holds the guard, appends
-    /// the user prompt entry, and sets `Working`. Sending first means a failed
+    /// the user prompt entry, sets `Working`, and clears the unread flag,
+    /// since whoever prompts has seen the session. Sending first means a failed
     /// send leaves nothing to undo, and the server's first update waits for
     /// the lock, so it follows the user prompt entry.
     pub fn start_prompt(
@@ -265,6 +266,7 @@ impl State {
         session.op = true;
         session.append(Entry::UserPrompt { content });
         session.status = Status::Working;
+        session.unread = false;
         publish(&mut self.watchers, session);
         Ok(Response::Done)
     }

@@ -192,7 +192,8 @@
 - **Session status**: The daemon-owned state of a session: `Idle`, `Working`,
   `NeedsPermission`, or `Failed`. It is `Status` in code.
 - **Unread**: A per-session flag set when a turn ends or fails while no daemon
-  client has the session focused, and cleared when one focuses it.
+  client has the session focused, and cleared when one focuses it or sends it
+  a prompt.
 - **Needs attention**: True of a session that is `NeedsPermission`, `Failed`, or
   unread. The sidebar sorts workspaces and sessions by it.
 - **Focus**: The set of sessions a daemon client is showing, sent with
