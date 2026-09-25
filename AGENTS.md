@@ -14,7 +14,10 @@ Map each file here as it is added, following the project layout in
   `Event`, `ClientMessage`, `DaemonMessage`, and `socket_path()`.
 - `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the
   core.
-- `crates/ur/src/main.rs` — the `ur` command line; only `daemon` so far.
+- `crates/ur/src/main.rs` — the `ur` command line: `daemon` and `agent-run`.
+- `crates/ur/src/config.rs` — `Config` and `ServerConfig`, the config file.
+- `crates/ur/src/one_shot.rs` — `ur agent-run`, the one-shot client, and its
+  tests against a test agent.
 - `crates/ur/src/daemon/mod.rs` — `start()`: binds the socket, removing a stale
   one.
 - `crates/ur/src/daemon/server.rs` — the accept loop, each socket connection's

@@ -4,13 +4,16 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+agent-client-protocol.workspace = true
 anyhow.workspace = true
 bytes.workspace = true
 clap.workspace = true
 futures.workspace = true
 portable-pty.workspace = true
+serde.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["io-std", "io-util"] }
+toml.workspace = true
 tokio-util.workspace = true
 ur-client.workspace = true
 vt100.workspace = true

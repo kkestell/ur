@@ -23,9 +23,16 @@ names, tool names, tool argument schemas, model names, modes, permission labels,
 and session or tool IDs have no special meaning to ur.
 
 - One configured server per daemon. Its executable and argument list live in
-  `$XDG_CONFIG_HOME/ur/config.toml` (under `~/.config` when unset). Development
-  uses `command = "ox"` and `args = []`. The one-shot client and daemon use this
-  same configuration.
+  the `[server]` table of `$XDG_CONFIG_HOME/ur/config.toml` (under `~/.config`
+  when unset). The one-shot client and daemon use this same configuration.
+  Development uses:
+
+  ```toml
+  [server]
+  command = "ox"
+  args = []
+  ```
+
 - Call optional methods only when supported. List and load enable saved history;
   without them, ur still supports sessions created during the current ACP
   connection. Delete is available only when advertised. Image attachments

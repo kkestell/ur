@@ -7,6 +7,7 @@ edition = "2024"
 version = "0.1.0"
 
 [workspace.dependencies]
+agent-client-protocol = "2.1.0"
 anyhow = "1.0.104"
 bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive"] }
@@ -18,6 +19,7 @@ tauri = "2.11.5"
 tauri-build = "2.6.3"
 tauri-plugin-wdio-webdriver = "1.2.0"
 tempfile = "3.27.0"
+toml = "1.1.6"
 tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7.19", features = ["codec"] }
 ts-rs = "12.0.1"
