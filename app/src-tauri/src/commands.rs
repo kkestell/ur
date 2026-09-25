@@ -2,7 +2,7 @@ use tauri::State;
 use tauri::ipc::{Channel, Response as ChannelBytes};
 use ur_client::{Request, Response, TerminalId};
 
-use crate::gui_state::{GuiState, Selection};
+use crate::gui_state::{Connection, GuiState, Selection};
 use crate::link::Link;
 
 #[tauri::command]
@@ -12,8 +12,9 @@ pub async fn request(link: State<'_, Link>, request: Request) -> Result<Response
         .map_err(|error| error.to_string())
 }
 
-/// Attaches the selected terminal. When there is no selection, or the daemon
-/// rejects the attachment, opens a new terminal, attaches it, and selects it.
+/// Attaches the GUI's terminal from the GUI state file. When there is none, or
+/// the daemon rejects the attachment, opens a new terminal, attaches it, and
+/// saves it.
 #[tauri::command]
 pub async fn attach_terminal(
     link: State<'_, Link>,
@@ -22,7 +23,7 @@ pub async fn attach_terminal(
     output: Channel<ChannelBytes>,
 ) -> Result<TerminalId, String> {
     let mut gui_state = GuiState::load().map_err(|error| error.to_string())?;
-    if let Some(Selection::Terminal(terminal)) = gui_state.selection(link.socket())
+    if let Some(terminal) = gui_state.saved(link.socket()).terminal
         && link
             .attach(terminal, rows, cols, output.clone())
             .await
@@ -38,7 +39,7 @@ pub async fn attach_terminal(
         Err(error) => return Err(error.to_string()),
     };
     link.attach(terminal, rows, cols, output).await?;
-    gui_state.select(link.socket(), Selection::Terminal(terminal));
+    gui_state.saved_mut(link.socket()).terminal = Some(terminal);
     gui_state.save().map_err(|error| error.to_string())?;
     Ok(terminal)
 }
@@ -52,4 +53,26 @@ pub async fn terminal_input(
     link.terminal_input(terminal, data)
         .await
         .map_err(|error| error.to_string())
+}
+
+/// The current connection, for a webview that started after the `connection`
+/// event it would have needed.
+#[tauri::command]
+pub fn connection(link: State<'_, Link>) -> Connection {
+    link.connection()
+}
+
+/// The saved selection.
+#[tauri::command]
+pub fn selection(link: State<'_, Link>) -> Result<Option<Selection>, String> {
+    let gui_state = GuiState::load().map_err(|error| error.to_string())?;
+    Ok(gui_state.saved(link.socket()).selection)
+}
+
+/// Saves the selection.
+#[tauri::command]
+pub fn select(link: State<'_, Link>, selection: Selection) -> Result<(), String> {
+    let mut gui_state = GuiState::load().map_err(|error| error.to_string())?;
+    gui_state.saved_mut(link.socket()).selection = Some(selection);
+    gui_state.save().map_err(|error| error.to_string())
 }

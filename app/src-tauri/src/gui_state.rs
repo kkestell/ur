@@ -3,18 +3,38 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use ur_client::TerminalId;
 
 /// The GUI state file, keyed by socket path.
 #[derive(Default, Serialize, Deserialize)]
 pub struct GuiState {
-    selections: HashMap<String, Selection>,
+    saved: HashMap<String, Saved>,
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// One socket path's record: the GUI's one terminal, until Workspace terminal
+/// controls list terminals under their workspaces, and the selection.
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct Saved {
+    pub terminal: Option<TerminalId>,
+    pub selection: Option<Selection>,
+}
+
+/// The session or terminal chosen in the sidebar.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
 pub enum Selection {
-    Terminal(TerminalId),
+    Terminal,
+    Session { session: String },
+}
+
+/// The payload of the `connection` event and command.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct Connection {
+    pub connected: bool,
+    pub socket: String,
 }
 
 impl GuiState {
@@ -32,12 +52,12 @@ impl GuiState {
         std::fs::write(path, serde_json::to_vec_pretty(self)?)
     }
 
-    pub fn selection(&self, socket: &Path) -> Option<Selection> {
-        self.selections.get(&key(socket)).copied()
+    pub fn saved(&self, socket: &Path) -> Saved {
+        self.saved.get(&key(socket)).cloned().unwrap_or_default()
     }
 
-    pub fn select(&mut self, socket: &Path, selection: Selection) {
-        self.selections.insert(key(socket), selection);
+    pub fn saved_mut(&mut self, socket: &Path) -> &mut Saved {
+        self.saved.entry(key(socket)).or_default()
     }
 }
 

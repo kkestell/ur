@@ -1,10 +1,11 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
 import { remote } from "webdriverio";
 
 const BIN = resolve(import.meta.dirname, "../../target/e2e/debug");
@@ -14,17 +15,23 @@ const WAIT_MS = 10_000;
 
 type Browser = Awaited<ReturnType<typeof remote>>;
 
+type TauriWindow = {
+  __TAURI_INTERNALS__: { invoke(command: string, args: unknown): Promise<unknown> };
+};
+
 /**
  * One test's temporary directory and daemon, and the GUI launches made in it.
- * The daemon's config file launches the fake server.
+ * The daemon's config file launches the fake server, which keeps its saved
+ * history in the directory, so sessions outlive a daemon restart.
  */
 export class TestEnvironment {
   readonly home: string;
   readonly #dir: string;
   readonly #socket: string;
   readonly #state: string;
-  readonly #daemon: ChildProcess;
-  readonly #daemonExited: Promise<void>;
+  readonly #config: string;
+  #daemon!: ChildProcess;
+  #daemonExited!: Promise<void>;
   readonly #guis: Gui[] = [];
 
   private constructor(dir: string) {
@@ -32,21 +39,35 @@ export class TestEnvironment {
     this.#socket = join(dir, "ur.sock");
     this.home = join(dir, "home");
     this.#state = join(dir, "state");
-    const config = join(dir, "config");
+    this.#config = join(dir, "config");
     mkdirSync(this.home);
     mkdirSync(this.#state);
-    mkdirSync(join(config, "ur"), { recursive: true });
+    mkdirSync(join(this.#config, "ur"), { recursive: true });
+    const server = JSON.stringify(join(BIN, "ur-fake-server"));
+    const history = JSON.stringify(join(dir, "history.json"));
     writeFileSync(
-      join(config, "ur/config.toml"),
-      `[server]\ncommand = ${JSON.stringify(join(BIN, "ur-fake-server"))}\n`,
+      join(this.#config, "ur/config.toml"),
+      `[server]\ncommand = ${server}\nargs = [${history}]\n`,
     );
+    this.#spawnDaemon();
+  }
+
+  static async start(): Promise<TestEnvironment> {
+    const environment = new TestEnvironment(mkdtempSync(join(tmpdir(), "ur-e2e-")));
+    // The core retries until the daemon is up, but waiting here keeps the
+    // no-connection state out of the tests.
+    await waitFor("the daemon to listen", () => canConnect(environment.#socket));
+    return environment;
+  }
+
+  #spawnDaemon(): void {
     // `/bin/sh` keeps user shell configuration out of the terminals.
     this.#daemon = spawn(join(BIN, "ur"), ["daemon"], {
       env: {
         ...process.env,
         UR_SOCKET: this.#socket,
         HOME: this.home,
-        XDG_CONFIG_HOME: config,
+        XDG_CONFIG_HOME: this.#config,
         XDG_STATE_HOME: this.#state,
         SHELL: "/bin/sh",
       },
@@ -56,14 +77,33 @@ export class TestEnvironment {
     this.#daemonExited = new Promise((resolve) => this.#daemon.once("exit", () => resolve()));
   }
 
-  static async start(): Promise<TestEnvironment> {
-    const environment = new TestEnvironment(mkdtempSync(join(tmpdir(), "ur-e2e-")));
-    // The core connects once, so the daemon must be listening first.
-    await waitFor("the daemon to listen", () => canConnect(environment.#socket));
-    return environment;
+  /** Kills the daemon and waits for it to exit. */
+  async stopDaemon(): Promise<void> {
+    this.#daemon.kill("SIGKILL");
+    await this.#daemonExited;
   }
 
-  /** Starts `ur-app` and connects to its WebDriver server once the terminal renders. */
+  /** Starts the daemon again after `stopDaemon()` and waits for it to listen. */
+  async startDaemon(): Promise<void> {
+    this.#spawnDaemon();
+    await waitFor("the daemon to listen", () => canConnect(this.#socket));
+  }
+
+  /** Runs the `ur` command line against the daemon and returns its output. */
+  async ur(...args: string[]): Promise<string> {
+    const { stdout } = await promisify(execFile)(join(BIN, "ur"), args, {
+      env: { ...process.env, UR_SOCKET: this.#socket },
+    });
+    return stdout.trim();
+  }
+
+  /** Adds the `home` workspace at `home` and creates a session in it. */
+  async newSession(): Promise<string> {
+    await this.ur("workspace", "add", "home", this.home);
+    return this.ur("new", "home");
+  }
+
+  /** Starts `ur-app`, connects to its WebDriver server, and waits for the sidebar. */
   async openGui(): Promise<Gui> {
     const child = spawn(join(BIN, "ur-app"), [], {
       env: {
@@ -79,9 +119,7 @@ export class TestEnvironment {
     this.#guis.push(gui);
     await waitFor("the WebDriver server", webdriverReady);
     await gui.connect();
-    await waitFor("the terminal to render", async () =>
-      (await gui.lines()).some((row) => row !== ""),
-    );
+    await waitFor("the sidebar to render", () => gui.hasElement(".sidebar"));
     return gui;
   }
 
@@ -98,8 +136,7 @@ export class TestEnvironment {
     for (const gui of this.#guis) {
       await gui.close();
     }
-    this.#daemon.kill("SIGKILL");
-    await this.#daemonExited;
+    await this.stopDaemon();
     // The shells and their applications get SIGHUP when the daemon exits and
     // can still be writing files such as `.viminfo`, so retry the removal.
     await waitFor("the test directory to be removed", async () => {
@@ -153,6 +190,94 @@ export class Gui {
       const textarea = document.querySelector(".xterm-helper-textarea")!;
       textarea.dispatchEvent(new InputEvent("input", { data: text, inputType: "insertText" }));
     }, text);
+  }
+
+  async hasElement(selector: string): Promise<boolean> {
+    return this.#session().execute(
+      (selector) => document.querySelector(selector) !== null,
+      selector,
+    );
+  }
+
+  /**
+   * Selects the sidebar's Terminal row, unless a reopened GUI restored it, and
+   * waits for the terminal to render.
+   */
+  async showTerminal(): Promise<void> {
+    if (!(await this.hasElement(".xterm"))) {
+      await this.click(".terminal-row");
+    }
+    await waitFor("the terminal to render", async () =>
+      (await this.lines()).some((row) => row !== ""),
+    );
+  }
+
+  /** Clicks the first element matching `selector` whose text contains `text`. */
+  async click(selector: string, text = ""): Promise<void> {
+    await waitFor(`${selector} with ${JSON.stringify(text)}`, () =>
+      this.#session().execute(
+        (selector, text) => {
+          const element = Array.from(document.querySelectorAll<HTMLElement>(selector)).find(
+            (element) => element.textContent!.includes(text),
+          );
+          element?.click();
+          return element !== undefined;
+        },
+        selector,
+        text,
+      ),
+    );
+  }
+
+  /** The text of each element matching `selector`. */
+  async texts(selector: string): Promise<string[]> {
+    return this.#session().execute(
+      (selector) => Array.from(document.querySelectorAll(selector), (element) => element.textContent!),
+      selector,
+    );
+  }
+
+  /** Waits until an element matching `selector` has text containing `text`. */
+  async waitForText(selector: string, text: string): Promise<void> {
+    let texts: string[] = [];
+    try {
+      await waitFor(`${selector} with ${JSON.stringify(text)}`, async () => {
+        texts = await this.texts(selector);
+        return texts.some((element) => element.includes(text));
+      });
+    } catch (error) {
+      throw new Error(`no ${selector} with ${JSON.stringify(text)} in:\n${texts.join("\n")}`, {
+        cause: error,
+      });
+    }
+  }
+
+  /** Waits until no element matches `selector`. */
+  async waitForNone(selector: string): Promise<void> {
+    await waitFor(`no ${selector}`, async () => !(await this.hasElement(selector)));
+  }
+
+  /** Types `text` into the editor and presses Enter. */
+  async sendPrompt(text: string): Promise<void> {
+    await this.#session().execute((text) => {
+      const textarea = document.querySelector<HTMLTextAreaElement>(".editor textarea")!;
+      // React tracks the value it set, so set it the way typing does.
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(textarea, text);
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    }, text);
+    await this.#session().execute(() => {
+      const textarea = document.querySelector(".editor textarea")!;
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+  }
+
+  /** Sends `request` through the core's `request` command and returns the response. */
+  async request(request: object): Promise<unknown> {
+    return this.#session().execute((request) => {
+      const tauri = (window as unknown as TauriWindow).__TAURI_INTERNALS__;
+      return tauri.invoke("request", { request });
+    }, request);
   }
 
   /** The terminal's rows as rendered, with trailing spaces removed. */

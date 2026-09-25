@@ -17,6 +17,7 @@ use agent_client_protocol::schema::v1::{
     StopReason, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, on_receive_request};
+use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
 /// Ends a running `hold` script, or the next one if none is running.
@@ -35,7 +36,11 @@ impl Hold {
 #[derive(Clone)]
 pub struct SavedHistory(Arc<Mutex<Saved>>);
 
+#[derive(Serialize, Deserialize)]
 struct Saved {
+    /// The file the saved history is written to after every change, if any.
+    #[serde(skip)]
+    file: Option<PathBuf>,
     /// Whether the fake server advertises `loadSession` and `session/list`.
     advertised: bool,
     /// The number of sessions created so far, so IDs are never reused.
@@ -43,6 +48,7 @@ struct Saved {
     sessions: Vec<SavedSession>,
 }
 
+#[derive(Serialize, Deserialize)]
 struct SavedSession {
     id: SessionId,
     cwd: PathBuf,
@@ -68,8 +74,26 @@ impl SavedHistory {
         SavedHistory::new(false)
     }
 
+    /// Saved history, advertised, read from `file` when it exists and written
+    /// to it after every change, so it outlives the fake server process.
+    pub fn file(file: PathBuf) -> SavedHistory {
+        let mut saved = match std::fs::read(&file) {
+            Ok(json) => serde_json::from_slice(&json).expect("the saved history file is valid"),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Saved {
+                file: None,
+                advertised: true,
+                created: 0,
+                sessions: Vec::new(),
+            },
+            Err(error) => panic!("reading {}: {error}", file.display()),
+        };
+        saved.file = Some(file);
+        SavedHistory(Arc::new(Mutex::new(saved)))
+    }
+
     fn new(advertised: bool) -> SavedHistory {
         SavedHistory(Arc::new(Mutex::new(Saved {
+            file: None,
             advertised,
             created: 0,
             sessions: Vec::new(),
@@ -80,13 +104,25 @@ impl SavedHistory {
         self.0.lock().unwrap().advertised
     }
 
-    fn with_session<R>(&self, id: &SessionId, f: impl FnOnce(&mut SavedSession) -> R) -> Option<R> {
+    /// Runs `f` on the saved history, then writes it to its file, if any.
+    fn edit<R>(&self, f: impl FnOnce(&mut Saved) -> R) -> R {
         let mut saved = self.0.lock().unwrap();
-        saved
-            .sessions
-            .iter_mut()
-            .find(|session| session.id == *id)
-            .map(f)
+        let result = f(&mut saved);
+        if let Some(file) = &saved.file {
+            let json = serde_json::to_vec(&*saved).expect("the saved history serializes");
+            std::fs::write(file, json).expect("the saved history file is writable");
+        }
+        result
+    }
+
+    fn with_session<R>(&self, id: &SessionId, f: impl FnOnce(&mut SavedSession) -> R) -> Option<R> {
+        self.edit(|saved| {
+            saved
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == *id)
+                .map(f)
+        })
     }
 
     fn save(&self, id: &SessionId, update: SessionUpdate) {
@@ -133,8 +169,7 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                 async move |request: NewSessionRequest,
                             responder,
                             connection: ConnectionTo<Client>| {
-                    let session = {
-                        let mut saved = history.0.lock().unwrap();
+                    let session = history.edit(|saved| {
                         saved.created += 1;
                         let session = SessionId::from(format!("fake-{}", saved.created));
                         saved.sessions.push(SavedSession {
@@ -145,7 +180,7 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                             unloadable: false,
                         });
                         session
-                    };
+                    });
                     loaded.lock().unwrap().insert(session.clone());
                     responder.respond(NewSessionResponse::new(session.clone()))?;
                     let command = AvailableCommand::new("tally", "count the tallies");

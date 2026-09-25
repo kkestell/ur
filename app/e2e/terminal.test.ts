@@ -7,6 +7,7 @@ const ESCAPE = "\x1b";
 
 e2eTest("a terminal survives closing and reopening the GUI", async (environment) => {
   let gui = await environment.openGui();
+  await gui.showTerminal();
   const defaultRows = (await gui.lines()).length;
   await gui.setWindowSize(700, 450);
   await waitFor("the view to shrink", async () => (await gui.lines()).length < defaultRows);
@@ -18,6 +19,7 @@ e2eTest("a terminal survives closing and reopening the GUI", async (environment)
 
   // Reopening at the default size attaches at a different size than before.
   gui = await environment.openGui();
+  await gui.showTerminal();
   await gui.waitForLine("first line");
   await gui.waitForLine("second line");
   const rows = (await gui.lines()).length;
@@ -31,11 +33,13 @@ e2eTest("a terminal survives closing and reopening the GUI", async (environment)
 
 e2eTest("quitting a restored full-screen application returns to the shell", async (environment) => {
   let gui = await environment.openGui();
+  await gui.showTerminal();
   await gui.type("top\r");
   await gui.waitForLine(/^Processes:/);
   await gui.close();
 
   gui = await environment.openGui();
+  await gui.showTerminal();
   await gui.type("q");
   await gui.type("echo back at the prompt\r");
   await gui.waitForLine("back at the prompt");

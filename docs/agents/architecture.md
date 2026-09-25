@@ -333,10 +333,14 @@ webview never touches the socket.
 - One Tauri command, `request`, takes a wire-protocol `Request` and returns the daemon's `Response`.
   The tagged `Request` enum carries the name and arguments, so adding a request touches
   `protocol.rs` and the daemon only. The other commands are `attach_terminal`, `terminal_input`,
-  `set_visible`, and `read_attachment`. `attach_terminal` is separate because it takes the
-  terminal's `Channel`, which `request` cannot carry.
-- Daemon events reach the webview as Tauri events: `watch` events under one name, and each
-  subscribed session's events under a name that carries the session ID. The webview keeps the
+  `selection`, `select`, `connection`, `set_visible`, and `read_attachment`. `attach_terminal` is
+  separate because it takes the terminal's `Channel`, which `request` cannot carry. `connection`
+  gives the webview the current connection when it starts, since a `connection` event emitted before
+  its listener is installed is lost.
+- Daemon events reach the webview as Tauri events: `watch` events under one name, and every
+  subscribed session's events under the one name `session`, with the webview dispatching on the
+  payload's session ID. Tauri event names allow only alphanumerics, `-`, `/`, `:`, and `_`, and
+  session IDs are opaque, so a name that carries the session ID is not safe. The webview keeps the
   sidebar and each subscribed session's state in stores outside React, keyed by session ID, so
   closing a tab keeps the transcript and reopening does not refetch. Components read the stores
   through `useSyncExternalStore` or zustand.
@@ -404,9 +408,10 @@ Selecting a terminal that already has a tab activates that tab.
 ### GUI state
 
 The core keeps the GUI's layout in `$XDG_STATE_HOME/ur/gui.json`, keyed by socket path: the selected
-session or terminal, and from milestone 10 the pane layout as dockview's serialized layout. Panes
-refer to sessions and terminals by ID. When the GUI opens, it drops panes whose session or terminal
-no longer exists.
+session or terminal, the GUI's one terminal until Workspace terminal controls list terminals under
+their workspaces, and from milestone 10 the pane layout as dockview's serialized layout. Panes refer
+to sessions and terminals by ID. When the GUI opens, it drops panes whose session or terminal no
+longer exists.
 
 ### Transport
 

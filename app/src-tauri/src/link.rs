@@ -1,24 +1,41 @@
+use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
 
 use tauri::ipc::{Channel, Response as ChannelBytes};
-use tokio::sync::OnceCell;
-use ur_client::{Client, Request, Response, TerminalId};
+use tauri::{AppHandle, Emitter, Manager};
+use ur_client::{Client, Event, Request, Response, TerminalId};
+
+use crate::gui_state::Connection;
 
 const SHELL_EXITED: &[u8] = b"\r\n[shell exited]\r\n";
 
-/// The core's owner of `ur_client::Client`. It connects on first use and does
-/// not reconnect yet.
+/// The wait between connection attempts.
+const RETRY_DELAY: Duration = Duration::from_millis(500);
+
+/// The core's owner of `ur_client::Client`. `run()` reconnects to the daemon
+/// and replays the desired set after a disconnect.
 pub struct Link {
     socket: PathBuf,
-    client: OnceCell<Client>,
+    desired: Mutex<Desired>,
+    client: Mutex<Option<Client>>,
+}
+
+/// The desired set: what `run()` restores after reconnecting.
+#[derive(Default)]
+struct Desired {
+    watch: bool,
+    subscribed: BTreeSet<String>,
 }
 
 impl Link {
     pub fn new(socket: PathBuf) -> Link {
         Link {
             socket,
-            client: OnceCell::new(),
+            desired: Mutex::new(Desired::default()),
+            client: Mutex::new(None),
         }
     }
 
@@ -26,8 +43,96 @@ impl Link {
         &self.socket
     }
 
+    /// The reconnect loop: connects, retrying every `RETRY_DELAY`, replays the
+    /// desired set, forwards events to the webview until the socket connection
+    /// ends, and starts over. Emits `connection` at each change.
+    pub async fn run(app: AppHandle) {
+        let link = app.state::<Link>();
+        loop {
+            let client = loop {
+                match Client::connect(&link.socket).await {
+                    Ok(client) => break client,
+                    Err(_) => tokio::time::sleep(RETRY_DELAY).await,
+                }
+            };
+            // Take the receiver before any request so no snapshot is missed.
+            let mut events = client.events();
+            *link.client.lock().unwrap() = Some(client.clone());
+            link.emit_connection(&app, true);
+
+            let (watch, subscribed) = {
+                let desired = link.desired.lock().unwrap();
+                (desired.watch, desired.subscribed.clone())
+            };
+            let mut replay = Vec::new();
+            if watch {
+                replay.push(Request::Watch);
+            }
+            replay.extend(subscribed.into_iter().map(|session| Request::Subscribe {
+                session: session.into(),
+            }));
+            for request in replay {
+                let client = client.clone();
+                // The daemon answers each with a fresh snapshot, which arrives
+                // as an event; the response is not needed.
+                tokio::spawn(async move {
+                    let _ = client.request(request).await;
+                });
+            }
+
+            while let Some(event) = events.recv().await {
+                let name = match &event {
+                    // The terminal attachment path already ends its output.
+                    Event::TerminalExited { .. } => continue,
+                    Event::WatchSnapshot { .. }
+                    | Event::WorkspaceAdded { .. }
+                    | Event::WorkspaceRemoved { .. }
+                    | Event::SessionChanged { .. } => "watch",
+                    Event::SessionSnapshot { .. }
+                    | Event::Entry { .. }
+                    | Event::SessionRemoved { .. } => "session",
+                };
+                if let Err(error) = app.emit(name, &event) {
+                    eprintln!("ur-app: emitting {name}: {error}");
+                }
+            }
+
+            *link.client.lock().unwrap() = None;
+            link.emit_connection(&app, false);
+        }
+    }
+
+    pub fn connection(&self) -> Connection {
+        Connection {
+            connected: self.client.lock().unwrap().is_some(),
+            socket: self.socket.display().to_string(),
+        }
+    }
+
+    /// Sends the request. `watch` and `subscribe` join the desired set first
+    /// and answer `Done` while disconnected, because the replay after the next
+    /// connect sends them. Every other request fails while disconnected.
     pub async fn request(&self, request: Request) -> io::Result<Response> {
-        self.client().await?.request(request).await
+        let replayed = match &request {
+            Request::Watch => {
+                self.desired.lock().unwrap().watch = true;
+                true
+            }
+            Request::Subscribe { session } => {
+                self.desired
+                    .lock()
+                    .unwrap()
+                    .subscribed
+                    .insert(session.to_string());
+                true
+            }
+            _ => false,
+        };
+        match self.client() {
+            Ok(client) => client.request(request).await,
+            Err(_) if replayed => Ok(Response::Done),
+            Err(error) => Err(error),
+        }
     }
 
     /// Attaches the terminal and forwards its output to `output` until the
@@ -39,7 +144,7 @@ impl Link {
         cols: u16,
         output: Channel<ChannelBytes>,
     ) -> Result<(), String> {
-        let client = self.client().await.map_err(|error| error.to_string())?;
+        let client = self.client().map_err(|error| error.to_string())?;
         let mut pty = client.pty(terminal);
         let request = Request::AttachTerminal {
             terminal,
@@ -64,12 +169,22 @@ impl Link {
     }
 
     pub async fn terminal_input(&self, terminal: TerminalId, data: String) -> io::Result<()> {
-        self.client().await?.pty_input(terminal, data.into())
+        self.client()?.pty_input(terminal, data.into())
     }
 
-    async fn client(&self) -> io::Result<&Client> {
-        self.client
-            .get_or_try_init(|| Client::connect(&self.socket))
-            .await
+    fn client(&self) -> io::Result<Client> {
+        self.client.lock().unwrap().clone().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotConnected, "not connected to the daemon")
+        })
+    }
+
+    fn emit_connection(&self, app: &AppHandle, connected: bool) {
+        let connection = Connection {
+            connected,
+            socket: self.socket.display().to_string(),
+        };
+        if let Err(error) = app.emit("connection", connection) {
+            eprintln!("ur-app: emitting connection: {error}");
+        }
     }
 }

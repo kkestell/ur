@@ -10,6 +10,7 @@ check-rust:
 
 check-app:
 	pnpm -C app build
+	pnpm -C app test
 
 check-docs:
 	dprint check

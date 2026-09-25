@@ -250,7 +250,10 @@
 - **Pane**: A dockview group holding tabs. The active pane receives sidebar selections.
 - **Tab**: A dockview panel for one agent session or terminal. Closing it changes only the layout.
 - **Layout**: The dockview arrangement of panes and tabs, saved in the GUI state file.
-- **Selection**: The session or terminal chosen in the sidebar, saved in the GUI state file.
+- **Selection**: The session or the Terminal row's terminal chosen in the sidebar, saved in the GUI
+  state file.
+- **Terminal row**: The sidebar row below the workspaces that selects the GUI's one terminal. It
+  lasts until Workspace terminal controls list terminals under their workspaces.
 
 ### Notifications and hooks
 

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test": "vitest run",
     "preview": "vite preview",
     "tauri": "tauri",
     "e2e": "export CARGO_TARGET_DIR=\"$(cd .. && pwd)/target/e2e\" && cargo build -p ur -p ur-fake-server && tauri build --debug --no-bundle --features webdriver && tsc -p e2e && node --test --test-concurrency=1 \"e2e/*.test.ts\""
@@ -26,6 +27,7 @@
     "@vitejs/plugin-react": "^6.0.2",
     "typescript": "~6.0.3",
     "vite": "^8.0.16",
+    "vitest": "^5.0.1",
     "webdriverio": "^9.32.0"
   }
 }

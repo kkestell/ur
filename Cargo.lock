@@ -4649,6 +4649,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-wdio-webdriver",
  "tokio",
+ "ts-rs",
  "ur-client",
 ]
 
@@ -4671,6 +4672,7 @@ name = "ur-fake-server"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "serde",
  "serde_json",
  "tokio",
 ]
