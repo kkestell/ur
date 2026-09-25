@@ -1,5 +1,4 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { once } from "node:events";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
@@ -22,6 +21,7 @@ export class TestEnvironment {
   readonly #socket: string;
   readonly #state: string;
   readonly #daemon: ChildProcess;
+  readonly #daemonExited: Promise<void>;
   readonly #guis: Gui[] = [];
 
   private constructor(dir: string) {
@@ -42,6 +42,8 @@ export class TestEnvironment {
       },
       stdio: ["ignore", "inherit", "inherit"],
     });
+    // Listen now: the daemon can exit before `stop`, such as when it crashes.
+    this.#daemonExited = new Promise((resolve) => this.#daemon.once("exit", () => resolve()));
   }
 
   static async start(): Promise<TestEnvironment> {
@@ -86,9 +88,8 @@ export class TestEnvironment {
     for (const gui of this.#guis) {
       await gui.close();
     }
-    const exited = once(this.#daemon, "exit");
     this.#daemon.kill("SIGKILL");
-    await exited;
+    await this.#daemonExited;
     // The shells and their applications get SIGHUP when the daemon exits and
     // can still be writing files such as `.viminfo`, so retry the removal.
     await waitFor("the test directory to be removed", async () => {
@@ -165,8 +166,8 @@ export class Gui {
         rows = await this.lines();
         return rows.some(matches);
       });
-    } catch {
-      throw new Error(`no line ${line} on screen:\n${rows.join("\n")}`);
+    } catch (error) {
+      throw new Error(`no line ${line} on screen:\n${rows.join("\n")}`, { cause: error });
     }
   }
 
@@ -204,7 +205,10 @@ export function e2eTest(name: string, body: (environment: TestEnvironment) => Pr
     try {
       await body(environment);
     } catch (error) {
-      await environment.screenshot(name);
+      // A failed screenshot must not replace the test's error.
+      await environment.screenshot(name).catch((screenshotError) => {
+        console.error(`no screenshot: ${screenshotError}`);
+      });
       throw error;
     } finally {
       await environment.stop();
@@ -212,7 +216,7 @@ export function e2eTest(name: string, body: (environment: TestEnvironment) => Pr
   });
 }
 
-async function waitFor(what: string, ready: () => Promise<boolean>): Promise<void> {
+export async function waitFor(what: string, ready: () => Promise<boolean>): Promise<void> {
   const deadline = Date.now() + WAIT_MS;
   while (!(await ready())) {
     if (Date.now() > deadline) {
