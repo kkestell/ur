@@ -6,10 +6,15 @@ import { withPermissions } from "./permissions";
 
 const options: PermissionOption[] = [{ optionId: "go", name: "Go ahead", kind: "allow_once" }];
 
-function pending(request_id: number, toolCallId: string, title?: string): PendingPermission {
+function pending(
+  request_id: number,
+  toolCallId: string,
+  title?: string,
+  content?: PendingPermission["request"]["toolCall"]["content"],
+): PendingPermission {
   return {
     request_id,
-    request: { sessionId: "s", toolCall: { toolCallId, title }, options },
+    request: { sessionId: "s", toolCall: { toolCallId, title, content }, options },
   };
 }
 
@@ -26,6 +31,22 @@ test("a_request_takes_its_tool_call_rows_place", () => {
 
   const titled = withPermissions(blocks, [pending(1, "t1", "read the tallies")]);
   expect(titled[1]).toMatchObject({ kind: "permission", title: "read the tallies" });
+});
+
+test("a_request_uses_its_tool_call_content_when_it_supplies_none", () => {
+  const output = { type: "content" as const, content: { type: "text" as const, text: "one" } };
+  const replacement = { type: "content" as const, content: { type: "text" as const, text: "two" } };
+  const withOutput: Block[] = [
+    { kind: "tool_call", id: "t1", title: "count the tallies", content: [output] },
+  ];
+  expect(withPermissions(withOutput, [pending(1, "t1")])[0]).toMatchObject({
+    kind: "permission",
+    content: [output],
+  });
+  expect(withPermissions(withOutput, [pending(1, "t1", undefined, [replacement])])[0]).toMatchObject({
+    kind: "permission",
+    content: [replacement],
+  });
 });
 
 test("a_request_without_a_tool_call_row_follows_the_last_entry", () => {

@@ -391,15 +391,16 @@ impl Script {
         })
     }
 
-    /// Sends a tool call and asks permission for it, with the options `go` and
-    /// `stop`.
+    /// Sends a tool call with content and asks permission for it, with the
+    /// options `go` and `stop`. The request carries no content of its own.
     async fn ask(
         &self,
         tool_call_id: &str,
     ) -> agent_client_protocol::Result<RequestPermissionOutcome> {
         let tool_call = ToolCall::new(tool_call_id.to_string(), "count the tallies")
             .kind(ToolKind::Search)
-            .raw_input(serde_json::json!({ "glob": "*.tally" }));
+            .raw_input(serde_json::json!({ "glob": "*.tally" }))
+            .content(vec![ToolCallContent::from("every *.tally file")]);
         self.update(SessionUpdate::ToolCall(tool_call))?;
         let request = RequestPermissionRequest::new(
             self.session.clone(),

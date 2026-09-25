@@ -56,6 +56,7 @@ function ItemView({
       return (
         <Permission
           title={item.title}
+          content={item.content}
           request={item.request}
           onAnswer={(option) => onAnswer(item.request, option)}
         />

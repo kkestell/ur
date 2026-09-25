@@ -29,6 +29,15 @@ e2eTest("clicking a permission option answers the request", async (environment) 
   await gui.waitForNone(".sidebar .status");
 });
 
+e2eTest("a permission request shows its tool call's content", async (environment) => {
+  await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.click(".sidebar .row", "New session");
+  // The request carries no content; its tool call does.
+  await gui.sendPrompt("tool");
+  await gui.waitForText(".block.permission .tool-call-content", "every *.tally file");
+});
+
 e2eTest("the permission shortcuts answer the oldest request", async (environment) => {
   await environment.newSession();
   const gui = await environment.openGui();

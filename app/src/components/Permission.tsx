@@ -1,4 +1,4 @@
-import type { PermissionOption } from "@agentclientprotocol/sdk";
+import type { PermissionOption, ToolCallContent } from "@agentclientprotocol/sdk";
 import type { PendingPermission } from "../ipc/bindings/PendingPermission";
 import { shortcutLabel } from "../keys";
 import { ToolCallContentView } from "./ToolCallContent";
@@ -6,21 +6,23 @@ import { ToolCallContentView } from "./ToolCallContent";
 /** One pending permission request: its tool call, its options, and "Awaiting Confirmation." */
 export function Permission({
   title,
+  content,
   request,
   onAnswer,
 }: {
   title: string;
+  content: ToolCallContent[];
   request: PendingPermission;
   onAnswer: (option: PermissionOption) => void;
 }) {
-  const { toolCall, options } = request.request;
+  const { options } = request.request;
   // A request with two options of the same kind shows the shortcut on the first.
   const shown = new Set<string>();
   return (
     <>
       <div className="block permission">
         <div className="permission-title">{title}</div>
-        <ToolCallContentView content={toolCall.content ?? []} />
+        <ToolCallContentView content={content} />
         <div className="permission-options">
           {options.map((option) => {
             const first = !shown.has(option.kind);

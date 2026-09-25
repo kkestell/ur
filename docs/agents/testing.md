@@ -70,6 +70,7 @@ documentation, give agent session tests replies, permission requests, and errors
 - A working session shows the spinner.
 - A session waiting for permission shows its mark and its workspace's count.
 - Clicking a permission option answers the request.
+- A permission request shows its tool call's content.
 - The permission shortcuts answer the oldest request.
 - A session that finishes a turn while not shown is unread until it is shown.
 - A failed turn shows its error and the failed mark.

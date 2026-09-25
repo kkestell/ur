@@ -1,15 +1,18 @@
+import type { ToolCallContent } from "@agentclientprotocol/sdk";
 import type { PendingPermission } from "../ipc/bindings/PendingPermission";
 import type { Block } from "./blocks";
 
 /** A block, or a pending permission request rendered in the thread. */
-export type Item = Block | { kind: "permission"; request: PendingPermission; title: string };
+export type Item =
+  | Block
+  | { kind: "permission"; request: PendingPermission; title: string; content: ToolCallContent[] };
 
 /**
  * Places the session's pending permission requests, oldest first, among its
  * blocks. A request takes the place of the tool call block with its tool
- * call ID, keeping the block's title when the request supplies none. A
- * request whose tool call has no block yet follows the last item, titled by
- * its tool call ID when it supplies no title.
+ * call ID, keeping the block's title and content when the request supplies
+ * neither. A request whose tool call has no block yet follows the last item,
+ * titled by its tool call ID when it supplies no title.
  */
 export function withPermissions(blocks: Block[], requests: PendingPermission[]): Item[] {
   const items: Item[] = [...blocks];
@@ -21,9 +24,19 @@ export function withPermissions(blocks: Block[], requests: PendingPermission[]):
     );
     const block = items[index];
     if (block !== undefined && block.kind === "tool_call") {
-      items[index] = { kind: "permission", request, title: title ?? block.title };
+      items[index] = {
+        kind: "permission",
+        request,
+        title: title ?? block.title,
+        content: toolCall.content ?? block.content,
+      };
     } else {
-      items.push({ kind: "permission", request, title: title ?? toolCall.toolCallId });
+      items.push({
+        kind: "permission",
+        request,
+        title: title ?? toolCall.toolCallId,
+        content: toolCall.content ?? [],
+      });
     }
   }
   return items;
