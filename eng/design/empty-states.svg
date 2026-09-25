@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1230" height="420" viewBox="0 0 1230 420" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12" fill="#ccc">
+  <defs>
+    <style>
+      .rule { stroke: #3a3a3a; fill: none; }
+      .frame { stroke: #444; fill: #1e1e1e; }
+      .bar { fill: #3a3a3a; }
+      .muted { fill: #808080; }
+      .bold { font-weight: 600; }
+      .mono { font-family: Menlo, monospace; white-space: pre; }
+      .num { fill: #1e1e1e; stroke: #999; }
+      .num-text { font-size: 10px; text-anchor: middle; }
+      .icon { color: #ccc; }
+      .icon-muted { color: #808080; }
+    </style>
+    <symbol id="sparkle" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"><path d="M6 .5 7.3 4.7 11.5 6 7.3 7.3 6 11.5 4.7 7.3 .5 6 4.7 4.7Z"/></symbol>
+    <symbol id="bulb" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><circle cx="6" cy="5" r="3.5"/><path d="M4.5 10.5h3"/></symbol>
+    <symbol id="search" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><circle cx="5" cy="5" r="3.5"/><path d="M7.6 7.6 11 11"/></symbol>
+    <symbol id="pencil" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"><path d="M1.5 10.5 2 8 8.5 1.5l2 2L4 10Z"/></symbol>
+    <symbol id="plus" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><path d="M6 1v10M1 6h10"/></symbol>
+    <symbol id="expand" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><path d="M7 1h4v4M5 11H1V7M11 1 7 5M1 11l4-4"/></symbol>
+    <symbol id="dots" viewBox="0 0 12 12" fill="currentColor"><circle cx="2" cy="6" r="1"/><circle cx="6" cy="6" r="1"/><circle cx="10" cy="6" r="1"/></symbol>
+    <symbol id="send" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"><path d="M1 1.5 11 6 1 10.5 2.8 6Z"/></symbol>
+    <symbol id="ring" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6" cy="6" r="5"/></symbol>
+    <symbol id="target" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><circle cx="6" cy="6" r="4.5"/><path d="M6 .5v2.5M6 9v2.5M.5 6H3M9 6h2.5"/></symbol>
+    <symbol id="copy" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><path d="M1.5 8V2.5a1 1 0 0 1 1-1H8"/></symbol>
+    <symbol id="terminal" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"><rect x=".5" y="1.5" width="11" height="9" rx="1"/><path d="M3 4.5 5 6 3 7.5M6 8h3"/></symbol>
+    <symbol id="split" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y="1.5" width="11" height="9" rx="1"/><path d="M6 1.5v9"/></symbol>
+    <symbol id="spinner" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M6 2a4 4 0 1 1-4 4"/></symbol>
+    <symbol id="cross" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M3 3l6 6M9 3 3 9"/></symbol>
+    <symbol id="alert" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><circle cx="6" cy="6" r="5"/><path d="M6 3.2v3.4M6 8.7v.1"/></symbol>
+      <symbol id="image" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"><rect x=".5" y="1.5" width="11" height="9" rx="1"/><path d="M.5 9 4 5.5 7 8.5 8.5 7 11.5 10"/><circle cx="8.5" cy="4.5" r="1"/></symbol>
+    <symbol id="check" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.5 4.8 9 10 3"/></symbol>
+  </defs>
+
+  <rect width="1230" height="420" fill="#151515"/>
+
+  <!-- No connection -->
+  <text x="40" y="40" class="muted" font-size="11">No connection</text>
+  <rect x="40" y="50" width="366" height="300" class="frame"/>
+  <line x1="40" y1="78" x2="406" y2="78" class="rule"/>
+  <circle cx="58" cy="64" r="5" class="rule"/><circle cx="74" cy="64" r="5" class="rule"/><circle cx="90" cy="64" r="5" class="rule"/>
+  <text x="112" y="68" class="bold">ur</text>
+  <use href="#spinner" x="139" y="182" width="12" height="12" class="icon"/>
+  <text x="231" y="192" text-anchor="middle">Connecting to /tmp/ur.sock</text>
+  <text x="223" y="218" class="muted" text-anchor="middle">Start the daemon with</text>
+  <text x="223" y="238" class="mono muted" text-anchor="middle" xml:space="preserve">ur daemon</text>
+  <text x="40" y="376" font-size="11">The GUI retries until the daemon is up.</text>
+
+  <!-- No workspaces -->
+  <text x="427" y="40" class="muted" font-size="11">No workspaces</text>
+  <rect x="427" y="50" width="366" height="300" class="frame"/>
+  <line x1="427" y1="78" x2="793" y2="78" class="rule"/>
+  <circle cx="445" cy="64" r="5" class="rule"/><circle cx="461" cy="64" r="5" class="rule"/><circle cx="477" cy="64" r="5" class="rule"/>
+  <text x="499" y="68" class="bold">ur</text>
+  <line x1="557" y1="78" x2="557" y2="350" class="rule"/>
+  <text x="439" y="97" class="muted" font-size="11">Workspaces</text>
+  <text x="675" y="192" text-anchor="middle">No workspaces</text>
+  <text x="675" y="216" class="mono muted" font-size="10.5" text-anchor="middle" xml:space="preserve">ur workspace add &lt;name&gt; &lt;path&gt;</text>
+  <text x="427" y="376" font-size="11">Until milestone 8 adds the + button,</text>
+  <text x="427" y="392" font-size="11">workspaces are added from the CLI.</text>
+
+  <!-- No session selected -->
+  <text x="814" y="40" class="muted" font-size="11">No session selected</text>
+  <rect x="814" y="50" width="366" height="300" class="frame"/>
+  <line x1="814" y1="78" x2="1180" y2="78" class="rule"/>
+  <circle cx="832" cy="64" r="5" class="rule"/><circle cx="848" cy="64" r="5" class="rule"/><circle cx="864" cy="64" r="5" class="rule"/>
+  <text x="886" y="68" class="bold">ur</text>
+  <line x1="944" y1="78" x2="944" y2="350" class="rule"/>
+  <text x="826" y="97" class="muted" font-size="11">Workspaces</text>
+  <text x="826" y="128">▾</text><text x="840" y="128">ox</text>
+  <line x1="832" y1="136" x2="832" y2="182" class="rule"/>
+  <text x="846" y="152">Add subagents</text>
+  <text x="846" y="176">Fix compaction</text>
+  <text x="826" y="208">▾</text><text x="840" y="208">ur</text>
+  <line x1="832" y1="216" x2="832" y2="238" class="rule"/>
+  <text x="846" y="232">Plan milestone 2</text>
+  <text x="1062" y="204" class="muted" text-anchor="middle">Select a session</text>
+  <text x="814" y="376" font-size="11">Shown until a session is selected.</text>
+</svg>
