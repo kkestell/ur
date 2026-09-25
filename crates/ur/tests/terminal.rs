@@ -10,8 +10,9 @@ use ur_client::{Client, Request, Response, TerminalId};
 
 const WAIT: Duration = Duration::from_secs(5);
 
-/// A daemon on a socket in its own directory, which is also `$HOME`. `/bin/sh`
-/// keeps user shell configuration out of the terminals.
+/// A daemon on a socket in its own directory, which is also `$HOME` and
+/// `$XDG_STATE_HOME`. `/bin/sh` keeps user shell configuration out of the
+/// terminals.
 struct Daemon {
     process: Child,
     socket: PathBuf,
@@ -26,6 +27,7 @@ impl Daemon {
             .arg("daemon")
             .env("UR_SOCKET", &socket)
             .env("HOME", dir.path())
+            .env("XDG_STATE_HOME", dir.path())
             .env("SHELL", "/bin/sh")
             .spawn()
             .unwrap();

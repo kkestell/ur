@@ -1,12 +1,9 @@
-use std::path::Path;
-
 use ur_client::{Request, Response};
 
-/// `ur new <path>`: creates a session and prints its ID.
-pub async fn start(path: &Path) -> anyhow::Result<()> {
+/// `ur new <workspace>`: creates a session and prints its ID.
+pub async fn start(workspace: String) -> anyhow::Result<()> {
     let client = super::connect().await?;
-    let path = std::path::absolute(path)?;
-    match super::request(&client, Request::NewSession { path }).await? {
+    match super::request(&client, Request::NewSession { workspace }).await? {
         Response::SessionCreated { session } => {
             println!("{session}");
             Ok(())

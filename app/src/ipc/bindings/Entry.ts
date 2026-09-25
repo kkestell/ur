@@ -3,4 +3,4 @@
 /**
  * One transcript entry.
  */
-export type Entry = { "type": "update", update: import("@agentclientprotocol/sdk").SessionUpdate, } | { "type": "user_prompt", content: Array<import("@agentclientprotocol/sdk").ContentBlock>, };
+export type Entry = { "type": "update", update: import("@agentclientprotocol/sdk").SessionUpdate, } | { "type": "user_prompt", content: Array<import("@agentclientprotocol/sdk").ContentBlock>, } | { "type": "turn_error", message: string, };

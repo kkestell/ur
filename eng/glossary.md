@@ -62,7 +62,8 @@
 - **Fake server**: The scripted server in `crates/ur-fake-server`. Its binary is
   what the daemon launches in end-to-end tests, and its library is the test
   agent in the daemon's tests. The prompt's text chooses its script: `hold`,
-  `tool`, or a reply.
+  `tool`, `tools` (two permission requests at once), `reject` (a rejected
+  prompt), `fail` (a turn error), or a reply.
 - **Daemon**: The long-running `ur daemon` process. It owns the ACP connection,
   session statuses, in-memory transcripts, pending permission requests, and
   terminals, and serves daemon clients on the socket.
@@ -205,7 +206,9 @@
 
 - **Pending permission request**: A `session/request_permission` the server sent
   and the daemon has not answered. The daemon holds its `Responder` in
-  `Session.pending`, and a session can have several, oldest first.
+  `Session.responders`, and a session can have several, oldest first. Each has
+  a request ID: the daemon's `u32` number for it, counting from 1 across all
+  sessions.
 - **Permission option**: One choice in a permission request, with its
   server-supplied label and kind: `allow_once`, `allow_always`, `reject_once`,
   or `reject_always`.
@@ -244,16 +247,18 @@
   ACP schema types unchanged.
 - **Watch**: The request that registers a daemon client for sidebar events:
   workspaces, their sessions and terminals, each session's title, status, and
-  unread flag, and each terminal's title.
+  unread flag, and each terminal's title. Pending permission requests arrive in
+  the session status.
+- **Session summary**: One session as watch shows it: its session ID,
+  workspace, session status, and unread flag. It is `SessionSummary` in code.
 - **Subscribe**: The request that registers a daemon client for one session's
-  content: its transcript, config options, and pending permission requests.
+  content: its transcript and config options.
 - **Snapshot**: The current state sent before live events: `WatchSnapshot` for
   watch, `SessionSnapshot` for subscribe, and a screen snapshot for a terminal
   attachment. The daemon takes the snapshot and registers the daemon client
   under one lock, so nothing is missed or duplicated.
-- **Session snapshot**: A subscribed session's transcript, config options, and
-  pending permission requests. A load sends a fresh one, which replaces the
-  daemon client's local state.
+- **Session snapshot**: A subscribed session's transcript and config options. A
+  load sends a fresh one, which replaces the daemon client's local state.
 
 ### Terminals
 

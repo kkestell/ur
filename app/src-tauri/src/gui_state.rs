@@ -45,13 +45,7 @@ fn key(socket: &Path) -> String {
     socket.display().to_string()
 }
 
-/// `$XDG_STATE_HOME/ur/gui.json`, else `~/.local/state/ur/gui.json`.
+/// `gui.json` in `ur_client::state_dir()`.
 fn path() -> io::Result<PathBuf> {
-    let state = match std::env::var_os("XDG_STATE_HOME") {
-        Some(state) => PathBuf::from(state),
-        None => std::env::home_dir()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no home directory"))?
-            .join(".local/state"),
-    };
-    Ok(state.join("ur/gui.json"))
+    Ok(ur_client::state_dir()?.join("gui.json"))
 }

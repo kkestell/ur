@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use futures::{SinkExt, StreamExt};
@@ -5,7 +6,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
-use ur_client::{ClientMessage, DaemonMessage, Frame, FrameCodec, Request, Response};
+use ur_client::{ClientMessage, DaemonMessage, Frame, FrameCodec, Request, Response, Workspace};
 
 use super::ops;
 use super::state::State;
@@ -17,10 +18,16 @@ pub async fn serve(
     listener: UnixListener,
     terminals: Arc<Terminals>,
     state: Arc<Mutex<State>>,
+    state_file: PathBuf,
 ) -> anyhow::Result<()> {
     loop {
         let (stream, _) = listener.accept().await?;
-        tokio::spawn(connection(stream, terminals.clone(), state.clone()));
+        tokio::spawn(connection(
+            stream,
+            terminals.clone(),
+            state.clone(),
+            state_file.clone(),
+        ));
     }
 }
 
@@ -51,7 +58,12 @@ impl Outbox {
     }
 }
 
-async fn connection(stream: UnixStream, terminals: Arc<Terminals>, state: Arc<Mutex<State>>) {
+async fn connection(
+    stream: UnixStream,
+    terminals: Arc<Terminals>,
+    state: Arc<Mutex<State>>,
+    state_file: PathBuf,
+) {
     let (mut sink, mut stream) = Framed::new(stream, FrameCodec).split();
     let (sender, mut receiver) = mpsc::channel(OUTBOX_CAPACITY);
     let cancel = CancellationToken::new();
@@ -72,7 +84,9 @@ async fn connection(stream: UnixStream, terminals: Arc<Terminals>, state: Arc<Mu
             match frame {
                 Frame::Json(json) => match serde_json::from_slice::<ClientMessage>(&json) {
                     Ok(ClientMessage { id, request }) => {
-                        if let Some(response) = handle(id, request, &terminals, &state, &outbox) {
+                        if let Some(response) =
+                            handle(id, request, &terminals, &state, &state_file, &outbox)
+                        {
                             outbox.send(Frame::json(&DaemonMessage::Response { id, response }));
                         }
                     }
@@ -101,6 +115,7 @@ async fn connection(stream: UnixStream, terminals: Arc<Terminals>, state: Arc<Mu
         () = writer => {}
         () = cancel.cancelled() => {}
     }
+    state.lock().unwrap().disconnect(&outbox);
 }
 
 /// Answers request `id`, or returns `None` when the op answers it later.
@@ -109,6 +124,7 @@ fn handle(
     request: Request,
     terminals: &Arc<Terminals>,
     state: &Arc<Mutex<State>>,
+    state_file: &Path,
     outbox: &Outbox,
 ) -> Option<Response> {
     let result = match request {
@@ -129,16 +145,43 @@ fn handle(
         } => terminals
             .resize(terminal, rows, cols)
             .map(|()| Response::Done),
-        Request::NewSession { path } => match ops::new_session(state, path, id, outbox.clone()) {
-            Ok(()) => return None,
-            Err(error) => Err(error),
-        },
+        Request::Watch => {
+            state.lock().unwrap().watch(outbox.clone());
+            Ok(Response::Done)
+        }
+        Request::AddWorkspace { name, path } => {
+            ops::add_workspace(state, state_file, Workspace { name, path }).map(|()| Response::Done)
+        }
+        Request::RemoveWorkspace { name } => {
+            ops::remove_workspace(state, state_file, &name).map(|()| Response::Done)
+        }
+        Request::NewSession { workspace } => {
+            match ops::new_session(state, workspace, id, outbox.clone()) {
+                Ok(()) => return None,
+                Err(error) => Err(error),
+            }
+        }
         Request::Subscribe { session } => state
             .lock()
             .unwrap()
             .subscribe(&session, outbox.clone())
             .map(|()| Response::Done),
+        Request::Focus { sessions } => state
+            .lock()
+            .unwrap()
+            .focus(outbox, &sessions)
+            .map(|()| Response::Done),
         Request::Prompt { session, content } => ops::prompt(state, session, content),
+        Request::Cancel { session } => ops::cancel(state, &session).map(|()| Response::Done),
+        Request::AnswerPermission {
+            session,
+            request_id,
+            option_id,
+        } => state
+            .lock()
+            .unwrap()
+            .answer_permission(&session, request_id, option_id)
+            .map(|()| Response::Done),
     };
     Some(result.unwrap_or_else(|error| Response::Error {
         message: format!("{error:#}"),

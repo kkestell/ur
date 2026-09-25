@@ -84,8 +84,9 @@ when loading is supported. Newly created sessions are already loaded.
 
 The daemon's own state file (`$XDG_STATE_HOME/ur/state.json`, under
 `~/.local/state` when the variable is unset) holds workspace names and absolute
-paths. Saved session discovery comes from the server. The GUI stores which
-threads are visible as part of its layout.
+paths. The daemon reads it at startup and stops with an error naming the file
+when it cannot. Saved session discovery comes from the server. The GUI stores
+which threads are visible as part of its layout.
 
 A workspace path is made absolute when the workspace is added and stored as is.
 Every `session/new`, `session/load`, and `session/list` call for that workspace
@@ -107,9 +108,10 @@ keeps the session reserved until deletion finishes.
 | `Failed { message }`           | the prompt returns a JSON-RPC error, a load fails, or the server exits while the session is `Working` or `NeedsPermission` | a prompt is sent                                                              |
 
 `requests` holds every pending permission request for the session, oldest first.
-ACP permits several requests to be pending; their IDs are opaque. A prompt sent
-to a session whose load failed loads it first; if the load fails again, the
-session returns to `Failed`.
+ACP permits several requests to be pending; their JSON-RPC IDs are opaque, so
+the daemon gives each a request ID of its own, as described under Permissions.
+A prompt sent to a session whose load failed loads it first; if the load fails
+again, the session returns to `Failed`.
 
 Each session also has an `unread` flag. It turns on when a turn ends or fails
 while no client has the session focused, and turns off when a client focuses it.
@@ -118,19 +120,23 @@ The sidebar sorts workspaces and sessions by this.
 
 A client focuses the set of sessions it is showing. The GUI focuses every
 session visible in a pane while its window has focus, and focuses nothing when
-the window loses focus. A client's focus clears when it disconnects.
+the window loses focus. `ur read` focuses the session it reads, so reading a
+session clears its unread flag, and a session followed with `--follow` does not
+become unread. A client's focus clears when it disconnects.
 
 ### Permissions
 
 The daemon holds the ACP responder for each pending permission request and sends
-the request to every client. Any client can answer, and the first answer wins.
-The daemon then tells every client the request is resolved. When a client
-cancels a session, the daemon sends `session/cancel` and answers every pending
-permission request for that session with `Cancelled`, which the ACP spec
-requires. Until the prompt returns, the session stays busy and shows `Working`;
-any further permission request is answered `Cancelled`. When the prompt ends or
-the server disconnects, the daemon clears any remaining pending requests and
-tells clients they are resolved.
+the request to every client. It numbers pending permission requests from 1,
+across all sessions, and clients answer by that request ID. The JSON-RPC ID can
+be a string, a number, or null, so the daemon does not use it. Any client can
+answer, and the first answer wins. The daemon then tells every client the
+request is resolved. When a client cancels a session, the daemon sends
+`session/cancel` and answers every pending permission request for that session
+with `Cancelled`, which the ACP spec requires. Until the prompt returns, the
+session stays busy and shows `Working`; any further permission request is
+answered `Cancelled`. When the prompt ends or the server disconnects, the daemon
+clears any remaining pending requests and tells clients they are resolved.
 
 The GUI draws one button per option, using the label and kind in the request.
 The CLI's `approve` and `deny` answer the session's oldest pending request with
@@ -193,7 +199,7 @@ below. JSON client requests:
 ```text
 watch
 add_workspace | remove_workspace
-new_session | delete_session
+new_session(workspace) | delete_session
 subscribe(session) | unsubscribe(session) | focus(sessions)
 prompt(session, content) | cancel(session)
 answer_permission(session, request_id, option_id)
@@ -208,8 +214,13 @@ output on the same socket connection.
 
 There are three levels of events. `watch` covers the sidebar: workspaces, their
 sessions and terminals, each session's title, status, and unread flag, and each
-terminal's title. `subscribe` covers one session's content: its transcript,
-config options, and pending permission requests. `attach_terminal` covers one
+terminal's title. Pending permission requests travel in the session status, so
+every watching client receives them. After the watch snapshot, the daemon sends
+`workspace_added`, `workspace_removed` (which also removes the workspace's
+sessions), and `session_changed` with the session's whole summary when a
+session is added or its status or unread flag changes. `subscribe` covers one
+session's content: its transcript and config options. A subscribed session
+removed with its workspace gets `session_removed`. `attach_terminal` covers one
 terminal's initial screen restoration and live output, using the terminal
 attachment format established in milestone 0. For `watch` and `subscribe`, under
 one lock the daemon queues a snapshot and registers the client for live events.
@@ -329,8 +340,9 @@ so the webview writes no protocol types by hand.
   callback clears `op` only after the turn's last update is in the transcript.
   The callbacks always return `Ok`, because an error from one shuts down the
   ACP connection. Delete holds `op` through cancel, wait, and delete.
-- Pending permission requests hold their SDK `Responder` in `Session.pending`;
-  `answer_permission` and cancellation respond through it.
+- Pending permission requests hold their SDK `Responder` in
+  `Session.responders`, keyed by request ID; `answer_permission` and
+  cancellation respond through it.
 - `Entry`, `Status`, and the snapshot structs are defined in `ur-client` and
   used as-is inside `State`. There is no conversion layer.
 

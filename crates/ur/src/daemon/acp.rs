@@ -48,10 +48,11 @@ pub async fn connect(
                     on_receive_notification!(),
                 )
                 .on_receive_request(
-                    async move |_: RequestPermissionRequest, responder, _connection| {
-                        responder.respond_with_internal_error(
-                            "ur does not answer permission requests yet",
-                        )
+                    {
+                        let state = state.clone();
+                        async move |request: RequestPermissionRequest, responder, _connection| {
+                            state.lock().unwrap().request_permission(request, responder)
+                        }
                     },
                     on_receive_request!(),
                 )
