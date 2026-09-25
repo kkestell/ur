@@ -7,7 +7,8 @@ build.
 Test ACP behavior against a test agent built with the SDK's `Agent.builder()` in the test process,
 without a model provider or Ox. The daemon's tests run the fake server in process over
 `Channel::duplex()`. Use Ox for live end-to-end checks, including each milestone's check in
-`docs/agents/todo.md`.
+`docs/agents/todo.md`. `make run` starts the daemon and the GUI for them; the CLI is
+`target/debug/ur`.
 
 ## Test discipline
 

@@ -5,7 +5,11 @@ THIS DOCUMENT MUST BE KEPT UP TO DATE
 Map each file here as it is added, following the project layout in `docs/agents/architecture.md`.
 
 - `Makefile` — `make check` runs every validation check; `make format` formats the Rust code and the
-  Markdown files; `make e2e` runs the end-to-end suite.
+  Markdown files; `make e2e` runs the end-to-end suite; `make run` starts the daemon and the GUI for
+  poking around.
+- `scripts/run` — `make run`: writes the development config file when it is missing, builds and
+  starts the daemon on the default socket, runs `pnpm tauri dev`, and stops the daemon when the GUI
+  exits.
 - `dprint.json` — the dprint config for the Markdown files, which wraps prose at 100 columns.
 - `Cargo.toml` — the Cargo workspace and shared dependency versions.
 - `.cargo/config.toml` — sets `TS_RS_EXPORT_DIR` so `cargo test` writes the TypeScript bindings to

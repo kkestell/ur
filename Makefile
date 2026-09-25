@@ -1,4 +1,4 @@
-.PHONY: check check-rust check-app check-docs format format-docs e2e
+.PHONY: check check-rust check-app check-docs format format-docs e2e run
 
 check: check-rust check-app check-docs
 
@@ -22,3 +22,6 @@ format-docs:
 
 e2e:
 	pnpm -C app e2e
+
+run:
+	scripts/run

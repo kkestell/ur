@@ -1,0 +1,31 @@
+#!/bin/bash
+# `make run`: builds the daemon and the CLI, starts the daemon on the default
+# socket with the development config file, runs the GUI in development mode,
+# and stops the daemon when the GUI exits.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+config="${XDG_CONFIG_HOME:-$HOME/.config}/ur/config.toml"
+if [ ! -e "$config" ]; then
+  mkdir -p "$(dirname "$config")"
+  printf '[server]\ncommand = "ox"\nargs = []\n' > "$config"
+  echo "wrote the development config file $config"
+fi
+
+cargo build -p ur
+
+socket="${UR_SOCKET:-${TMPDIR:-/tmp}/ur.sock}"
+target/debug/ur daemon &
+daemon=$!
+trap 'kill "$daemon" 2>/dev/null; wait "$daemon" 2>/dev/null' EXIT
+until [ -S "$socket" ]; do
+  if ! kill -0 "$daemon" 2>/dev/null; then
+    wait "$daemon"
+  fi
+  sleep 0.1
+done
+echo "the daemon is running on $socket; the CLI is target/debug/ur"
+
+# Closing the window or pressing Ctrl-C ends `tauri dev` with a nonzero status,
+# which is not an error here.
+pnpm -C app tauri dev || true
