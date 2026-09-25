@@ -2,91 +2,79 @@ THIS DOCUMENT MUST BE KEPT UP TO DATE
 
 ## Code
 
-Map each file here as it is added, following the project layout in
-`docs/agents/architecture.md`.
+Map each file here as it is added, following the project layout in `docs/agents/architecture.md`.
 
+- `Makefile` — `make check` runs every validation check; `make format` formats the Rust code and the
+  Markdown files; `make e2e` runs the end-to-end suite.
+- `dprint.json` — the dprint config for the Markdown files, which wraps prose at 100 columns.
 - `Cargo.toml` — the Cargo workspace and shared dependency versions.
-- `.cargo/config.toml` — sets `TS_RS_EXPORT_DIR` so `cargo test` writes the
-  TypeScript bindings to `app/src/ipc/bindings/`.
-- `crates/ur-client/src/frame.rs` — `Frame` and `FrameCodec`, the wire protocol
-  framing.
-- `crates/ur-client/src/protocol.rs` — `TerminalId`, `Request`, `Response`,
-  `Event`, `Workspace`, `SessionSummary`, `Status`, `PendingPermission`,
-  `Entry`, `ClientMessage`, `DaemonMessage`, `socket_path()`, and
-  `state_dir()`.
-- `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the
-  core and the CLI, with `request()`, `events()`, `pty()`, and `pty_input()`.
-- `crates/ur-fake-server/` — the fake server: `lib.rs` exports
-  `fake_server()`, `Hold`, and `SavedHistory`, and `main.rs` serves it over
-  stdin and stdout.
-- `crates/ur/src/main.rs` — the `ur` command line: `daemon`, `agent-run`,
-  `workspace add|rm`, `ls`, `new`, `prompt`, `read`, `cancel`, `approve`,
-  `deny`, and `wait`.
-- `crates/ur/src/cli/` — `connect()`, `watch()`, and one file per CLI
-  subcommand: `workspace.rs`, `ls.rs`, `new.rs`, `prompt.rs`, `read.rs`,
-  `cancel.rs`, `answer.rs` (`approve` and `deny`), and `wait.rs`.
+- `.cargo/config.toml` — sets `TS_RS_EXPORT_DIR` so `cargo test` writes the TypeScript bindings to
+  `app/src/ipc/bindings/`.
+- `crates/ur-client/src/frame.rs` — `Frame` and `FrameCodec`, the wire protocol framing.
+- `crates/ur-client/src/protocol.rs` — `TerminalId`, `Request`, `Response`, `Event`, `Workspace`,
+  `SessionSummary`, `Status`, `PendingPermission`, `Entry`, `ClientMessage`, `DaemonMessage`,
+  `socket_path()`, and `state_dir()`.
+- `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the core and the CLI, with
+  `request()`, `events()`, `pty()`, and `pty_input()`.
+- `crates/ur-fake-server/` — the fake server: `lib.rs` exports `fake_server()`, `Hold`, and
+  `SavedHistory`, and `main.rs` serves it over stdin and stdout.
+- `crates/ur/src/main.rs` — the `ur` command line: `daemon`, `agent-run`, `workspace add|rm`, `ls`,
+  `new`, `prompt`, `read`, `cancel`, `approve`, `deny`, and `wait`.
+- `crates/ur/src/cli/` — `connect()`, `watch()`, and one file per CLI subcommand: `workspace.rs`,
+  `ls.rs`, `new.rs`, `prompt.rs`, `read.rs`, `cancel.rs`, `answer.rs` (`approve` and `deny`), and
+  `wait.rs`.
 - `crates/ur/src/config.rs` — `Config` and `ServerConfig`, the config file.
-- `crates/ur/src/one_shot.rs` — `ur agent-run`, the one-shot client, and its
-  tests against a test agent.
-- `crates/ur/src/daemon/mod.rs` — `start()`: binds the socket, removing a stale
-  one, and reads the config file; `run()`: reads the state file, starts the
-  supervisor, then serves.
-- `crates/ur/src/daemon/state.rs` — `State`: the ACP connection with its
-  capabilities and generation, workspaces, watchers, and sessions, saved or
-  loaded, with their transcripts, session titles, operation guards and the
-  loads they hold, statuses, unread flags, focus, pending permission requests,
-  and subscribers.
-- `crates/ur/src/daemon/state_file.rs` — `read()` and `write()` for the state
-  file.
-- `crates/ur/src/daemon/acp.rs` — `supervise()`: the supervisor, which starts
-  the server again after it exits, and each ACP connection's handlers;
-  `list_sessions()`; `initialize()`, shared with the one-shot client.
-- `crates/ur/src/daemon/ops.rs` — `add_workspace()`, which also lists the
-  workspace's saved sessions, and `remove_workspace()`, which write the state
-  file; `new_session()`, `subscribe()`, `prompt()`, and `load()`, which handle
-  the server's responses in `on_receiving_result` callbacks; and `cancel()`.
-- `crates/ur/src/daemon/server.rs` — the accept loop, each socket connection's
-  reader and writer, request handling, and `Outbox`.
-- `crates/ur/src/daemon/terminal.rs` — `Terminals`: login shells through
-  `portable-pty`, their `vt100::Parser`, terminal attachment, and the screen
-  snapshot.
-- `crates/ur/src/daemon/tests.rs` — the daemon's session tests, run in process
-  against the fake server.
+- `crates/ur/src/one_shot.rs` — `ur agent-run`, the one-shot client, and its tests against a test
+  agent.
+- `crates/ur/src/daemon/mod.rs` — `start()`: binds the socket, removing a stale one, and reads the
+  config file; `run()`: reads the state file, starts the supervisor, then serves.
+- `crates/ur/src/daemon/state.rs` — `State`: the ACP connection with its capabilities and
+  generation, workspaces, watchers, and sessions, saved or loaded, with their transcripts, session
+  titles, operation guards and the loads they hold, statuses, unread flags, focus, pending
+  permission requests, and subscribers.
+- `crates/ur/src/daemon/state_file.rs` — `read()` and `write()` for the state file.
+- `crates/ur/src/daemon/acp.rs` — `supervise()`: the supervisor, which starts the server again after
+  it exits, and each ACP connection's handlers; `list_sessions()`; `initialize()`, shared with the
+  one-shot client.
+- `crates/ur/src/daemon/ops.rs` — `add_workspace()`, which also lists the workspace's saved
+  sessions, and `remove_workspace()`, which write the state file; `new_session()`, `subscribe()`,
+  `prompt()`, and `load()`, which handle the server's responses in `on_receiving_result` callbacks;
+  and `cancel()`.
+- `crates/ur/src/daemon/server.rs` — the accept loop, each socket connection's reader and writer,
+  request handling, and `Outbox`.
+- `crates/ur/src/daemon/terminal.rs` — `Terminals`: login shells through `portable-pty`, their
+  `vt100::Parser`, terminal attachment, and the screen snapshot.
+- `crates/ur/src/daemon/tests.rs` — the daemon's session tests, run in process against the fake
+  server.
 - `crates/ur/tests/terminal.rs` — integration tests that run `ur daemon`.
-- `app/src-tauri/Cargo.toml` — the `webdriver` feature, which embeds
-  `tauri-plugin-wdio-webdriver`'s WebDriver server for the end-to-end suite.
-  Release builds and `pnpm tauri dev` leave it out.
+- `app/src-tauri/Cargo.toml` — the `webdriver` feature, which embeds `tauri-plugin-wdio-webdriver`'s
+  WebDriver server for the end-to-end suite. Release builds and `pnpm tauri dev` leave it out.
 - `app/src-tauri/src/main.rs` — the Tauri builder, managed `Link`, and commands.
-- `app/src-tauri/src/link.rs` — `Link`: owns the `Client` and forwards terminal
-  output to the webview's `Channel`.
-- `app/src-tauri/src/commands.rs` — the core commands `request`,
-  `attach_terminal`, and `terminal_input`.
+- `app/src-tauri/src/link.rs` — `Link`: owns the `Client` and forwards terminal output to the
+  webview's `Channel`.
+- `app/src-tauri/src/commands.rs` — the core commands `request`, `attach_terminal`, and
+  `terminal_input`.
 - `app/src-tauri/src/gui_state.rs` — the GUI state file and `Selection`.
-- `app/src/ipc/` — `request()`, `attachTerminal()`, and `terminalInput()`;
-  `bindings/` is generated by `cargo test` and committed.
-- `app/src/components/TerminalPane.tsx` — the xterm.js view of the selected
-  terminal.
-- `app/src/App.tsx` — shows the terminal pane full-window, or the error when
-  attaching fails.
-- `app/e2e/harness.ts` — `TestEnvironment`, `Gui`, and `e2eTest`, used by the
-  end-to-end suite and ad-hoc checks. `TestEnvironment` writes a config file
-  that launches the fake server.
+- `app/src/ipc/` — `request()`, `attachTerminal()`, and `terminalInput()`; `bindings/` is generated
+  by `cargo test` and committed.
+- `app/src/components/TerminalPane.tsx` — the xterm.js view of the selected terminal.
+- `app/src/App.tsx` — shows the terminal pane full-window, or the error when attaching fails.
+- `app/e2e/harness.ts` — `TestEnvironment`, `Gui`, and `e2eTest`, used by the end-to-end suite and
+  ad-hoc checks. `TestEnvironment` writes a config file that launches the fake server.
 - `app/e2e/terminal.test.ts` — the end-to-end tests for terminals.
 
 ## Validation
 
-For changes affecting behavior, interfaces, artifacts, or builds, run full
-validation: `cargo fmt --all -- --check`,
-`cargo test --workspace --all-targets --all-features`,
+For changes affecting behavior, interfaces, artifacts, or builds, run full validation with
+`make check`: `cargo fmt --all -- --check`, `cargo test --workspace --all-targets --all-features`,
 `cargo build --workspace --all-features`,
-`cargo clippy --workspace --all-targets --all-features -- -D warnings`,
-`pnpm -C app build`. Report any skipped or failed check; do
-not call partial validation complete. For documentation-only, comment-only, and
-filename-only changes, use focused searches and diff inspection.
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`, `pnpm -C app build`, and
+`dprint check`. Report any skipped or failed check; do not call partial validation complete. For
+documentation-only, comment-only, and filename-only changes, run `make check-docs` and use focused
+searches and diff inspection. Run `make format-docs` to format the Markdown files.
 
-Run the end-to-end suite, `pnpm -C app e2e`, when finishing each top-level item
-in `docs/agents/todo.md`. Do not add end-to-end tests without the user's
-approval.
+Run the end-to-end suite, `make e2e`, when finishing each top-level item in `docs/agents/todo.md`.
+Do not add end-to-end tests without the user's approval.
 
 ## Ox workflow
 
@@ -94,13 +82,20 @@ Plans, work logs, reviews, and issues live in `docs/agents/`.
 
 - `/ox-plan` explores a change and writes a plan to `docs/agents/plans/`.
 - `/ox-work` implements a plan, writes a work log to `docs/agents/work/`, and commits.
-- `/ox-review` reviews code, writes a review to `docs/agents/reviews/`, and records each finding in `docs/agents/issues.csv`.
-- `docs/agents/todo.md` is the task list. High and medium severity issues are added under the task they affect, or as new top-level items.
-- `docs/agents/issues.csv` is the issue log. Each row has an id (`OX-NNNN`), a created time, a title, a severity (`low`, `medium`, `high`), the review lens that found it, a status (`unplanned`, `planned`, `wontfix`, `fixed`), and the review that found it. Issues found outside a review leave the lens and review empty. Append rows; never reorder or delete them, because `todo.md` links to rows by line number.
+- `/ox-review` reviews code, writes a review to `docs/agents/reviews/`, and records each finding in
+  `docs/agents/issues.csv`.
+- `docs/agents/todo.md` is the task list. High and medium severity issues are added under the task
+  they affect, or as new top-level items.
+- `docs/agents/issues.csv` is the issue log. Each row has an id (`OX-NNNN`), a created time, a
+  title, a severity (`low`, `medium`, `high`), the review lens that found it, a status (`unplanned`,
+  `planned`, `wontfix`, `fixed`), and the review that found it. Issues found outside a review leave
+  the lens and review empty. Append rows; never reorder or delete them, because `todo.md` links to
+  rows by line number.
 
 ## Documentation
 
-Never mention "milestones", "phases", etc. in code comments or documentation (other than todo.md) -- describe the work instead.
+Never mention "milestones", "phases", etc. in code comments or documentation (other than todo.md) --
+describe the work instead.
 
 Read before planning and changing code:
 
@@ -112,9 +107,8 @@ Read before planning and changing code:
 
 ## Backwards Compatibility
 
-Currently, there is none. Delete `state.json` and `gui.json` instead of adding
-migrations or versions. Their directory is `$XDG_STATE_HOME/ur`, else
-`~/.local/state/ur`.
+Currently, there is none. Delete `state.json` and `gui.json` instead of adding migrations or
+versions. Their directory is `$XDG_STATE_HOME/ur`, else `~/.local/state/ur`.
 
 ## Communication
 
