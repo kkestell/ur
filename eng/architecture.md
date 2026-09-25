@@ -195,6 +195,10 @@ open_terminal(workspace) | attach_terminal(terminal, rows, cols) | detach_termin
 terminal_resize | close_terminal
 ```
 
+`terminal_exited` tells every attached daemon client that a terminal's shell
+exited and the daemon removed the terminal. It follows all of that terminal's
+output on the same socket connection.
+
 There are three levels of events. `watch` covers the sidebar: workspaces, their
 sessions and terminals, each session's title, status, and unread flag, and each
 terminal's title. `subscribe` covers one session's content: its transcript,
@@ -255,9 +259,9 @@ app/src-tauri/src/
   link.rs         owns ur_client::Client; reconnect loop; Desired { watch,
                   subscribed, attached, focus }; forwards events to app.emit
                   and PTY bytes to the terminal Channel
-  commands.rs     request(req: Request) -> Response, terminal_input,
-                  set_visible, read_attachment
-  terminal.rs     terminal ID to Channel<Vec<u8>>
+  commands.rs     request(req: Request) -> Response, attach_terminal,
+                  terminal_input, set_visible, read_attachment
+  terminal.rs     terminal ID to Channel<tauri::ipc::Response>
   gui_state.rs    gui.json
   menu.rs         context menus and the folder picker
 
@@ -320,7 +324,9 @@ the app that speaks the wire protocol. The webview never touches the socket.
 - One Tauri command, `request`, takes a wire-protocol `Request` and returns the
   daemon's `Response`. The tagged `Request` enum carries the name and arguments,
   so adding a request touches `protocol.rs` and the daemon only. The other
-  commands are `terminal_input`, `set_visible`, and `read_attachment`.
+  commands are `attach_terminal`, `terminal_input`, `set_visible`, and
+  `read_attachment`. `attach_terminal` is separate because it takes the
+  terminal's `Channel`, which `request` cannot carry.
 - Daemon events reach the webview as Tauri events: `watch` events under one
   name, and each subscribed session's events under a name that carries the
   session ID. The webview keeps the sidebar and each subscribed session's state
@@ -332,9 +338,9 @@ the app that speaks the wire protocol. The webview never touches the socket.
   resets that state and uses the same reducer as live events. The reducer is the
   only code that knows ACP update shapes; components render the blocks it
   derives.
-- Terminal output goes through a Tauri IPC `Channel` of raw bytes, one per
-  attached terminal, so it is never JSON-encoded. Terminal input goes to the
-  core through a `terminal_input` command, which sends a binary `PTY` frame.
+- Terminal output goes through a `Channel<tauri::ipc::Response>` of raw bytes,
+  one per attached terminal, so it is never JSON-encoded. Terminal input goes to
+  the core through a `terminal_input` command, which sends a binary `PTY` frame.
 - The webview tells the core which sessions are visible in panes through
   `set_visible`. The core combines that with the window's focus, which it gets
   from `WindowEvent::Focused`, and sends `focus` to the daemon as described
@@ -375,6 +381,21 @@ one std mutex. The reader thread locks it, feeds the parser, and fans the bytes
 out to every attached outbox. Attach locks the same mutex, takes
 `state_formatted()` and the size as the snapshot, and adds its outbox. No output
 can arrive between the snapshot and the registration.
+
+The terminal attachment format, established in milestone 0:
+
+- `attach_terminal(terminal, rows, cols)` first resizes the PTY and the parser
+  if the size differs, so the screen snapshot matches the daemon client's view.
+  The application redraws at the new size through live output.
+- The screen snapshot is `state_formatted()`, prefixed with `ESC [ ? 1049 h`
+  when the alternate screen is active. `state_formatted()` does not switch to
+  the alternate screen, and without the prefix a restored full-screen
+  application would leave its last frame in the normal buffer when it quits.
+- The screen snapshot is the attachment's first `PTY` frame, queued before the
+  outbox is registered and before the response, so a daemon client registers
+  its `pty` receiver before sending `attach_terminal`.
+- The parser keeps no scrollback. The normal buffer's contents and scrollback
+  from before the attachment are not restored.
 
 Detaching or losing the GUI leaves the shell and its applications running. Close
 Terminal and Remove Workspace stop the corresponding terminals.

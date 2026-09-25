@@ -1,0 +1,19 @@
+[package]
+name = "ur-app"
+edition.workspace = true
+version.workspace = true
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+tokio.workspace = true
+ur-client.workspace = true
+tauri-plugin-wdio-webdriver = { workspace = true, optional = true }
+
+[features]
+# An embedded WebDriver server for automated GUI checks. Never ship it.
+webdriver = ["dep:tauri-plugin-wdio-webdriver"]
