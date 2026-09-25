@@ -17,7 +17,8 @@ Map each file here as it is added, following the project layout in
 - `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the
   core and the CLI, with `request()`, `events()`, `pty()`, and `pty_input()`.
 - `crates/ur-fake-server/` — the fake server: `lib.rs` exports
-  `fake_server()` and `Hold`, and `main.rs` serves it over stdin and stdout.
+  `fake_server()`, `Hold`, and `SavedHistory`, and `main.rs` serves it over
+  stdin and stdout.
 - `crates/ur/src/main.rs` — the `ur` command line: `daemon`, `agent-run`,
   `workspace add|rm`, `ls`, `new`, `prompt`, `read`, `cancel`, `approve`,
   `deny`, and `wait`.
@@ -28,18 +29,22 @@ Map each file here as it is added, following the project layout in
 - `crates/ur/src/one_shot.rs` — `ur agent-run`, the one-shot client, and its
   tests against a test agent.
 - `crates/ur/src/daemon/mod.rs` — `start()`: binds the socket, removing a stale
-  one, and reads the config file; `run()`: reads the state file, connects to
-  the server, then serves.
-- `crates/ur/src/daemon/state.rs` — `State`: the ACP connection, workspaces,
-  watchers, and sessions with their transcripts, operation guards, statuses,
-  unread flags, focus, pending permission requests, and subscribers.
+  one, and reads the config file; `run()`: reads the state file, starts the
+  supervisor, then serves.
+- `crates/ur/src/daemon/state.rs` — `State`: the ACP connection with its
+  capabilities and generation, workspaces, watchers, and sessions, saved or
+  loaded, with their transcripts, session titles, operation guards and the
+  loads they hold, statuses, unread flags, focus, pending permission requests,
+  and subscribers.
 - `crates/ur/src/daemon/state_file.rs` — `read()` and `write()` for the state
   file.
-- `crates/ur/src/daemon/acp.rs` — `connect()`: the ACP connection and its
-  handlers; `initialize()`, shared with the one-shot client.
-- `crates/ur/src/daemon/ops.rs` — `add_workspace()` and `remove_workspace()`,
-  which write the state file; `new_session()` and `prompt()`, which handle the
-  server's responses in `on_receiving_result` callbacks; and `cancel()`.
+- `crates/ur/src/daemon/acp.rs` — `supervise()`: the supervisor, which starts
+  the server again after it exits, and each ACP connection's handlers;
+  `list_sessions()`; `initialize()`, shared with the one-shot client.
+- `crates/ur/src/daemon/ops.rs` — `add_workspace()`, which also lists the
+  workspace's saved sessions, and `remove_workspace()`, which write the state
+  file; `new_session()`, `subscribe()`, `prompt()`, and `load()`, which handle
+  the server's responses in `on_receiving_result` callbacks; and `cancel()`.
 - `crates/ur/src/daemon/server.rs` — the accept loop, each socket connection's
   reader and writer, request handling, and `Outbox`.
 - `crates/ur/src/daemon/terminal.rs` — `Terminals`: login shells through

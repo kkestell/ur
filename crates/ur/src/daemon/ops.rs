@@ -1,15 +1,19 @@
 //! Requests that call the server or write the state file. Each handles the
 //! server's response in an `on_receiving_result` callback, which the SDK runs
 //! before it dispatches the server's next message. The callbacks always return
-//! `Ok`, because an error from one shuts down the ACP connection.
+//! `Ok`, because an error from one shuts down the ACP connection. Prompt and
+//! load callbacks carry the generation they were sent in, and ignore the error
+//! a request gets when the ACP connection closes: the supervisor records that
+//! server exit, so every interrupted turn gets one turn error entry.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, NewSessionRequest, PromptRequest, SessionId,
+    CancelNotification, ContentBlock, LoadSessionRequest, NewSessionRequest, PromptRequest,
+    SessionId,
 };
-use agent_client_protocol::{Agent, ConnectionTo};
+use agent_client_protocol::{Agent, ConnectionTo, is_incoming_transport_closed};
 use anyhow::bail;
 use ur_client::{DaemonMessage, Frame, Response, Workspace};
 
@@ -19,7 +23,8 @@ use super::state::State;
 use super::state_file;
 
 /// Adds a workspace whose path is an absolute path to a directory, and saves
-/// it in the state file.
+/// it in the state file. When the server can list sessions, a spawned task
+/// adds the workspace's saved sessions.
 pub fn add_workspace(
     state: &Arc<Mutex<State>>,
     state_file: &Path,
@@ -32,12 +37,33 @@ pub fn add_workspace(
     if !path.is_dir() {
         bail!("workspace path {} is not a directory", path.display());
     }
-    state
-        .lock()
-        .unwrap()
-        .add_workspace(workspace, |workspaces| {
+    let connection = {
+        let mut locked = state.lock().unwrap();
+        locked.add_workspace(workspace.clone(), |workspaces| {
             state_file::write(state_file, workspaces)
-        })
+        })?;
+        locked
+            .server()
+            .ok()
+            .filter(|server| server.can_list())
+            .map(|server| server.connection.clone())
+    };
+    if let Some(connection) = connection {
+        let state = state.clone();
+        tokio::spawn(async move {
+            match acp::list_sessions(&connection, workspace.path).await {
+                Ok(sessions) => state
+                    .lock()
+                    .unwrap()
+                    .add_saved_sessions(&workspace.name, sessions),
+                Err(error) => eprintln!(
+                    "ur daemon: listing the sessions of {}: {error:#}",
+                    workspace.name
+                ),
+            }
+        });
+    }
+    Ok(())
 }
 
 /// Removes a workspace from the state file, then cancels its running prompts
@@ -95,33 +121,94 @@ pub fn new_session(
     Ok(())
 }
 
-/// Sends `session/prompt` and answers once it is sent, or answers busy. The
-/// operation guard is released after the turn's last update is in the
-/// transcript.
+/// Subscribes to a session, and answers request `id` now or, when the
+/// subscription starts or waits for a load, once the load ends. Returns the
+/// response, or `None` when the load answers it later.
+pub fn subscribe(
+    state: &Arc<Mutex<State>>,
+    session: &SessionId,
+    id: u64,
+    outbox: Outbox,
+) -> anyhow::Result<Option<Response>> {
+    state
+        .lock()
+        .unwrap()
+        .subscribe(session, id, outbox, load(state, None))
+}
+
+/// Sends `session/prompt` and answers once it is sent, or answers busy. A
+/// session that is not loaded is loaded first. The operation guard is released
+/// after the turn's last update is in the transcript.
 pub fn prompt(
     state: &Arc<Mutex<State>>,
     session: SessionId,
     content: Vec<ContentBlock>,
 ) -> anyhow::Result<Response> {
-    let callback_state = state.clone();
+    let load = load(state, Some(content.clone()));
     state
         .lock()
         .unwrap()
-        .start_prompt(&session, content, |connection, content| {
-            let session = session.clone();
-            connection
-                .send_request(PromptRequest::new(session.clone(), content))
-                .on_receiving_result(move |result| async move {
-                    let result = result
-                        .map(|response| response.stop_reason)
-                        .map_err(|error| acp::describe(&error));
-                    callback_state
-                        .lock()
-                        .unwrap()
-                        .finish_prompt(&session, result);
-                    Ok(())
-                })
-        })
+        .prompt(&session, content, send_prompt(state), load)
+}
+
+/// Builds the function that sends `session/load`. Its callback ends the load
+/// and then, if `prompt` holds a prompt's content and the load succeeded,
+/// sends the prompt under the same lock, so no other request can take the
+/// operation guard in between.
+pub fn load(
+    state: &Arc<Mutex<State>>,
+    prompt: Option<Vec<ContentBlock>>,
+) -> impl FnOnce(&ConnectionTo<Agent>, u64, LoadSessionRequest) -> agent_client_protocol::Result<()>
+{
+    let state = state.clone();
+    move |connection, generation, request| {
+        let session = request.session_id.clone();
+        connection
+            .send_request(request)
+            .on_receiving_result(move |result| async move {
+                if let Err(error) = &result
+                    && is_incoming_transport_closed(error)
+                {
+                    return Ok(());
+                }
+                let result = result.map(|_| ()).map_err(|error| acp::describe(&error));
+                let mut locked = state.lock().unwrap();
+                if locked.finish_load(&session, generation, result)
+                    && let Some(content) = prompt
+                    && let Err(error) = locked.start_prompt(&session, content, send_prompt(&state))
+                {
+                    eprintln!("ur daemon: prompting {session} after its load: {error:#}");
+                }
+                Ok(())
+            })
+    }
+}
+
+/// Builds the function that sends `session/prompt`. Its callback ends the turn.
+fn send_prompt(
+    state: &Arc<Mutex<State>>,
+) -> impl FnOnce(&ConnectionTo<Agent>, u64, PromptRequest) -> agent_client_protocol::Result<()> {
+    let state = state.clone();
+    move |connection, generation, request| {
+        let session = request.session_id.clone();
+        connection
+            .send_request(request)
+            .on_receiving_result(move |result| async move {
+                if let Err(error) = &result
+                    && is_incoming_transport_closed(error)
+                {
+                    return Ok(());
+                }
+                let result = result
+                    .map(|response| response.stop_reason)
+                    .map_err(|error| acp::describe(&error));
+                state
+                    .lock()
+                    .unwrap()
+                    .finish_prompt(&session, generation, result);
+                Ok(())
+            })
+    }
 }
 
 pub fn cancel(state: &Arc<Mutex<State>>, session: &SessionId) -> anyhow::Result<()> {

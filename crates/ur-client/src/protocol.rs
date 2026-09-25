@@ -47,8 +47,9 @@ pub enum Request {
         workspace: String,
     },
     /// Sends the session snapshot, then every later transcript entry.
-    /// Subscribing again from the same socket connection replaces the earlier
-    /// subscription.
+    /// Subscribing to a saved session loads it first, and the snapshot and the
+    /// response wait for the load. Subscribing again from the same socket
+    /// connection replaces the earlier subscription.
     Subscribe {
         #[ts(type = "string")]
         session: SessionId,
@@ -59,7 +60,9 @@ pub enum Request {
         #[ts(type = "Array<string>")]
         sessions: Vec<SessionId>,
     },
-    /// Sends `session/prompt` and answers once it is sent, or answers busy.
+    /// Sends `session/prompt` and answers once it is sent, or answers busy. A
+    /// saved session is loaded first, and the prompt is sent when the load
+    /// succeeds.
     Prompt {
         #[ts(type = "string")]
         session: SessionId,
@@ -123,11 +126,13 @@ pub enum Event {
     WorkspaceRemoved {
         name: String,
     },
-    /// A session was added, or its status or unread flag changed.
+    /// A session was added, or its status, unread flag, session title, or last
+    /// activity changed.
     SessionChanged {
         summary: SessionSummary,
     },
-    /// A subscribed session's transcript, sent before its later entries.
+    /// A subscribed session's transcript, sent before its later entries. A load
+    /// sends a fresh one, which replaces the earlier transcript.
     SessionSnapshot {
         #[ts(type = "string")]
         session: SessionId,
@@ -163,6 +168,10 @@ pub struct SessionSummary {
     pub workspace: String,
     pub status: Status,
     pub unread: bool,
+    /// The session title, from `session/list` or `session_info_update`.
+    pub title: Option<String>,
+    /// The last activity, from `session/list` or `session_info_update`.
+    pub updated_at: Option<String>,
 }
 
 /// The session status.
@@ -212,7 +221,7 @@ pub enum Entry {
         content: Vec<ContentBlock>,
     },
     /// A turn error entry: the message of the JSON-RPC error `session/prompt`
-    /// returned.
+    /// returned, or why the server exited during the turn.
     TurnError { message: String },
 }
 

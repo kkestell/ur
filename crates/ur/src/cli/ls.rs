@@ -1,6 +1,7 @@
 use ur_client::Status;
 
-/// `ur ls`: prints each workspace, then its sessions with their statuses.
+/// `ur ls`: prints each workspace, then its sessions with their statuses and
+/// session titles.
 pub async fn start() -> anyhow::Result<()> {
     let client = super::connect().await?;
     let (workspaces, sessions, _) = super::watch(&client).await?;
@@ -13,8 +14,12 @@ pub async fn start() -> anyhow::Result<()> {
                 Status::NeedsPermission { .. } => "needs permission",
                 Status::Failed { .. } => "failed",
             };
+            let title = match &summary.title {
+                Some(title) => format!("  {title}"),
+                None => String::new(),
+            };
             let unread = if summary.unread { "  unread" } else { "" };
-            println!("  {}  {status}{unread}", summary.session);
+            println!("  {}  {status}{title}{unread}", summary.session);
         }
     }
     Ok(())

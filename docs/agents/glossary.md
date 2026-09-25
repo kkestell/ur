@@ -31,7 +31,7 @@
 | server                     | agent                                                   | `Agent`, `ConnectionTo<Agent>` |
 | workspace path             | `cwd`                                                   | —                              |
 | session title              | `title` in `session/list` and `session_info_update`     | session title in `watch`       |
-| last activity              | `updatedAt` in `session/list` and `session_info_update` | —                              |
+| last activity              | `updatedAt` in `session/list` and `session_info_update` | `SessionSummary.updated_at`    |
 | user message, replayed     | `user_message_chunk`                                    | ACP update entry               |
 | user message, sent         | `session/prompt` content                                | user prompt entry              |
 | thought                    | `agent_thought_chunk`                                   | "Thinking" row                 |
@@ -63,7 +63,9 @@
   what the daemon launches in end-to-end tests, and its library is the test
   agent in the daemon's tests. The prompt's text chooses its script: `hold`,
   `tool`, `tools` (two permission requests at once), `reject` (a rejected
-  prompt), `fail` (a turn error), or a reply.
+  prompt), `fail` (a turn error), `title` (a session title), `unloadable` (a
+  session whose loads fail), or a reply. Its saved history is a
+  `SavedHistory`, which the daemon's tests share between fake servers.
 - **Daemon**: The long-running `ur daemon` process. It owns the ACP connection,
   session statuses, in-memory transcripts, pending permission requests, and
   terminals, and serves daemon clients on the socket.
@@ -130,8 +132,9 @@
   because the daemon created it during the current ACP connection or because
   `session/load` succeeded.
 - **Load**: A `session/load` call that rebuilds a session's transcript from
-  replay. It happens the first time a saved session is viewed or prompted, and
-  it replaces the previous transcript only on success.
+  replay. Subscribing to or prompting an unloaded session starts one, and so
+  does a server restart for each unloaded session with subscribers. It
+  replaces the previous transcript only on success.
 - **Replay**: The ACP updates the server sends during `session/load`. They go
   through the same handler and `apply_update` as live updates.
 - **Session title**: The label of a session from `session/list` or
@@ -251,7 +254,8 @@
   unread flag, and each terminal's title. Pending permission requests arrive in
   the session status.
 - **Session summary**: One session as watch shows it: its session ID,
-  workspace, session status, and unread flag. It is `SessionSummary` in code.
+  workspace, session status, unread flag, session title, and last activity. It
+  is `SessionSummary` in code.
 - **Subscribe**: The request that registers a daemon client for one session's
   content: its transcript and config options.
 - **Snapshot**: The current state sent before live events: `WatchSnapshot` for

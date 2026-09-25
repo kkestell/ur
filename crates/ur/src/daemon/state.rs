@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use agent_client_protocol::schema::v1::{
-    ContentBlock, PermissionOptionId, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionId, SessionNotification,
+    AgentCapabilities, ContentBlock, LoadSessionRequest, PermissionOptionId, PromptRequest,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionId, SessionInfo, SessionNotification, SessionUpdate,
     StopReason,
 };
 use agent_client_protocol::{Agent, ConnectionTo, Responder};
@@ -21,7 +22,10 @@ use super::server::Outbox;
 /// await.
 pub struct State {
     /// The ACP connection, or why there is none.
-    server: Result<ConnectionTo<Agent>, String>,
+    server: Result<Server, String>,
+    /// The generation of the current or last ACP connection. Prompt and load
+    /// results from an earlier one are ignored.
+    generation: u64,
     /// In the order they were added.
     workspaces: Vec<Workspace>,
     /// In the order they were created.
@@ -31,12 +35,34 @@ pub struct State {
     next_request_id: u32,
 }
 
+/// The ACP connection and the capabilities from its `initialize`.
+pub struct Server {
+    pub connection: ConnectionTo<Agent>,
+    pub capabilities: AgentCapabilities,
+}
+
+impl Server {
+    pub fn can_list(&self) -> bool {
+        self.capabilities.session_capabilities.list.is_some()
+    }
+
+    fn can_load(&self) -> bool {
+        self.capabilities.load_session
+    }
+}
+
 struct Session {
     id: SessionId,
     workspace: String,
     transcript: Vec<Entry>,
-    /// The operation guard, held while a prompt runs.
-    op: bool,
+    /// Whether the transcript came from `session/new` or `session/load` during
+    /// the current ACP connection.
+    loaded: bool,
+    title: Option<String>,
+    /// The last activity.
+    updated_at: Option<String>,
+    /// The operation guard.
+    op: Option<Op>,
     subscribers: Vec<Outbox>,
     status: Status,
     unread: bool,
@@ -49,10 +75,26 @@ struct Session {
     cancelling: bool,
 }
 
+/// The session operation that holds the operation guard.
+enum Op {
+    /// A turn is running.
+    Prompt,
+    /// `session/load` is in flight.
+    Load {
+        /// The replayed entries, which become the transcript if the load
+        /// succeeds.
+        replay: Vec<Entry>,
+        /// The request ID and outbox of each `subscribe` that answers when the
+        /// load ends.
+        waiting: Vec<(u64, Outbox)>,
+    },
+}
+
 impl State {
     pub fn new(workspaces: Vec<Workspace>) -> State {
         State {
             server: Err("the server has not started".to_string()),
+            generation: 0,
             workspaces,
             sessions: Vec::new(),
             watchers: Vec::new(),
@@ -60,12 +102,48 @@ impl State {
         }
     }
 
-    pub fn set_server(&mut self, server: Result<ConnectionTo<Agent>, String>) {
+    /// Sets the ACP connection, which starts a new generation, or why there
+    /// is none.
+    pub fn set_server(&mut self, server: Result<Server, String>) {
+        if server.is_ok() {
+            self.generation += 1;
+        }
         self.server = server;
     }
 
+    pub fn server(&self) -> anyhow::Result<&Server> {
+        server(&self.server)
+    }
+
     pub fn connection(&self) -> anyhow::Result<ConnectionTo<Agent>> {
-        connection(&self.server)
+        Ok(self.server()?.connection.clone())
+    }
+
+    pub fn workspaces(&self) -> Vec<Workspace> {
+        self.workspaces.clone()
+    }
+
+    /// Records that the ACP connection ended. The new server process has
+    /// loaded no sessions, so every session becomes unloaded. Every running
+    /// turn fails with `reason` and its pending permission requests are
+    /// dropped. A running load ends with the unchanged transcript. Every
+    /// operation guard is released.
+    pub fn server_exited(&mut self, reason: String) {
+        for session in &mut self.sessions {
+            session.loaded = false;
+            if let Some(Op::Load { waiting, .. }) = session.op.take() {
+                session.end_load(waiting);
+            }
+            // A prompt that starts with a load is `Working` during the load.
+            if matches!(
+                session.status,
+                Status::Working | Status::NeedsPermission { .. }
+            ) {
+                session.end_turn(Err(reason.clone()));
+                publish(&mut self.watchers, session);
+            }
+        }
+        self.server = Err(reason);
     }
 
     /// Queues the watch snapshot and registers the outbox for later changes.
@@ -140,7 +218,7 @@ impl State {
         save(&workspaces)?;
         self.workspaces = workspaces;
         for session in self.sessions.iter_mut().filter(|s| s.workspace == name) {
-            if session.op {
+            if matches!(session.op, Some(Op::Prompt)) {
                 // The removal is saved, so it goes ahead. Without an ACP
                 // connection, there is no prompt left to cancel.
                 if let Err(error) = connection(&self.server)
@@ -173,50 +251,204 @@ impl State {
         if !self.workspaces.iter().any(|other| other.name == workspace) {
             bail!("workspace {workspace} was removed");
         }
-        let session = Session {
-            id,
-            workspace,
-            transcript: Vec::new(),
-            op: false,
-            subscribers: Vec::new(),
-            status: Status::Idle { last_stop: None },
-            unread: false,
-            focus: Vec::new(),
-            responders: HashMap::new(),
-            cancelling: false,
-        };
+        let mut session = Session::new(id, workspace);
+        session.loaded = true;
         publish(&mut self.watchers, &session);
         self.sessions.push(session);
         Ok(())
     }
 
-    /// Appends an ACP update entry. An update for an unknown session is
-    /// dropped.
+    /// Adds each saved session from `session/list` that is not in `State`,
+    /// and updates the session title and last activity of the others. Does
+    /// nothing if the workspace was removed while the list was in flight.
+    pub fn add_saved_sessions(&mut self, workspace: &str, sessions: Vec<SessionInfo>) {
+        if !self.workspaces.iter().any(|other| other.name == workspace) {
+            return;
+        }
+        for info in sessions {
+            match find(&mut self.sessions, &info.session_id) {
+                Ok(session) => {
+                    if session.title != info.title || session.updated_at != info.updated_at {
+                        session.title = info.title;
+                        session.updated_at = info.updated_at;
+                        publish(&mut self.watchers, session);
+                    }
+                }
+                Err(_) => {
+                    let mut session = Session::new(info.session_id, workspace.to_string());
+                    session.title = info.title;
+                    session.updated_at = info.updated_at;
+                    publish(&mut self.watchers, &session);
+                    self.sessions.push(session);
+                }
+            }
+        }
+    }
+
+    /// Appends an ACP update entry, or adds it to the replay while a load
+    /// runs. A `session_info_update` also changes the session title and last
+    /// activity. An update for an unknown session is dropped.
     pub fn apply_update(&mut self, notification: SessionNotification) {
         let id = notification.session_id;
         let Ok(session) = find(&mut self.sessions, &id) else {
             eprintln!("ur daemon: dropping an update for unknown session {id}");
             return;
         };
-        session.append(Entry::Update {
+        if let SessionUpdate::SessionInfoUpdate(info) = &notification.update {
+            // A null value clears the field, and an absent one leaves it.
+            let mut changed = false;
+            if let Some(title) = info.title.as_opt_ref() {
+                changed |= replace(&mut session.title, title.cloned());
+            }
+            if let Some(updated_at) = info.updated_at.as_opt_ref() {
+                changed |= replace(&mut session.updated_at, updated_at.cloned());
+            }
+            if changed {
+                publish(&mut self.watchers, session);
+            }
+        }
+        let entry = Entry::Update {
             update: Box::new(notification.update),
-        });
+        };
+        match &mut session.op {
+            Some(Op::Load { replay, .. }) => replay.push(entry),
+            _ => session.append(entry),
+        }
     }
 
-    /// Queues the session snapshot and registers the outbox for later entries.
+    /// Registers the outbox for the session's later entries, and queues the
+    /// session snapshot and returns `done`. Subscribing to an unloaded session
+    /// that is not `Failed` calls `load` to send `session/load` when the server
+    /// can load it and no other session operation runs. During any load, the
+    /// snapshot and the response wait for it to end, and this returns `None`.
     /// Subscribing again from the same socket connection replaces the earlier
     /// subscription.
-    pub fn subscribe(&mut self, id: &SessionId, outbox: Outbox) -> anyhow::Result<()> {
+    pub fn subscribe(
+        &mut self,
+        id: &SessionId,
+        request_id: u64,
+        outbox: Outbox,
+        load: impl FnOnce(
+            &ConnectionTo<Agent>,
+            u64,
+            LoadSessionRequest,
+        ) -> agent_client_protocol::Result<()>,
+    ) -> anyhow::Result<Option<Response>> {
+        let generation = self.generation;
+        let can_load = self.server.as_ref().is_ok_and(Server::can_load);
         let session = find(&mut self.sessions, id)?;
-        outbox.send(event(Event::SessionSnapshot {
-            session: id.clone(),
-            transcript: session.transcript.clone(),
-        }));
+        let waits = match &mut session.op {
+            Some(Op::Load { waiting, .. }) => {
+                waiting.push((request_id, outbox.clone()));
+                true
+            }
+            Some(Op::Prompt) => false,
+            None => {
+                if !session.loaded && can_load && !matches!(session.status, Status::Failed { .. }) {
+                    let connection = connection(&self.server)?;
+                    load(
+                        &connection,
+                        generation,
+                        load_request(&self.workspaces, session),
+                    )?;
+                    session.op = Some(Op::Load {
+                        replay: Vec::new(),
+                        waiting: vec![(request_id, outbox.clone())],
+                    });
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+        if !waits {
+            outbox.send(session.snapshot());
+        }
         session
             .subscribers
             .retain(|other| !other.same_connection(&outbox));
         session.subscribers.push(outbox);
-        Ok(())
+        Ok((!waits).then_some(Response::Done))
+    }
+
+    /// Loads every unloaded session that has subscribers, calling `load` for
+    /// each, when the server can load them.
+    pub fn reload_subscribed(
+        &mut self,
+        load: impl Fn(
+            &ConnectionTo<Agent>,
+            u64,
+            LoadSessionRequest,
+        ) -> agent_client_protocol::Result<()>,
+    ) {
+        let Ok(server) = &self.server else {
+            return;
+        };
+        if !server.can_load() {
+            return;
+        }
+        for session in &mut self.sessions {
+            if session.loaded || session.op.is_some() || session.subscribers.is_empty() {
+                continue;
+            }
+            let request = load_request(&self.workspaces, session);
+            if let Err(error) = load(&server.connection, self.generation, request) {
+                eprintln!("ur daemon: loading {}: {error}", session.id);
+                continue;
+            }
+            session.op = Some(Op::Load {
+                replay: Vec::new(),
+                waiting: Vec::new(),
+            });
+        }
+    }
+
+    /// Ends a load. On success, the replay becomes the transcript, followed by
+    /// the old transcript's trailing turn error entry if it had one, which
+    /// keeps the error of a turn the server exit interrupted. On failure, the
+    /// transcript is unchanged, the session stays unloaded, and it becomes
+    /// `Failed`. Either way, every subscriber gets a session snapshot and each
+    /// waiting `subscribe` is answered. Returns whether the session is loaded.
+    /// A result from an earlier generation, or for a session that is gone, is
+    /// ignored.
+    pub fn finish_load(
+        &mut self,
+        id: &SessionId,
+        generation: u64,
+        result: Result<(), String>,
+    ) -> bool {
+        if generation != self.generation {
+            return false;
+        }
+        let Ok(session) = find(&mut self.sessions, id) else {
+            return false;
+        };
+        let (replay, waiting) = match session.op.take() {
+            Some(Op::Load { replay, waiting }) => (replay, waiting),
+            other => {
+                session.op = other;
+                return false;
+            }
+        };
+        match result {
+            Ok(()) => {
+                let error = match session.transcript.last() {
+                    Some(error @ Entry::TurnError { .. }) => Some(error.clone()),
+                    _ => None,
+                };
+                session.transcript = replay;
+                session.transcript.extend(error);
+                session.loaded = true;
+            }
+            Err(message) => {
+                session.status = Status::Failed {
+                    message: format!("session/load failed: {message}"),
+                };
+                publish(&mut self.watchers, session);
+            }
+        }
+        session.end_load(waiting);
+        session.loaded
     }
 
     /// Makes `sessions` the ones this socket connection focuses, and clears
@@ -245,6 +477,49 @@ impl State {
         }
     }
 
+    /// Answers busy while the session's operation guard is held. A loaded
+    /// session is prompted as `start_prompt` describes. An unloaded one is
+    /// loaded first: `load` sends `session/load`, and the load holds the
+    /// guard, sets `Working`, and clears the unread flag. Its callback sends
+    /// the prompt when the load succeeds.
+    pub fn prompt(
+        &mut self,
+        id: &SessionId,
+        content: Vec<ContentBlock>,
+        send: impl FnOnce(&ConnectionTo<Agent>, u64, PromptRequest) -> agent_client_protocol::Result<()>,
+        load: impl FnOnce(
+            &ConnectionTo<Agent>,
+            u64,
+            LoadSessionRequest,
+        ) -> agent_client_protocol::Result<()>,
+    ) -> anyhow::Result<Response> {
+        let generation = self.generation;
+        let server = server(&self.server)?;
+        let session = find(&mut self.sessions, id)?;
+        if session.op.is_some() {
+            return Ok(Response::Busy);
+        }
+        if session.loaded {
+            return self.start_prompt(id, content, send);
+        }
+        if !server.can_load() {
+            bail!("the server cannot load session {id}");
+        }
+        load(
+            &server.connection,
+            generation,
+            load_request(&self.workspaces, session),
+        )?;
+        session.op = Some(Op::Load {
+            replay: Vec::new(),
+            waiting: Vec::new(),
+        });
+        session.status = Status::Working;
+        session.unread = false;
+        publish(&mut self.watchers, session);
+        Ok(Response::Done)
+    }
+
     /// Answers busy while the session's operation guard is held. Otherwise
     /// calls `send` to send `session/prompt`, then holds the guard, appends
     /// the user prompt entry, sets `Working`, and clears the unread flag,
@@ -255,15 +530,20 @@ impl State {
         &mut self,
         id: &SessionId,
         content: Vec<ContentBlock>,
-        send: impl FnOnce(ConnectionTo<Agent>, Vec<ContentBlock>) -> agent_client_protocol::Result<()>,
+        send: impl FnOnce(&ConnectionTo<Agent>, u64, PromptRequest) -> agent_client_protocol::Result<()>,
     ) -> anyhow::Result<Response> {
+        let generation = self.generation;
         let connection = self.connection()?;
         let session = find(&mut self.sessions, id)?;
-        if session.op {
+        if session.op.is_some() {
             return Ok(Response::Busy);
         }
-        send(connection, content.clone())?;
-        session.op = true;
+        send(
+            &connection,
+            generation,
+            PromptRequest::new(id.clone(), content.clone()),
+        )?;
+        session.op = Some(Op::Prompt);
         session.append(Entry::UserPrompt { content });
         session.status = Status::Working;
         session.unread = false;
@@ -272,32 +552,22 @@ impl State {
     }
 
     /// Ends the prompt with its stop reason, or with the message of the error
-    /// it returned, which becomes a turn error entry. Remaining pending
-    /// permission requests are dropped. A session removed with its workspace
-    /// is gone, and nothing happens.
-    pub fn finish_prompt(&mut self, id: &SessionId, result: Result<StopReason, String>) {
+    /// it returned. A result from an earlier generation, or for a session
+    /// removed with its workspace, is ignored.
+    pub fn finish_prompt(
+        &mut self,
+        id: &SessionId,
+        generation: u64,
+        result: Result<StopReason, String>,
+    ) {
+        if generation != self.generation {
+            return;
+        }
         let Ok(session) = find(&mut self.sessions, id) else {
             return;
         };
-        session.status = match result {
-            Ok(stop) => Status::Idle {
-                last_stop: Some(stop),
-            },
-            Err(message) => {
-                session.append(Entry::TurnError {
-                    message: message.clone(),
-                });
-                Status::Failed { message }
-            }
-        };
-        // Dropping a responder sends no reply. The turn is over, so the server
-        // no longer waits for one.
-        session.responders.clear();
-        session.op = false;
-        session.cancelling = false;
-        if session.focus.is_empty() {
-            session.unread = true;
-        }
+        session.op = None;
+        session.end_turn(result);
         publish(&mut self.watchers, session);
     }
 
@@ -386,7 +656,8 @@ impl State {
         send_cancel: impl FnOnce(&ConnectionTo<Agent>, &SessionId) -> agent_client_protocol::Result<()>,
     ) -> anyhow::Result<()> {
         let session = find(&mut self.sessions, id)?;
-        if !session.op {
+        // A load has no turn to cancel yet.
+        if !matches!(session.op, Some(Op::Prompt)) {
             return Ok(());
         }
         send_cancel(&connection(&self.server)?, id)?;
@@ -401,6 +672,71 @@ impl State {
 }
 
 impl Session {
+    /// A saved session: `Idle`, not unread, and unloaded.
+    fn new(id: SessionId, workspace: String) -> Session {
+        Session {
+            id,
+            workspace,
+            transcript: Vec::new(),
+            loaded: false,
+            title: None,
+            updated_at: None,
+            op: None,
+            subscribers: Vec::new(),
+            status: Status::Idle { last_stop: None },
+            unread: false,
+            focus: Vec::new(),
+            responders: HashMap::new(),
+            cancelling: false,
+        }
+    }
+
+    /// Ends the turn with its stop reason, or with an error message, which
+    /// becomes a turn error entry and `Failed`. Remaining pending permission
+    /// requests are dropped. The caller releases the operation guard and
+    /// publishes the change.
+    fn end_turn(&mut self, result: Result<StopReason, String>) {
+        self.status = match result {
+            Ok(stop) => Status::Idle {
+                last_stop: Some(stop),
+            },
+            Err(message) => {
+                self.append(Entry::TurnError {
+                    message: message.clone(),
+                });
+                Status::Failed { message }
+            }
+        };
+        // Dropping a responder sends no reply. The turn is over, so the server
+        // no longer waits for one.
+        self.responders.clear();
+        self.cancelling = false;
+        if self.focus.is_empty() {
+            self.unread = true;
+        }
+    }
+
+    /// Sends every subscriber a session snapshot, then answers each waiting
+    /// `subscribe`.
+    fn end_load(&mut self, waiting: Vec<(u64, Outbox)>) {
+        let snapshot = self.snapshot();
+        self.subscribers
+            .retain(|outbox| outbox.send(snapshot.clone()));
+        for (id, outbox) in waiting {
+            outbox.send(Frame::json(&DaemonMessage::Response {
+                id,
+                response: Response::Done,
+            }));
+        }
+    }
+
+    fn snapshot(&self) -> Frame {
+        event(Event::SessionSnapshot {
+            session: self.id.clone(),
+            transcript: self.transcript.clone(),
+        })
+    }
+
     fn append(&mut self, entry: Entry) {
         let frame = event(Event::Entry {
             session: self.id.clone(),
@@ -427,14 +763,36 @@ impl Session {
             workspace: self.workspace.clone(),
             status: self.status.clone(),
             unread: self.unread,
+            title: self.title.clone(),
+            updated_at: self.updated_at.clone(),
         }
     }
 }
 
-fn connection(server: &Result<ConnectionTo<Agent>, String>) -> anyhow::Result<ConnectionTo<Agent>> {
+fn server(server: &Result<Server, String>) -> anyhow::Result<&Server> {
     server
-        .clone()
+        .as_ref()
         .map_err(|reason| anyhow!("no ACP connection: {reason}"))
+}
+
+fn connection(result: &Result<Server, String>) -> anyhow::Result<ConnectionTo<Agent>> {
+    Ok(server(result)?.connection.clone())
+}
+
+/// `session/load` for the session, with its workspace path as `cwd`.
+fn load_request(workspaces: &[Workspace], session: &Session) -> LoadSessionRequest {
+    let workspace = workspaces
+        .iter()
+        .find(|workspace| workspace.name == session.workspace)
+        .expect("every session's workspace exists");
+    LoadSessionRequest::new(session.id.clone(), workspace.path.clone())
+}
+
+/// Sets `field` and returns whether it changed.
+fn replace(field: &mut Option<String>, value: Option<String>) -> bool {
+    let changed = *field != value;
+    *field = value;
+    changed
 }
 
 fn find<'a>(sessions: &'a mut [Session], id: &SessionId) -> anyhow::Result<&'a mut Session> {

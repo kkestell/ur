@@ -31,8 +31,12 @@ pub async fn start(path: &Path) -> anyhow::Result<()> {
         UnixListener::bind(path).with_context(|| format!("binding {}", path.display()))?;
     let server = Config::read().map(|config| {
         let command = config.server.command;
-        let agent = AcpAgent::new(AcpAgentConfig::new(command.clone()).args(config.server.args));
-        (command, agent)
+        let args = config.server.args;
+        let launch = {
+            let command = command.clone();
+            move || AcpAgent::new(AcpAgentConfig::new(command.clone()).args(args.clone()))
+        };
+        (command, launch)
     });
     let state_file = ur_client::state_dir()
         .context("finding the state directory")?
@@ -40,21 +44,23 @@ pub async fn start(path: &Path) -> anyhow::Result<()> {
     run(listener, state_file, server).await
 }
 
-/// Reads the state file, connects to the server, then serves daemon clients.
-/// An unreadable state file stops the daemon. `server` holds the command that
-/// runs the server, for errors, and the connection to it. Daemon clients that
-/// connect meanwhile wait in the listen backlog, so no request sees a server
-/// that is still starting. Without a server, terminals, workspaces, and the
-/// transcripts held in memory still work.
-async fn run(
+/// Reads the state file, starts the supervisor, then serves daemon clients
+/// once the first `initialize` ends. An unreadable state file stops the
+/// daemon. `server` holds the command that runs the server, for errors, and
+/// the function that starts it, which the supervisor calls again after each
+/// server exit. Daemon clients that connect meanwhile wait in the listen
+/// backlog, so no request sees a server that is still starting. Without a
+/// server, terminals, workspaces, and the transcripts held in memory still
+/// work.
+async fn run<S: ConnectTo<Client> + 'static>(
     listener: UnixListener,
     state_file: PathBuf,
-    server: anyhow::Result<(String, impl ConnectTo<Client> + 'static)>,
+    server: anyhow::Result<(String, impl Fn() -> S + Send + 'static)>,
 ) -> anyhow::Result<()> {
     let workspaces = state_file::read(&state_file)?;
     let state = Arc::new(Mutex::new(State::new(workspaces)));
     match server {
-        Ok((command, server)) => acp::connect(command, server, state.clone()).await,
+        Ok((command, launch)) => acp::supervise(command, launch, state.clone()).await,
         Err(error) => {
             let reason = format!("{error:#}");
             eprintln!("ur daemon: cannot start the server: {reason}");

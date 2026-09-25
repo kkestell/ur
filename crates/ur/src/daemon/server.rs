@@ -161,11 +161,12 @@ fn handle(
                 Err(error) => Err(error),
             }
         }
-        Request::Subscribe { session } => state
-            .lock()
-            .unwrap()
-            .subscribe(&session, outbox.clone())
-            .map(|()| Response::Done),
+        Request::Subscribe { session } => match ops::subscribe(state, &session, id, outbox.clone())
+        {
+            Ok(Some(response)) => Ok(response),
+            Ok(None) => return None,
+            Err(error) => Err(error),
+        },
         Request::Focus { sessions } => state
             .lock()
             .unwrap()

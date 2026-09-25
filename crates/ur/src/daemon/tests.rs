@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
@@ -9,53 +10,107 @@ use anyhow::anyhow;
 use tempfile::TempDir;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::time::timeout;
+use tokio::task::AbortHandle;
+use tokio::time::{sleep, timeout};
 use ur_client::{
     Client, Entry, Event, PendingPermission, Request, Response, SessionSummary, Status, Workspace,
 };
-use ur_fake_server::{Hold, fake_server};
+use ur_fake_server::{Hold, SavedHistory, fake_server};
 
 const WAIT: Duration = Duration::from_secs(5);
+
+/// The reason a session fails when `TestDaemon::kill_server()` ends its turn.
+const SERVER_EXIT: &str = "the fake server closed the ACP connection";
+
+/// Starts the server for the supervisor, over an in-process channel.
+type Launch = Box<dyn Fn() -> Channel + Send>;
 
 /// The daemon running in this process on a socket and a state file in its own
 /// directory.
 struct TestDaemon {
     socket: PathBuf,
     state_file: PathBuf,
+    /// The fake server's saved history, shared by every fake server this
+    /// daemon and its restarts start.
+    history: SavedHistory,
+    /// The running fake server's task.
+    server: Arc<Mutex<Option<AbortHandle>>>,
     _dir: TempDir,
 }
 
 impl TestDaemon {
-    /// Runs the daemon with the fake server over an in-process channel.
+    /// Runs the daemon with the fake server.
     fn start(hold: &Hold) -> TestDaemon {
-        let dir = tempfile::tempdir().unwrap();
-        let state_file = dir.path().join("state.json");
-        TestDaemon::run_on(dir, state_file, fake(hold))
+        TestDaemon::start_with(hold, SavedHistory::default())
     }
 
-    /// Runs another daemon with the fake server, on this daemon's state file.
+    fn start_with(hold: &Hold, history: SavedHistory) -> TestDaemon {
+        let dir = tempfile::tempdir().unwrap();
+        let state_file = dir.path().join("state.json");
+        TestDaemon::run_fake(dir, state_file, hold, history)
+    }
+
+    /// Runs another daemon with the fake server, on this daemon's state file
+    /// and saved history.
     fn restart(&self, hold: &Hold) -> TestDaemon {
-        TestDaemon::run_on(
+        TestDaemon::run_fake(
             tempfile::tempdir().unwrap(),
             self.state_file.clone(),
-            fake(hold),
+            hold,
+            self.history.clone(),
         )
     }
 
-    fn run(server: anyhow::Result<Channel>) -> TestDaemon {
-        let dir = tempfile::tempdir().unwrap();
-        let state_file = dir.path().join("state.json");
-        TestDaemon::run_on(dir, state_file, server)
+    fn run_fake(
+        dir: TempDir,
+        state_file: PathBuf,
+        hold: &Hold,
+        history: SavedHistory,
+    ) -> TestDaemon {
+        let server = Arc::new(Mutex::new(None));
+        let launch: Launch = Box::new({
+            let hold = hold.clone();
+            let history = history.clone();
+            let server = server.clone();
+            move || {
+                let (client, agent) = Channel::duplex();
+                let task =
+                    tokio::spawn(fake_server(hold.clone(), history.clone()).connect_to(agent));
+                *server.lock().unwrap() = Some(task.abort_handle());
+                client
+            }
+        });
+        TestDaemon::run_on(dir, state_file, history, server, Ok(launch))
     }
 
-    fn run_on(dir: TempDir, state_file: PathBuf, server: anyhow::Result<Channel>) -> TestDaemon {
+    fn run(launch: anyhow::Result<Launch>) -> TestDaemon {
+        let dir = tempfile::tempdir().unwrap();
+        let state_file = dir.path().join("state.json");
+        TestDaemon::run_on(
+            dir,
+            state_file,
+            SavedHistory::default(),
+            Arc::default(),
+            launch,
+        )
+    }
+
+    fn run_on(
+        dir: TempDir,
+        state_file: PathBuf,
+        history: SavedHistory,
+        server: Arc<Mutex<Option<AbortHandle>>>,
+        launch: anyhow::Result<Launch>,
+    ) -> TestDaemon {
         let socket = dir.path().join("ur.sock");
         let listener = UnixListener::bind(&socket).unwrap();
-        let server = server.map(|channel| ("the fake server".to_string(), channel));
-        tokio::spawn(super::run(listener, state_file.clone(), server));
+        let launch = launch.map(|launch| ("the fake server".to_string(), launch));
+        tokio::spawn(super::run(listener, state_file.clone(), launch));
         TestDaemon {
             socket,
             state_file,
+            history,
+            server,
             _dir: dir,
         }
     }
@@ -63,12 +118,18 @@ impl TestDaemon {
     async fn connect(&self) -> Client {
         Client::connect(&self.socket).await.unwrap()
     }
-}
 
-fn fake(hold: &Hold) -> anyhow::Result<Channel> {
-    let (client, agent) = Channel::duplex();
-    tokio::spawn(fake_server(hold.clone()).connect_to(agent));
-    Ok(client)
+    /// Aborts the running fake server, which closes its ACP connection the
+    /// way a server exit does. The supervisor starts another after
+    /// `RESTART_DELAY`.
+    fn kill_server(&self) {
+        self.server
+            .lock()
+            .unwrap()
+            .take()
+            .expect("the fake server is running")
+            .abort();
+    }
 }
 
 /// One daemon client's view of a subscribed session: the session snapshot,
@@ -97,6 +158,31 @@ impl Subscription {
             }
         }
         &self.transcript
+    }
+
+    /// Waits for a fresh session snapshot, keeping the entries before it, and
+    /// returns it.
+    async fn next_snapshot(&mut self) -> &[Entry] {
+        loop {
+            let event = timeout(WAIT, self.events.recv())
+                .await
+                .unwrap_or_else(|_| panic!("a session snapshot arrives: {:?}", self.transcript))
+                .expect("the socket connection stays open");
+            match event {
+                Event::Entry { session, entry } if session == self.session => {
+                    self.transcript.push(entry);
+                }
+                Event::SessionSnapshot {
+                    session,
+                    transcript,
+                } if session == self.session => {
+                    self.snapshot = transcript.clone();
+                    self.transcript = transcript;
+                    return &self.transcript;
+                }
+                other => panic!("unexpected event {other:?}"),
+            }
+        }
     }
 }
 
@@ -127,6 +213,16 @@ impl Watch {
             }
         }
     }
+
+    /// Waits for the session to stop being `Working`, and returns its status.
+    async fn next_turn_end(&mut self, session: &SessionId) -> Status {
+        loop {
+            let status = self.next_change(session).await.status;
+            if status != Status::Working {
+                return status;
+            }
+        }
+    }
 }
 
 async fn watch(daemon: &TestDaemon) -> Watch {
@@ -150,22 +246,26 @@ async fn watch(daemon: &TestDaemon) -> Watch {
     }
 }
 
-/// An absolute path to a directory, for workspaces.
-fn workspace_path() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+/// An absolute path to a directory for the workspace. Each name has its own,
+/// so `session/list` for one workspace does not return another's sessions.
+fn workspace_path(name: &str) -> PathBuf {
+    static ROOT: LazyLock<TempDir> = LazyLock::new(|| tempfile::tempdir().unwrap());
+    let path = ROOT.path().join(name);
+    std::fs::create_dir_all(&path).unwrap();
+    path
 }
 
 fn workspace(name: &str) -> Workspace {
     Workspace {
         name: name.to_string(),
-        path: workspace_path().to_path_buf(),
+        path: workspace_path(name),
     }
 }
 
 async fn add_workspace(client: &Client, name: &str) -> Response {
     let request = Request::AddWorkspace {
         name: name.to_string(),
-        path: workspace_path().to_path_buf(),
+        path: workspace_path(name),
     };
     client.request(request).await.unwrap()
 }
@@ -180,6 +280,10 @@ async fn remove_workspace(client: &Client, name: &str) -> Response {
 /// Adds the workspace, then creates a session in it.
 async fn new_session(client: &Client, workspace: &str) -> SessionId {
     assert_eq!(add_workspace(client, workspace).await, Response::Done);
+    create_session(client, workspace).await
+}
+
+async fn create_session(client: &Client, workspace: &str) -> SessionId {
     let request = Request::NewSession {
         workspace: workspace.to_string(),
     };
@@ -187,6 +291,25 @@ async fn new_session(client: &Client, workspace: &str) -> SessionId {
         Response::SessionCreated { session } => session,
         other => panic!("unexpected response {other:?}"),
     }
+}
+
+/// Creates a session in the workspace once the supervisor has started the
+/// server again.
+async fn create_session_after_restart(client: &Client, workspace: &str) -> SessionId {
+    timeout(WAIT, async {
+        loop {
+            let request = Request::NewSession {
+                workspace: workspace.to_string(),
+            };
+            match client.request(request).await.unwrap() {
+                Response::SessionCreated { session } => return session,
+                Response::Error { .. } => sleep(Duration::from_millis(50)).await,
+                other => panic!("unexpected response {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("the server starts again")
 }
 
 async fn subscribe(client: &Client, session: &SessionId) -> Subscription {
@@ -260,6 +383,18 @@ fn tool_call_ids(requests: &[PendingPermission]) -> Vec<String> {
         .collect()
 }
 
+/// The summary of a session that was just created or listed.
+fn new_summary(session: &SessionId, workspace: &str) -> SessionSummary {
+    SessionSummary {
+        session: session.clone(),
+        workspace: workspace.to_string(),
+        status: Status::Idle { last_stop: None },
+        unread: false,
+        title: None,
+        updated_at: None,
+    }
+}
+
 fn idle(stop: StopReason) -> Status {
     Status::Idle {
         last_stop: Some(stop),
@@ -269,6 +404,21 @@ fn idle(stop: StopReason) -> Status {
 fn user_prompt(text: &str) -> Entry {
     Entry::UserPrompt {
         content: vec![ContentBlock::from(text)],
+    }
+}
+
+/// A replayed user message.
+fn user_message(text: &str) -> Entry {
+    Entry::Update {
+        update: Box::new(SessionUpdate::UserMessageChunk(ContentChunk::new(
+            text.into(),
+        ))),
+    }
+}
+
+fn turn_error(message: &str) -> Entry {
+    Entry::TurnError {
+        message: message.to_string(),
     }
 }
 
@@ -370,12 +520,7 @@ async fn watch_sends_the_snapshot_then_changes() {
             workspace: workspace("home")
         }
     );
-    let summary = SessionSummary {
-        session,
-        workspace: "home".to_string(),
-        status: Status::Idle { last_stop: None },
-        unread: false,
-    };
+    let summary = new_summary(&session, "home");
     assert_eq!(
         early.next().await,
         Event::SessionChanged {
@@ -418,17 +563,20 @@ async fn workspace_requests_reject_bad_input() {
         ),
         (
             "a path that is not a directory",
-            add("file", workspace_path().join("Cargo.toml")),
+            add(
+                "file",
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+            ),
             "is not a directory",
         ),
         (
             "an empty name",
-            add("", workspace_path().to_path_buf()),
+            add("", workspace_path("empty")),
             "a workspace needs a name",
         ),
         (
             "a name in use",
-            add("home", workspace_path().to_path_buf()),
+            add("home", workspace_path("home")),
             "workspace home already exists",
         ),
         (
@@ -496,15 +644,7 @@ async fn removing_a_workspace_removes_its_sessions() {
     );
     let after = watch(&daemon).await;
     assert_eq!(after.workspaces, [workspace("kept")]);
-    assert_eq!(
-        after.sessions,
-        [SessionSummary {
-            session: kept,
-            workspace: "kept".to_string(),
-            status: Status::Idle { last_stop: None },
-            unread: false,
-        }]
-    );
+    assert_eq!(after.sessions, [new_summary(&kept, "kept")]);
 }
 
 #[tokio::test]
@@ -725,9 +865,15 @@ async fn prompt_errors_fail_the_turn() {
 
 #[tokio::test(start_paused = true)]
 async fn session_requests_fail_without_a_server() {
-    // The paused clock skips ahead to the initialize timeout. The agent side
-    // of this channel stays open and never answers.
-    let (silent, _agent) = Channel::duplex();
+    // The paused clock skips ahead to the initialize timeout, and restarts
+    // time out the same way. The agent side of each channel stays open and
+    // never answers.
+    let agents = Arc::new(Mutex::new(Vec::new()));
+    let silent: Launch = Box::new(move || {
+        let (client, agent) = Channel::duplex();
+        agents.lock().unwrap().push(agent);
+        client
+    });
     let cases = [
         (
             "a config error",
@@ -740,8 +886,8 @@ async fn session_requests_fail_without_a_server() {
             "initialize failed for the fake server: no answer after 30 seconds",
         ),
     ];
-    for (case, server, reason) in cases {
-        let daemon = TestDaemon::run(server);
+    for (case, launch, reason) in cases {
+        let daemon = TestDaemon::run(launch);
         let client = daemon.connect().await;
         assert_eq!(
             add_workspace(&client, "home").await,
@@ -766,4 +912,276 @@ async fn session_requests_fail_without_a_server() {
             "{case}: open_terminal works"
         );
     }
+}
+
+#[tokio::test]
+async fn saved_sessions_are_listed_at_startup() {
+    let hold = Hold::default();
+    let daemon = TestDaemon::start(&hold);
+    let client = daemon.connect().await;
+    let first = new_session(&client, "home").await;
+    let second = create_session(&client, "home").await;
+    let third = new_session(&client, "work").await;
+
+    let restarted = daemon.restart(&hold);
+
+    // Two sessions in one workspace take two pages of `session/list`.
+    assert_eq!(
+        watch(&restarted).await.sessions,
+        [
+            new_summary(&first, "home"),
+            new_summary(&second, "home"),
+            new_summary(&third, "work"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn subscribing_loads_a_saved_session() {
+    // The hold is never released, as if the daemon were killed during the
+    // turn.
+    let hold = Hold::default();
+    let daemon = TestDaemon::start(&hold);
+    let client = daemon.connect().await;
+    let session = new_session(&client, "home").await;
+    let mut subscription = subscribe(&client, &session).await;
+    assert_eq!(prompt(&client, &session, "hold").await, Response::Done);
+    subscription.wait_for(3).await;
+
+    let restarted = daemon.restart(&hold);
+
+    let transcript = transcript(&restarted, &session).await;
+    assert!(is_commands_update(&transcript[0]), "{transcript:?}");
+    assert_eq!(transcript[1..], [user_message("hold"), message("holding")]);
+}
+
+#[tokio::test]
+async fn prompting_loads_a_saved_session_first() {
+    let hold = Hold::default();
+    let daemon = TestDaemon::start(&hold);
+    let client = daemon.connect().await;
+    let session = new_session(&client, "home").await;
+    let mut watcher = watch(&daemon).await;
+    assert_eq!(prompt(&client, &session, "hi").await, Response::Done);
+    assert_eq!(
+        watcher.next_turn_end(&session).await,
+        idle(StopReason::EndTurn)
+    );
+
+    let restarted = daemon.restart(&hold);
+    let client = restarted.connect().await;
+    let mut watcher = watch(&restarted).await;
+    assert_eq!(prompt(&client, &session, "again").await, Response::Done);
+
+    assert_eq!(watcher.next_change(&session).await.status, Status::Working);
+    assert_eq!(
+        watcher.next_turn_end(&session).await,
+        idle(StopReason::EndTurn)
+    );
+    let transcript = transcript(&restarted, &session).await;
+    assert!(is_commands_update(&transcript[0]), "{transcript:?}");
+    assert_eq!(
+        transcript[1..],
+        [
+            user_message("hi"),
+            message("you "),
+            message("said: "),
+            message("hi"),
+            user_prompt("again"),
+            message("you "),
+            message("said: "),
+            message("again"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_failed_load_is_retried_by_the_next_prompt() {
+    let hold = Hold::default();
+    let daemon = TestDaemon::start(&hold);
+    let client = daemon.connect().await;
+    let session = new_session(&client, "home").await;
+    let mut watcher = watch(&daemon).await;
+    assert_eq!(
+        prompt(&client, &session, "unloadable").await,
+        Response::Done
+    );
+    watcher.next_turn_end(&session).await;
+
+    let restarted = daemon.restart(&hold);
+    let client = restarted.connect().await;
+    let mut watcher = watch(&restarted).await;
+    let subscription = subscribe(&client, &session).await;
+
+    assert_eq!(subscription.snapshot, []);
+    let error = "the fake server cannot load this session";
+    let failed = |status: &Status| {
+        matches!(status, Status::Failed { message }
+            if message.starts_with("session/load failed:") && message.contains(error))
+    };
+    let status = watcher.next_change(&session).await.status;
+    assert!(failed(&status), "{status:?}");
+    assert_eq!(
+        watch(&restarted).await.sessions.len(),
+        1,
+        "the session stays in watch"
+    );
+    assert_eq!(prompt(&client, &session, "again").await, Response::Done);
+    assert_eq!(watcher.next_change(&session).await.status, Status::Working);
+    let status = watcher.next_change(&session).await.status;
+    assert!(failed(&status), "{status:?}");
+}
+
+#[tokio::test]
+async fn session_titles_come_from_updates_and_the_list() {
+    let hold = Hold::default();
+    let daemon = TestDaemon::start(&hold);
+    let client = daemon.connect().await;
+    let session = new_session(&client, "home").await;
+    let mut watcher = watch(&daemon).await;
+
+    assert_eq!(prompt(&client, &session, "title").await, Response::Done);
+
+    assert_eq!(watcher.next_change(&session).await.status, Status::Working);
+    assert_eq!(
+        watcher.next_change(&session).await.title.as_deref(),
+        Some("tallies")
+    );
+    let restarted = daemon.restart(&hold);
+    let sessions = watch(&restarted).await.sessions;
+    assert_eq!(sessions[0].title.as_deref(), Some("tallies"));
+}
+
+#[tokio::test]
+async fn adding_a_workspace_lists_its_saved_sessions() {
+    let daemon = TestDaemon::start(&Hold::default());
+    let client = daemon.connect().await;
+    let session = new_session(&client, "home").await;
+    assert_eq!(remove_workspace(&client, "home").await, Response::Done);
+    let mut watcher = watch(&daemon).await;
+
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+
+    assert_eq!(
+        watcher.next().await,
+        Event::WorkspaceAdded {
+            workspace: workspace("home")
+        }
+    );
+    assert_eq!(
+        watcher.next_change(&session).await,
+        new_summary(&session, "home")
+    );
+}
+
+#[tokio::test]
+async fn server_exit_fails_the_running_turn() {
+    // (script, whether it waits for a permission answer)
+    let cases = [("hold", false), ("tool", true)];
+    for (script, asks) in cases {
+        let daemon = TestDaemon::start(&Hold::default());
+        let client = daemon.connect().await;
+        let session = new_session(&client, "home").await;
+        let mut watcher = watch(&daemon).await;
+        assert_eq!(prompt(&client, &session, script).await, Response::Done);
+        assert_eq!(
+            watcher.next_change(&session).await.status,
+            Status::Working,
+            "{script}"
+        );
+        let request_id = if asks {
+            Some(requests(watcher.next_change(&session).await)[0].request_id)
+        } else {
+            None
+        };
+
+        daemon.kill_server();
+
+        let summary = watcher.next_change(&session).await;
+        assert_eq!(
+            summary.status,
+            Status::Failed {
+                message: SERVER_EXIT.to_string()
+            },
+            "{script}"
+        );
+        assert!(summary.unread, "{script}");
+        let transcript = transcript(&daemon, &session).await;
+        let errors = transcript
+            .iter()
+            .filter(|entry| matches!(entry, Entry::TurnError { .. }))
+            .count();
+        assert_eq!(errors, 1, "{script}: {transcript:?}");
+        assert_eq!(
+            transcript.last(),
+            Some(&turn_error(SERVER_EXIT)),
+            "{script}"
+        );
+        if let Some(request_id) = request_id {
+            assert_eq!(
+                answer(&client, &session, request_id, "go").await,
+                Response::Error {
+                    message: format!("permission request {request_id} is resolved")
+                },
+                "{script}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn subscribed_sessions_reload_after_the_server_restarts() {
+    let daemon = TestDaemon::start(&Hold::default());
+    let client = daemon.connect().await;
+    let session = new_session(&client, "home").await;
+    let mut subscription = subscribe(&client, &session).await;
+    let mut watcher = watch(&daemon).await;
+    assert_eq!(prompt(&client, &session, "hold").await, Response::Done);
+    subscription.wait_for(3).await;
+
+    daemon.kill_server();
+
+    assert_eq!(subscription.wait_for(4).await[3], turn_error(SERVER_EXIT));
+    let snapshot = subscription.next_snapshot().await.to_vec();
+    assert!(is_commands_update(&snapshot[0]), "{snapshot:?}");
+    assert_eq!(
+        snapshot[1..],
+        [
+            user_message("hold"),
+            message("holding"),
+            turn_error(SERVER_EXIT)
+        ]
+    );
+    let failed = Status::Failed {
+        message: SERVER_EXIT.to_string(),
+    };
+    assert_eq!(watcher.next_turn_end(&session).await, failed);
+    assert_eq!(watch(&daemon).await.sessions[0].status, failed);
+    assert_eq!(prompt(&client, &session, "again").await, Response::Done);
+    assert_eq!(
+        watcher.next_turn_end(&session).await,
+        idle(StopReason::EndTurn)
+    );
+}
+
+#[tokio::test]
+async fn without_history_capabilities_old_sessions_cannot_be_prompted() {
+    let daemon = TestDaemon::start_with(&Hold::default(), SavedHistory::unadvertised());
+    let client = daemon.connect().await;
+    let old = new_session(&client, "home").await;
+    let before = subscribe(&client, &old).await.wait_for(1).await.to_vec();
+
+    daemon.kill_server();
+
+    let new = create_session_after_restart(&client, "home").await;
+    assert_eq!(
+        prompt(&client, &old, "hi").await,
+        Response::Error {
+            message: format!("the server cannot load session {old}")
+        }
+    );
+    assert_eq!(transcript(&daemon, &old).await, before);
+    let mut watcher = watch(&daemon).await;
+    assert_eq!(prompt(&client, &new, "hi").await, Response::Done);
+    assert_eq!(watcher.next_turn_end(&new).await, idle(StopReason::EndTurn));
 }

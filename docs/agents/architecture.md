@@ -61,7 +61,9 @@ depending on Ox's implementation.
 The daemon starts the configured server as a child and keeps one ACP connection
 to it. Sessions across workspaces use that connection. If the server exits,
 active turns fail; the daemon starts it again and restores history where
-supported (milestone 4).
+supported. The supervisor waits 1 second before starting the server again. Each
+failed start doubles the wait, up to 30 seconds, and a successful `initialize`
+resets it.
 
 ### The ACP server owns saved history
 
@@ -76,11 +78,26 @@ after a restart.
 
 For each workspace, the sidebar combines newly created sessions with those
 returned by `session/list` when supported, following its pagination and using
-their titles and last activity. `session_info_update`, when sent, keeps those
-details current during a turn. A session with no title yet shows as "New
-session". Selecting a session shows its thread; the daemon loads its saved
-transcript automatically the first time it is needed for viewing or prompting,
-when loading is supported. Newly created sessions are already loaded.
+their titles and last activity. The daemon calls `session/list` for every
+workspace after each `initialize`, and for a workspace when it is added. A
+workspace whose list fails shows only the sessions the daemon already has.
+`session_info_update`, when sent, live or replayed, keeps those details
+current. A session with no title yet shows as "New session". Selecting a
+session shows its thread; the daemon loads its saved transcript automatically
+the first time it is needed for viewing or prompting, when loading is
+supported. Newly created sessions are already loaded.
+
+A load starts when a daemon client subscribes to an unloaded session that is
+not `Failed`, when a daemon client prompts an unloaded session, and, after the
+server restarts, for every unloaded session with subscribers. A `subscribe`
+that starts a load, or arrives during one, gets its session snapshot and its
+response when the load ends. A prompt that starts a load answers once
+`session/load` is sent, sets `Working`, and sends the prompt when the load
+succeeds. If the transcript being replaced ends with a turn error entry, that
+entry is kept after the replay, so the error of a turn the server exit
+interrupted survives the reload. Without `loadSession`, sessions from an
+earlier ACP connection keep their transcripts in memory but cannot be
+prompted.
 
 The daemon's own state file (`$XDG_STATE_HOME/ur/state.json`, under
 `~/.local/state` when the variable is unset) holds workspace names and absolute
@@ -320,16 +337,23 @@ so the webview writes no protocol types by hand.
   it is held only for the lock, and updates reach `State` in the order the
   server sent them. Replay from `session/load` arrives through the same handler
   and the same `apply_update`.
-- The supervisor calls `connect_with`, sends `initialize`, stores a clone of
-  `ConnectionTo<Agent>` in `State`, and awaits a shutdown-or-closed signal. The
-  daemon accepts socket connections only after `initialize`, so no request sees
-  a server that is still starting. A server that has not answered after 30
-  seconds counts as a failed `initialize`, so it cannot block terminals. Each
-  connection has a generation number carried on every op result; `State`
-  ignores anything from an earlier generation. On exit the supervisor fails
-  `Working` and `NeedsPermission` sessions, clears pending requests, bumps the
-  generation, and reconnects with backoff.
-- The guard lives in `State` as `session.op`. Under the lock: if `op` is set,
+- The supervisor calls `connect_with`, sends `initialize`, lists every
+  workspace's saved sessions, stores a clone of `ConnectionTo<Agent>` and the
+  server's capabilities in `State`, reloads subscribed sessions, and awaits
+  the ACP connection's close. The daemon accepts socket connections only after
+  the first `initialize`, so no request sees a server that is still starting.
+  A server that has not answered `initialize` and the lists after 30 seconds
+  counts as a failed `initialize`, so it cannot block terminals. Each
+  successful `initialize` starts a new generation, carried on every prompt and
+  load result; `State` ignores anything from an earlier generation. On exit
+  the supervisor fails `Working` and `NeedsPermission` sessions, clears
+  pending requests, marks every session unloaded, releases every operation
+  guard, and starts the server again with backoff.
+- The guard lives in `State` as `session.op`, an `Op`: `Prompt` while a turn
+  runs, or `Load` while `session/load` is in flight. `Load` holds the replayed
+  entries, which become the transcript only on success, and the `subscribe`
+  requests waiting for the load. During a load, `apply_update` adds to the
+  replay and sends nothing to subscribers. Under the lock: if `op` is set,
   return busy; otherwise send the request through the connection clone, set
   `op`, and, for a prompt, append the user prompt entry and set `Working`.
   Sending under the lock means a failed send leaves nothing to undo, and the
@@ -340,7 +364,11 @@ so the webview writes no protocol types by hand.
   the server's first update for it is handled, and the `session/prompt`
   callback clears `op` only after the turn's last update is in the transcript.
   The callbacks always return `Ok`, because an error from one shuts down the
-  ACP connection. Delete holds `op` through cancel, wait, and delete.
+  ACP connection. A prompt or load callback ignores the error a request gets
+  when the ACP connection closes, which can arrive before or after the
+  supervisor sees the close; the supervisor records that server exit, so each
+  interrupted turn gets one turn error entry. Delete holds `op` through
+  cancel, wait, and delete.
 - Pending permission requests hold their SDK `Responder` in
   `Session.responders`, keyed by request ID; `answer_permission` and
   cancellation respond through it.
@@ -457,7 +485,8 @@ configured command and arguments (see the SDK's
 `examples/yolo_one_shot_client.rs`). Requests to the server go through a clone
 of `ConnectionTo<Agent>`, and ops handle their responses in
 `on_receiving_result` callbacks as described under Daemon architecture. Only
-`initialize`, sent from the supervisor before any session exists, is awaited
-with `block_task()`.
+`initialize` and `session/list` are awaited with `block_task()`: the
+supervisor, which is not a handler, awaits `initialize` and the lists after
+it, and a spawned task awaits the list for a workspace that was just added.
 PTY reads stay on a blocking thread. The app's core runs the socket connection
 on Tauri's Tokio runtime.
