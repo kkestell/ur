@@ -77,15 +77,15 @@
   <line x1="40" y1="460" x2="600" y2="460" class="rule"/>
   <rect x="56" y="370" width="200" height="9" class="bar"/>
   <text x="60" y="490" class="mono" xml:space="preserve">Try this with a cheaper model.</text>
-  <rect x="300" y="366" width="284" height="110" rx="4" fill="#252525" stroke="#3a3a3a"/>
-  <use href="#search" x="312" y="376" width="12" height="12" class="icon-muted"/>
-  <text x="332" y="386" class="muted">Filter</text>
-  <line x1="300" y1="396" x2="584" y2="396" class="rule"/>
-  <text x="332" y="416">DeepSeek: DeepSeek V4.1 Flash</text>
-  <rect x="301" y="424" width="282" height="24" fill="#2c2c2c"/>
-  <use href="#check" x="312" y="430" width="12" height="12" class="icon"/>
-  <text x="332" y="440">Z.ai: GLM 5.3 Flash</text>
-  <text x="332" y="464">Meta: Muse Spark 1.3</text>
+  <rect x="300" y="446" width="284" height="110" rx="4" fill="#252525" stroke="#3a3a3a"/>
+  <use href="#search" x="312" y="456" width="12" height="12" class="icon-muted"/>
+  <text x="332" y="466" class="muted">Filter</text>
+  <line x1="300" y1="476" x2="584" y2="476" class="rule"/>
+  <text x="332" y="496">DeepSeek: DeepSeek V4.1 Flash</text>
+  <rect x="301" y="504" width="282" height="24" fill="#2c2c2c"/>
+  <use href="#check" x="312" y="510" width="12" height="12" class="icon"/>
+  <text x="332" y="520">Z.ai: GLM 5.3 Flash</text>
+  <text x="332" y="544">Meta: Muse Spark 1.3</text>
   <use href="#ring" x="298" y="568" width="12" height="12" class="icon-muted"/>
   <text x="318" y="578">glm-5.3-flash ⌄</text>
   <text x="434" y="578">Default ⌄</text>
@@ -112,7 +112,7 @@
   <!-- Key -->
   <g font-size="11">
     <circle cx="48" cy="650" r="8" class="num"/><text x="48" y="654" class="num-text">1</text>
-    <text x="64" y="654">Typing / lists /compact and Ox's skills from available_commands_update. Enter inserts one.</text>
+    <text x="64" y="654">Typing / lists the server's advertised commands. Enter inserts one.</text>
     <circle cx="48" cy="674" r="8" class="num"/><text x="48" y="678" class="num-text">2</text>
     <text x="64" y="678">The ring fills with context use. Hovering shows tokens used, the context size, and the session's cost.</text>
     <circle cx="640" cy="650" r="8" class="num"/><text x="640" y="654" class="num-text">3</text>

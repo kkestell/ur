@@ -90,7 +90,7 @@
   <text x="336" y="363">Apply patch to 2 files</text>
 
   <line x1="280" y1="560" x2="740" y2="560" class="rule"/>
-  <text x="300" y="590" class="mono muted">Message Ox — / for commands</text>
+  <text x="300" y="590" class="mono muted">Message agent — / for commands</text>
   <use href="#ring" x="440" y="668" width="12" height="12" class="icon-muted"/>
   <text x="458" y="678">glm-5.3-flash ⌄</text>
   <text x="574" y="678">Default ⌄</text>
@@ -104,6 +104,7 @@
   <line x1="910" y1="80" x2="1180" y2="80" class="rule"/>
   <use href="#terminal" x="754" y="58" width="12" height="12" class="icon"/>
   <text x="774" y="68">npm run dev</text>
+  <use href="#cross" x="886" y="58" width="12" height="12" class="icon"/>
   <use href="#plus" x="1134" y="58" width="12" height="12" class="icon"/>
   <use href="#split" x="1156" y="58" width="12" height="12" class="icon"/>
   <text x="756" y="104" class="mono" font-size="11">&gt; site@1.0.0 dev</text>
@@ -134,7 +135,7 @@
   <text x="804" y="530">OpenRouter returned 429 (rate limited)</text>
 
   <line x1="740" y1="580" x2="1180" y2="580" class="rule"/>
-  <text x="756" y="606" class="mono muted">Message Ox — / for commands</text>
+  <text x="756" y="606" class="mono muted">Message agent — / for commands</text>
   <use href="#ring" x="880" y="668" width="12" height="12" class="icon-muted"/>
   <text x="898" y="678">glm-5.3-flash ⌄</text>
   <text x="1014" y="678">Default ⌄</text>
@@ -163,14 +164,14 @@
     <circle cx="48" cy="730" r="8" class="num"/><text x="48" y="734" class="num-text">1</text>
     <text x="64" y="734">Terminals belong to a workspace and are listed under it.</text>
     <circle cx="48" cy="754" r="8" class="num"/><text x="48" y="758" class="num-text">2</text>
-    <text x="64" y="758">A tab shows the kind (agent or terminal) and the status. Hovering shows close; closing leaves it running.</text>
+    <text x="64" y="758">A tab shows its kind and status. Hovering shows Close Tab, which leaves it running.</text>
     <circle cx="48" cy="778" r="8" class="num"/><text x="48" y="782" class="num-text">3</text>
-    <text x="64" y="782">+ opens New Session and New Terminal, both in this pane's workspace.</text>
+    <text x="64" y="782">+ opens New Session and New Terminal in the active tab's workspace.</text>
     <circle cx="640" cy="730" r="8" class="num"/><text x="640" y="734" class="num-text">4</text>
     <text x="656" y="734">Split opens this menu. Dragging a tab onto a pane edge also splits.</text>
     <circle cx="640" cy="754" r="8" class="num"/><text x="640" y="758" class="num-text">5</text>
-    <text x="656" y="758">A terminal pane is the iced_term view from the PTY spike. It has no agent status.</text>
+    <text x="656" y="758">Closing the GUI leaves terminal applications running.</text>
     <circle cx="640" cy="778" r="8" class="num"/><text x="640" y="782" class="num-text">6</text>
-    <text x="656" y="782">A failed turn ends with its error. The next prompt clears it.</text>
+    <text x="656" y="782">The error stays in the thread. The next prompt clears the Failed status.</text>
   </g>
 </svg>

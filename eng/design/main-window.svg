@@ -67,7 +67,7 @@
   <text x="72" y="306">Update deps</text>
 
   <!-- Thread header -->
-  <text x="296" y="68">Sketch the JSON frame types for the daemon protocol.</text>
+  <text x="296" y="68">Wire protocol v2</text>
   <use href="#plus" x="1156" y="58" width="12" height="12" class="icon"/>
   <line x1="280" y1="80" x2="1180" y2="80" class="rule"/>
 
@@ -110,7 +110,7 @@
 
   <!-- Message editor -->
   <line x1="280" y1="560" x2="1180" y2="560" class="rule"/>
-  <text x="300" y="590" class="mono muted">Message Ox — / for commands</text>
+  <text x="300" y="590" class="mono muted">Message agent — / for commands</text>
   <use href="#ring" x="878" y="668" width="12" height="12" class="icon-muted"/>
   <text x="898" y="678">glm-5.3-flash ⌄</text>
   <text x="1014" y="678">Default ⌄</text>
@@ -139,14 +139,14 @@
     <circle cx="48" cy="802" r="8" class="num"/><text x="48" y="806" class="num-text">4</text>
     <text x="64" y="806">User messages sit in a box, in the buffer font.</text>
     <circle cx="48" cy="826" r="8" class="num"/><text x="48" y="830" class="num-text">5</text>
-    <text x="64" y="830">Shell commands are filled blocks with the command in full.</text>
+    <text x="64" y="830">Execute tools are filled blocks showing the title supplied by the server.</text>
     <circle cx="640" cy="730" r="8" class="num"/><text x="640" y="734" class="num-text">6</text>
     <text x="656" y="734">Thinking and other tool calls are an icon and a title. Clicking one expands its content.</text>
     <circle cx="640" cy="754" r="8" class="num"/><text x="640" y="758" class="num-text">7</text>
     <text x="656" y="758">Copies the response to the clipboard as Markdown.</text>
     <circle cx="640" cy="778" r="8" class="num"/><text x="640" y="782" class="num-text">8</text>
-    <text x="656" y="782">Typing / lists the slash commands Ox sends in available_commands_update.</text>
+    <text x="656" y="782">Typing / lists the slash commands advertised by the server.</text>
     <circle cx="640" cy="802" r="8" class="num"/><text x="640" y="806" class="num-text">9</text>
-    <text x="656" y="806">Context ring (hover for tokens and cost), one picker per ACP config option, then Send.</text>
+    <text x="656" y="806">Usage when reported, one picker per supplied ACP config option, then Send.</text>
   </g>
 </svg>

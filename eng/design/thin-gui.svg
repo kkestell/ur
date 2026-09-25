@@ -75,7 +75,7 @@
 
   <!-- Message editor -->
   <line x1="280" y1="560" x2="1180" y2="560" class="rule"/>
-  <text x="300" y="590" class="mono muted" xml:space="preserve">Message Ox</text>
+  <text x="300" y="590" class="mono muted" xml:space="preserve">Message agent</text>
   <use href="#send" x="1148" y="668" width="12" height="12" class="icon"/>
 
   <!-- Callouts -->
@@ -87,7 +87,7 @@
   <!-- Key -->
   <g font-size="11">
     <circle cx="48" cy="730" r="8" class="num"/><text x="48" y="734" class="num-text">1</text>
-    <text x="64" y="734">Workspaces and their open sessions from watch, in the order they were added.</text>
+    <text x="64" y="734">Workspaces and their sessions from watch. Click a session to view its thread.</text>
     <circle cx="48" cy="754" r="8" class="num"/><text x="48" y="758" class="num-text">2</text>
     <text x="64" y="758">Thoughts are plain text, dimmer than the agent's messages.</text>
     <circle cx="640" cy="730" r="8" class="num"/><text x="640" y="734" class="num-text">3</text>

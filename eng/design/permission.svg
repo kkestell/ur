@@ -67,7 +67,7 @@
   <text x="72" y="306">Update deps</text>
 
   <!-- Thread header -->
-  <text x="296" y="68">Review src/subagents.rs and run the full test suite.</text>
+  <text x="296" y="68">Add subagents review</text>
   <use href="#plus" x="1156" y="58" width="12" height="12" class="icon"/>
   <line x1="280" y1="80" x2="1180" y2="80" class="rule"/>
 
@@ -105,7 +105,7 @@
 
   <!-- Message editor while the turn runs -->
   <line x1="280" y1="560" x2="1180" y2="560" class="rule"/>
-  <text x="300" y="590" class="mono muted">Message Ox — / for commands</text>
+  <text x="300" y="590" class="mono muted">Message agent — / for commands</text>
   <use href="#ring" x="878" y="668" width="12" height="12" class="icon-muted"/>
   <text x="898" y="678">glm-5.3-flash ⌄</text>
   <text x="1014" y="678">High ⌄</text>
@@ -122,15 +122,15 @@
   <!-- Key -->
   <g font-size="11">
     <circle cx="48" cy="730" r="8" class="num"/><text x="48" y="734" class="num-text">1</text>
-    <text x="64" y="734">The session waiting for permission. The dot stays until the request is answered.</text>
+    <text x="64" y="734">The dot marks a session with pending permission requests.</text>
     <circle cx="48" cy="754" r="8" class="num"/><text x="48" y="758" class="num-text">2</text>
-    <text x="64" y="758">The pending tool call opens with its working directory and full command.</text>
+    <text x="64" y="758">The pending tool call opens with the details supplied by the server.</text>
     <circle cx="48" cy="778" r="8" class="num"/><text x="48" y="782" class="num-text">3</text>
     <text x="64" y="782">One row per option in the request. The icon comes from the option kind (allow or reject). The first answer wins.</text>
     <circle cx="640" cy="730" r="8" class="num"/><text x="640" y="734" class="num-text">4</text>
     <text x="656" y="734">Turn status while the agent waits.</text>
     <circle cx="640" cy="754" r="8" class="num"/><text x="640" y="758" class="num-text">5</text>
-    <text x="656" y="758">While a turn runs, Send becomes Stop. Stop sends session/cancel and</text>
-    <text x="656" y="774">answers the pending request as cancelled. Picker changes apply to the next turn.</text>
+    <text x="656" y="758">While a turn runs, Send becomes Stop. Stop cancels the turn and all</text>
+    <text x="656" y="774">pending permission requests. Picker changes apply to the next turn.</text>
   </g>
 </svg>
