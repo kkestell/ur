@@ -27,6 +27,7 @@ pub struct Client {
 struct Routes {
     pending: HashMap<u64, oneshot::Sender<Response>>,
     pty: HashMap<TerminalId, mpsc::UnboundedSender<Bytes>>,
+    events: Option<mpsc::UnboundedSender<Event>>,
     closed: bool,
 }
 
@@ -54,7 +55,7 @@ impl Client {
                 reader_routes.lock().unwrap().deliver(frame);
             }
             // Dropping the senders fails pending requests and closes every
-            // `pty` receiver.
+            // `pty` and `events` receiver.
             let mut routes = reader_routes.lock().unwrap();
             *routes = Routes {
                 closed: true,
@@ -95,6 +96,18 @@ impl Client {
         receiver
     }
 
+    /// Receives every event until the socket connection ends. Call this
+    /// before the request whose events are wanted, such as `subscribe`. A
+    /// later call closes the earlier receiver.
+    pub fn events(&self) -> mpsc::UnboundedReceiver<Event> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let mut routes = self.routes.lock().unwrap();
+        if !routes.closed {
+            routes.events = Some(sender);
+        }
+        receiver
+    }
+
     pub fn pty_input(&self, id: TerminalId, bytes: Bytes) -> io::Result<()> {
         self.send(Frame::Pty { id, bytes })
     }
@@ -113,10 +126,15 @@ impl Routes {
                         let _ = sender.send(response);
                     }
                 }
-                Ok(DaemonMessage::Event {
-                    event: Event::TerminalExited { terminal },
-                }) => {
-                    self.pty.remove(&terminal);
+                Ok(DaemonMessage::Event { event }) => {
+                    if let Event::TerminalExited { terminal } = &event {
+                        self.pty.remove(terminal);
+                    }
+                    if let Some(sender) = &self.events
+                        && sender.send(event).is_err()
+                    {
+                        self.events = None;
+                    }
                 }
                 Err(error) => eprintln!("ur-client: bad message from the daemon: {error}"),
             },

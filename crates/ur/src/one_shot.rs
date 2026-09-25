@@ -2,21 +2,20 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, Implementation, InitializeRequest, NewSessionRequest,
-    PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionNotification, StopReason,
+    CancelNotification, ContentBlock, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    SessionNotification, StopReason,
 };
 use agent_client_protocol::{
     AcpAgent, AcpAgentConfig, Agent, Client, ConnectTo, ConnectionTo, Error,
     on_receive_notification, on_receive_request,
 };
-use anyhow::bail;
 use serde::Serialize;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 
 use crate::config::Config;
+use crate::daemon::acp;
 
 /// Runs `agent-run` against the server in the config file, answering
 /// permission requests from stdin.
@@ -97,20 +96,8 @@ async fn prompt_once<W: Write>(
     prompt: String,
     output: &Mutex<W>,
 ) -> anyhow::Result<StopReason> {
-    let initialize = connection
-        .send_request(
-            InitializeRequest::new(ProtocolVersion::V1)
-                .client_info(Implementation::new("ur", env!("CARGO_PKG_VERSION"))),
-        )
-        .block_task()
-        .await?;
+    let initialize = acp::initialize(&connection).await?;
     print_json(output, &initialize)?;
-    if initialize.protocol_version != ProtocolVersion::V1 {
-        bail!(
-            "the server uses ACP version {}; ur supports only version 1",
-            initialize.protocol_version
-        );
-    }
     let session = connection
         .send_request(NewSessionRequest::new(cwd))
         .block_task()
@@ -171,8 +158,9 @@ fn acp_name(value: impl Serialize) -> String {
 #[cfg(test)]
 mod tests {
     use agent_client_protocol::Channel;
+    use agent_client_protocol::schema::ProtocolVersion;
     use agent_client_protocol::schema::v1::{
-        ContentChunk, InitializeResponse, NewSessionResponse, PermissionOption,
+        ContentChunk, InitializeRequest, InitializeResponse, NewSessionResponse, PermissionOption,
         PermissionOptionKind, PromptResponse, SessionUpdate, ToolCall, ToolCallUpdate,
         ToolCallUpdateFields,
     };

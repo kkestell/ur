@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -14,7 +14,10 @@ const WAIT_MS = 10_000;
 
 type Browser = Awaited<ReturnType<typeof remote>>;
 
-/** One test's temporary directory and daemon, and the GUI launches made in it. */
+/**
+ * One test's temporary directory and daemon, and the GUI launches made in it.
+ * The daemon's config file launches the fake server.
+ */
 export class TestEnvironment {
   readonly home: string;
   readonly #dir: string;
@@ -29,14 +32,21 @@ export class TestEnvironment {
     this.#socket = join(dir, "ur.sock");
     this.home = join(dir, "home");
     this.#state = join(dir, "state");
+    const config = join(dir, "config");
     mkdirSync(this.home);
     mkdirSync(this.#state);
+    mkdirSync(join(config, "ur"), { recursive: true });
+    writeFileSync(
+      join(config, "ur/config.toml"),
+      `[server]\ncommand = ${JSON.stringify(join(BIN, "ur-fake-server"))}\n`,
+    );
     // `/bin/sh` keeps user shell configuration out of the terminals.
     this.#daemon = spawn(join(BIN, "ur"), ["daemon"], {
       env: {
         ...process.env,
         UR_SOCKET: this.#socket,
         HOME: this.home,
+        XDG_CONFIG_HOME: config,
         XDG_STATE_HOME: this.#state,
         SHELL: "/bin/sh",
       },

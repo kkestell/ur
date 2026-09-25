@@ -225,6 +225,9 @@ One Cargo workspace:
 - `crates/ur`: the `ur` binary, which is the daemon and the CLI.
 - `crates/ur-client`: the frame format, the request and event types, and an
   async client for the socket. The CLI and the GUI both use it.
+- `crates/ur-fake-server`: the fake server, a scripted server built with the
+  SDK's `Agent.builder()`. The daemon's tests run its library in process, and
+  the end-to-end suite's daemon launches its binary from the config file.
 - `app/`: the Tauri 2 app. `app/src` is the frontend, React and TypeScript built
   with Vite. `app/src-tauri` is the app's Rust core, a workspace member that
   depends on `ur-client`. `pnpm tauri dev` runs it against a daemon that is
@@ -238,15 +241,14 @@ crates/ur/src/
   one_shot.rs     agent-run; speaks ACP directly, no daemon
   cli/            one file per subcommand; each uses ur_client::Client only
   daemon/
-    mod.rs        start(): read state.json, spawn the supervisor, the ingest
-                  task, and the listener
+    mod.rs        start(): read state.json and the config file, start the
+                  supervisor, wait for initialize, then serve the listener
     state.rs      State: workspaces, sessions, terminals, subscriber lists.
                   Pure: no IO, no await.
     acp.rs        supervisor loop around connect_with, restart with backoff,
                   Agent facade over ConnectionTo<Agent>
-    ingest.rs     drains the AcpIncoming channel into State, then publishes
-    ops.rs        prompt, load, delete, cancel, answer_permission as spawned
-                  tasks
+    ops.rs        prompt, load, delete, cancel, answer_permission, with
+                  responses handled in on_receiving_result callbacks
     terminal.rs   portable-pty plus vt100, one struct per terminal
     server.rs     Unix socket accept loop, per-connection reader and writer,
                   Outbox
@@ -294,29 +296,38 @@ so the webview writes no protocol types by hand.
 ### Daemon architecture
 
 - One `Arc<Mutex<State>>` with a std mutex, never held across an await. Every
-  mutation is a method on `State` that returns the events to publish. The caller
-  drops the lock, then pushes to outboxes. Snapshot and subscriber registration
-  happen inside one method, which gives the ordering guarantee under Wire
-  protocol. An outbox is a bounded `mpsc::Sender<Frame>` used with `try_send`; a
-  full outbox closes that connection.
-- ACP handlers only forward. The notification handler sends
-  `AcpIncoming::Update` and the permission handler sends
-  `AcpIncoming::Permission(request, responder)` on an unbounded channel, then
-  returns. The SDK runs every handler on one event loop, so handlers do no other
-  work. The ingest task is the single writer of ACP data into `State`, which
-  gives total order. Replay from `session/load` arrives through the same handler
+  mutation is a method on `State` that queues its events on the affected
+  outboxes while the lock is held. An outbox is a bounded `mpsc::Sender<Frame>`
+  used with `try_send`, which never waits, so `State` still does no IO and no
+  awaiting; a full outbox closes that connection. A subscriber's snapshot and
+  every later entry are queued under the same lock, in transcript order, which
+  gives the ordering guarantee under Wire protocol.
+- ACP handlers apply what they receive to `State` directly. The notification
+  handler locks `State`, appends the ACP update entry, queues its event, and
+  returns without awaiting. The SDK's dispatch loop waits for each handler, so
+  it is held only for the lock, and updates reach `State` in the order the
+  server sent them. Replay from `session/load` arrives through the same handler
   and the same `apply_update`.
-- The supervisor calls `connect_with`, stores a clone of `ConnectionTo<Agent>`
-  in `State`, and awaits a shutdown-or-closed signal. Each connection has a
-  generation number carried on every `AcpIncoming` and every op result; `State`
-  ignores anything from an earlier generation. On exit the supervisor fails
-  `Working` and `NeedsPermission` sessions, clears pending requests, bumps the
-  generation, and reconnects with backoff.
-- Ops are spawned tasks, and the guard lives in `State` as `session.op`. Under
-  the lock: if `op` is set, return busy; otherwise set it and, for a prompt,
-  append the user prompt entry and set `Working`. Send the request through the
-  connection clone and await it. Under the lock again: clear `op` and apply the
-  result. Delete holds `op` through cancel, wait, and delete.
+- The supervisor calls `connect_with`, sends `initialize`, stores a clone of
+  `ConnectionTo<Agent>` in `State`, and awaits a shutdown-or-closed signal. The
+  daemon accepts socket connections only after `initialize`, so no request sees
+  a server that is still starting. Each connection has a generation number
+  carried on every op result; `State` ignores anything from an earlier
+  generation. On exit the supervisor fails `Working` and `NeedsPermission`
+  sessions, clears pending requests, bumps the generation, and reconnects with
+  backoff.
+- The guard lives in `State` as `session.op`. Under the lock: if `op` is set,
+  return busy; otherwise send the request through the connection clone, set
+  `op`, and, for a prompt, append the user prompt entry and set `Working`.
+  Sending under the lock means a failed send leaves nothing to undo, and the
+  server's first update waits for the lock, so it follows the user prompt
+  entry. The op handles the response in an `on_receiving_result` callback,
+  never `block_task()`: the SDK runs that callback before it dispatches the
+  server's next message. So the `session/new` callback adds the session before
+  the server's first update for it is handled, and the `session/prompt`
+  callback clears `op` only after the turn's last update is in the transcript.
+  The callbacks always return `Ok`, because an error from one shuts down the
+  ACP connection. Delete holds `op` through cancel, wait, and delete.
 - Pending permission requests hold their SDK `Responder` in `Session.pending`;
   `answer_permission` and cancellation respond through it.
 - `Entry`, `Status`, and the snapshot structs are defined in `ur-client` and
@@ -426,10 +437,13 @@ no TCP listener and no auth code.
 
 The daemon runs on Tokio, because the ACP Rust SDK (`agent-client-protocol`
 2.1.0) is async. The supervisor in `daemon/acp.rs` uses `Client.builder()` with
-the forwarding handlers for `SessionNotification` and `RequestPermissionRequest`
-described under Daemon architecture, and `connect_with` to an `AcpAgent` built
-from the configured command and arguments (see the SDK's
+the handlers for `SessionNotification` and `RequestPermissionRequest` described
+under Daemon architecture, and `connect_with` to an `AcpAgent` built from the
+configured command and arguments (see the SDK's
 `examples/yolo_one_shot_client.rs`). Requests to the server go through a clone
-of `ConnectionTo<Agent>` from ordinary Tokio tasks, awaited with `block_task()`.
+of `ConnectionTo<Agent>`, and ops handle their responses in
+`on_receiving_result` callbacks as described under Daemon architecture. Only
+`initialize`, sent from the supervisor before any session exists, is awaited
+with `block_task()`.
 PTY reads stay on a blocking thread. The app's core runs the socket connection
 on Tauri's Tokio runtime.

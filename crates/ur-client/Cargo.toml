@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+agent-client-protocol-schema.workspace = true
 bytes.workspace = true
 futures.workspace = true
 serde.workspace = true

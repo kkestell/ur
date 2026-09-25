@@ -5,7 +5,8 @@ Run `cargo test --workspace` for the Rust test suite and
 --workspace` for a debug build.
 
 Test ACP behavior against a test agent built with the SDK's `Agent.builder()` in
-the test process, without a model provider or Ox. Use Ox for live end-to-end
+the test process, without a model provider or Ox. The daemon's tests run the
+fake server in process over `Channel::duplex()`. Use Ox for live end-to-end
 checks, including each milestone's check in `eng/todo.md`.
 
 ## Test discipline
@@ -33,8 +34,9 @@ guarantee, and the suite changes as the guarantees change.
 
 `pnpm -C app e2e` builds the daemon and the app, with its embedded WebDriver
 server, into `target/e2e`, then runs the tests in `app/e2e/` one at a time. Each
-test gets a `TestEnvironment`: a temporary directory for the socket, `HOME`, and
-the GUI state file, and a daemon started in it. A failing test saves a
+test gets a `TestEnvironment`: a temporary directory for the socket, `HOME`, the
+GUI state file, and a config file that launches the fake server, and a daemon
+started in it. A failing test saves a
 screenshot to `app/e2e/artifacts/` for diagnosis.
 
 Tests assert on terminal text, read from the xterm.js rows, and on whether input

@@ -59,6 +59,10 @@
   requirements.
 - **Test agent**: A server built with the SDK's `Agent.builder()` inside a test
   process. It exercises ACP without a model provider or Ox.
+- **Fake server**: The scripted server in `crates/ur-fake-server`. Its binary is
+  what the daemon launches in end-to-end tests, and its library is the test
+  agent in the daemon's tests. The prompt's text chooses its script: `hold`,
+  `tool`, or a reply.
 - **Daemon**: The long-running `ur daemon` process. It owns the ACP connection,
   session statuses, in-memory transcripts, pending permission requests, and
   terminals, and serves daemon clients on the socket.
@@ -101,14 +105,10 @@
 - **Supervisor**: The daemon task in `daemon/acp.rs` that launches the server,
   holds the ACP connection, and reconnects with backoff when the server exits.
 - **Generation**: A number identifying one ACP connection. It is carried on
-  every `AcpIncoming` and op result, and `State` ignores anything from an
-  earlier generation.
-- **Ingest task**: The daemon task that drains the `AcpIncoming` channel into
-  `State` and publishes the resulting events. It is the only writer of ACP data
-  into `State`.
+  every op result, and `State` ignores anything from an earlier generation.
 - **`State`**: The daemon's in-memory workspaces, sessions, terminals, and
-  subscriber lists behind one std mutex. Every mutation is a method that returns
-  the events to publish and does no IO.
+  subscriber lists behind one std mutex. Every mutation is a method that queues
+  its events on the affected outboxes while the lock is held, and does no IO.
 - **Outbox**: A bounded `mpsc::Sender<Frame>` for one socket connection. A full
   outbox closes that connection.
 

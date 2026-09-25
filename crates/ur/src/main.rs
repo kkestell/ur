@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+mod cli;
 mod config;
 mod daemon;
 mod one_shot;
@@ -19,6 +20,17 @@ enum Command {
     Daemon,
     /// Run one prompt against the configured server without a daemon.
     AgentRun { workspace: PathBuf, prompt: String },
+    /// Create a session in `path` and print its ID.
+    New { path: PathBuf },
+    /// Send a text prompt to a session.
+    Prompt { session: String, text: String },
+    /// Print a session's transcript as JSON lines.
+    Read {
+        session: String,
+        /// Keep printing new entries until the daemon closes the connection.
+        #[arg(long)]
+        follow: bool,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -28,6 +40,9 @@ fn main() -> anyhow::Result<()> {
         match command {
             Command::Daemon => daemon::start(&ur_client::socket_path()).await,
             Command::AgentRun { workspace, prompt } => one_shot::start(&workspace, prompt).await,
+            Command::New { path } => cli::new::start(&path).await,
+            Command::Prompt { session, text } => cli::prompt::start(session, text).await,
+            Command::Read { session, follow } => cli::read::start(session, follow).await,
         }
     });
     // Tokio reads stdin with a blocking read that cannot be cancelled. If

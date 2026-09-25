@@ -20,3 +20,4 @@ vt100.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+ur-fake-server.workspace = true

@@ -11,20 +11,33 @@ Map each file here as it is added, following the project layout in
 - `crates/ur-client/src/frame.rs` — `Frame` and `FrameCodec`, the wire protocol
   framing.
 - `crates/ur-client/src/protocol.rs` — `TerminalId`, `Request`, `Response`,
-  `Event`, `ClientMessage`, `DaemonMessage`, and `socket_path()`.
+  `Event`, `Entry`, `ClientMessage`, `DaemonMessage`, and `socket_path()`.
 - `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the
-  core.
-- `crates/ur/src/main.rs` — the `ur` command line: `daemon` and `agent-run`.
+  core and the CLI, with `request()`, `events()`, `pty()`, and `pty_input()`.
+- `crates/ur-fake-server/` — the fake server: `lib.rs` exports
+  `fake_server()` and `Hold`, and `main.rs` serves it over stdin and stdout.
+- `crates/ur/src/main.rs` — the `ur` command line: `daemon`, `agent-run`,
+  `new`, `prompt`, and `read`.
+- `crates/ur/src/cli/` — `connect()` and one file per CLI subcommand:
+  `new.rs`, `prompt.rs`, and `read.rs`.
 - `crates/ur/src/config.rs` — `Config` and `ServerConfig`, the config file.
 - `crates/ur/src/one_shot.rs` — `ur agent-run`, the one-shot client, and its
   tests against a test agent.
 - `crates/ur/src/daemon/mod.rs` — `start()`: binds the socket, removing a stale
-  one.
+  one, and reads the config file; `run()`: connects to the server, then serves.
+- `crates/ur/src/daemon/state.rs` — `State`: the ACP connection, sessions,
+  transcripts, operation guards, and subscribers.
+- `crates/ur/src/daemon/acp.rs` — `connect()`: the ACP connection and its
+  handlers; `initialize()`, shared with the one-shot client.
+- `crates/ur/src/daemon/ops.rs` — `new_session()` and `prompt()`, which handle
+  the server's responses in `on_receiving_result` callbacks.
 - `crates/ur/src/daemon/server.rs` — the accept loop, each socket connection's
   reader and writer, request handling, and `Outbox`.
 - `crates/ur/src/daemon/terminal.rs` — `Terminals`: login shells through
   `portable-pty`, their `vt100::Parser`, terminal attachment, and the screen
   snapshot.
+- `crates/ur/src/daemon/tests.rs` — the daemon's session tests, run in process
+  against the fake server.
 - `crates/ur/tests/terminal.rs` — integration tests that run `ur daemon`.
 - `app/src-tauri/Cargo.toml` — the `webdriver` feature, which embeds
   `tauri-plugin-wdio-webdriver`'s WebDriver server for the end-to-end suite.
@@ -42,7 +55,8 @@ Map each file here as it is added, following the project layout in
 - `app/src/App.tsx` — shows the terminal pane full-window, or the error when
   attaching fails.
 - `app/e2e/harness.ts` — `TestEnvironment`, `Gui`, and `e2eTest`, used by the
-  end-to-end suite and ad-hoc checks.
+  end-to-end suite and ad-hoc checks. `TestEnvironment` writes a config file
+  that launches the fake server.
 - `app/e2e/terminal.test.ts` — the end-to-end tests for terminals.
 
 ## Validation
