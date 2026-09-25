@@ -148,9 +148,9 @@ and records the workspace name on the session.
 
 - `ur workspace add <name> <path>` and `ur workspace rm <name>` print nothing.
 - `ur new <workspace>` prints the session ID.
-- `ur ls` prints each workspace as `<name>  <path>`. Under it, each session is printed as
-  `<session>  <status>`, where status is `idle`, `working`, `needs permission`, or `failed`,
-  followed by `unread` when the unread flag is set.
+- `ur ls` prints each workspace as `<name>  <path>`. Under it, each session is printed, indented two
+  spaces, as `<session>  <status>`, where status is `idle`, `working`, `needs permission`, or
+  `failed`, followed by two spaces and `unread` when the unread flag is set.
 - `ur cancel <session>` prints nothing.
 - `ur approve <session>` and `ur deny <session>` read the session's status from the watch snapshot
   and answer its oldest pending request with the first `allow_*` or `reject_*` option. A session

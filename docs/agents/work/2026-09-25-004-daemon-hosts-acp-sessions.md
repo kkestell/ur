@@ -70,10 +70,11 @@ or moved a guarantee.
    chunks joined into the complete poem.
 
 2. The CLI against the fake server, with `command` set to `target/debug/ur-fake-server` in the same
-   kind of setup: `ur prompt $S "hello there world"` streamed `you`, `said:`, `hello`, `there`,
-   `world`; `ur prompt $S again` while `hold` ran printed `Error: session fake-1 is busy` and exited
-   1; `ur prompt nope hi` printed `Error: no session nope`; `ur new .` with no daemon named the
-   socket path. `ur read $S` without `--follow` printed the same entries as the follower and exited.
+   kind of setup: `ur prompt $S "hello there world"` streamed `you said: hello there world` as one
+   chunk per word, each but the last ending in a space; `ur prompt $S again` while `hold` ran
+   printed `Error: session fake-1 is busy` and exited 1; `ur prompt nope hi` printed
+   `Error: no session nope`; `ur new .` with no daemon named the socket path. `ur read $S` without
+   `--follow` printed the same entries as the follower and exited.
 
 ## Follow-up work
 
