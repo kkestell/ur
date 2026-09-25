@@ -119,6 +119,7 @@ export class TestEnvironment {
     this.#guis.push(gui);
     await waitFor("the WebDriver server", webdriverReady);
     await gui.connect();
+    await gui.focusWindow();
     await waitFor("the sidebar to render", () => gui.hasElement(".sidebar"));
     return gui;
   }
@@ -178,6 +179,19 @@ export class Gui {
     await waitFor("the webview to load the app", async () => {
       return (await this.#session().getUrl()) !== "about:blank";
     });
+  }
+
+  /**
+   * Makes `ur-app` the frontmost application. The GUI focuses its visible
+   * sessions only while its window has focus, and WebDriver cannot focus the
+   * window.
+   */
+  async focusWindow(): Promise<void> {
+    const script = `tell application "System Events" to set frontmost of (first process whose unix id is ${this.#process.pid}) to true`;
+    await promisify(execFile)("osascript", ["-e", script]);
+    await waitFor("the window to have focus", () =>
+      this.#session().execute(() => document.hasFocus()),
+    );
   }
 
   /**
@@ -254,7 +268,15 @@ export class Gui {
 
   /** Waits until no element matches `selector`. */
   async waitForNone(selector: string): Promise<void> {
-    await waitFor(`no ${selector}`, async () => !(await this.hasElement(selector)));
+    let texts: string[] = [];
+    try {
+      await waitFor(`no ${selector}`, async () => {
+        texts = await this.texts(selector);
+        return texts.length === 0;
+      });
+    } catch (error) {
+      throw new Error(`still ${selector}:\n${texts.join("\n")}`, { cause: error });
+    }
   }
 
   /** Types `text` into the editor and presses Enter. */
@@ -281,6 +303,29 @@ export class Gui {
   async promptText(): Promise<string> {
     return this.#session().execute(
       () => document.querySelector<HTMLTextAreaElement>(".editor textarea")!.value,
+    );
+  }
+
+  /**
+   * Presses ⌘ with the key whose `KeyboardEvent.code` is `code`, and ⇧ or ⌥
+   * as given, on the window, where the permission shortcuts listen.
+   */
+  async pressShortcut(code: string, { shift = false, alt = false } = {}): Promise<void> {
+    await this.#session().execute(
+      (code, shift, alt) => {
+        const event = new KeyboardEvent("keydown", {
+          code,
+          metaKey: true,
+          shiftKey: shift,
+          altKey: alt,
+          bubbles: true,
+          cancelable: true,
+        });
+        window.dispatchEvent(event);
+      },
+      code,
+      shift,
+      alt,
     );
   }
 

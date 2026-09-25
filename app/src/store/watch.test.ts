@@ -1,6 +1,12 @@
 import { expect, test, vi } from "vitest";
 import type { SessionSummary } from "../ipc/bindings/SessionSummary";
-import { initialWatch, reduceWatch, workspaceSessions } from "./watch";
+import {
+  attentionCount,
+  initialWatch,
+  orderedWorkspaces,
+  reduceWatch,
+  workspaceSessions,
+} from "./watch";
 
 // The store installs its Tauri listeners when it loads.
 vi.mock("../ipc", () => ({
@@ -8,7 +14,12 @@ vi.mock("../ipc", () => ({
   onConnection: () => Promise.resolve(() => {}),
 }));
 
-function summary(session: string, workspace: string, updated_at: string | null): SessionSummary {
+function summary(
+  session: string,
+  workspace: string,
+  updated_at: string | null,
+  attention: Partial<Pick<SessionSummary, "status" | "unread">> = {},
+): SessionSummary {
   return {
     session,
     workspace,
@@ -16,6 +27,7 @@ function summary(session: string, workspace: string, updated_at: string | null):
     unread: false,
     title: null,
     updated_at,
+    ...attention,
   };
 }
 
@@ -41,6 +53,48 @@ test("sessions_order_by_last_activity", () => {
     "new",
     "old",
   ]);
+});
+
+test("sessions_needing_attention_come_first", () => {
+  const state = reduceWatch(connected, {
+    type: "watch_snapshot",
+    workspaces: [{ name: "ws", path: "/ws" }],
+    sessions: [
+      summary("unread", "ws", "2026-01-01T00:00:00Z", { unread: true }),
+      summary("read", "ws", "2026-04-01T00:00:00Z"),
+      summary("failed", "ws", "2026-02-01T00:00:00Z", {
+        status: { type: "failed", message: "boom" },
+      }),
+      summary("permission", "ws", "2026-03-01T00:00:00Z", {
+        status: { type: "needs_permission", requests: [] },
+      }),
+    ],
+  });
+  expect(workspaceSessions(state, "ws").map((session) => session.session)).toEqual([
+    "permission",
+    "failed",
+    "unread",
+    "read",
+  ]);
+});
+
+test("workspaces_needing_attention_come_first", () => {
+  const state = reduceWatch(connected, {
+    type: "watch_snapshot",
+    workspaces: [
+      { name: "a", path: "/a" },
+      { name: "b", path: "/b" },
+      { name: "c", path: "/c" },
+    ],
+    sessions: [
+      summary("s1", "a", null),
+      summary("s2", "b", null),
+      summary("s3", "c", null, { unread: true }),
+      summary("s4", "c", null),
+    ],
+  });
+  expect(orderedWorkspaces(state).map((workspace) => workspace.name)).toEqual(["c", "a", "b"]);
+  expect(["a", "b", "c"].map((name) => attentionCount(state, name))).toEqual([0, 0, 1]);
 });
 
 test("a_removed_workspace_drops_its_sessions", () => {

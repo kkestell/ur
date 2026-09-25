@@ -43,11 +43,13 @@ screenshot to `app/e2e/artifacts/` for diagnosis.
 Tests drive the GUI the way the user does, through clicks, the editor, and the terminal, and assert
 on what the window shows. `TestEnvironment.ur()` runs the command line for setup the GUI does
 through native dialogs or menus, which WebDriver cannot drive, and `Gui.request()` sends a request
-through the core's `request` command for the same reason. `Gui.showTerminal()` shows the terminal,
-so its view is the only xterm.js on the page. Terminal tests assert on terminal text, read from the
-xterm.js rows, and type through `Gui.type`, not WebDriver key actions. The fake server's prompt
-scripts, named in `fake_server()`'s documentation, give agent session tests replies, permission
-requests, and errors.
+through the core's `request` command for the same reason. `openGui()` makes `ur-app` the frontmost
+application with `Gui.focusWindow()`, since the GUI focuses its visible sessions only while its
+window has focus and WebDriver cannot focus the window; a test that depends on focus calls it again
+before that step. `Gui.showTerminal()` shows the terminal, so its view is the only xterm.js on the
+page. Terminal tests assert on terminal text, read from the xterm.js rows, and type through
+`Gui.type`, not WebDriver key actions. The fake server's prompt scripts, named in `fake_server()`'s
+documentation, give agent session tests replies, permission requests, and errors.
 
 ### End-to-end guarantee list
 
@@ -64,6 +66,13 @@ requests, and errors.
 - A prompt the daemon answers busy comes back to the editor.
 - An editor draft does not follow the selection to another session.
 - A session that comes back with its workspace shows its thread.
+- A working session shows the spinner.
+- A session waiting for permission shows its mark and its workspace's count.
+- Clicking a permission option answers the request.
+- The permission shortcuts answer the oldest request.
+- A session that finishes a turn while not shown is unread until it is shown.
+- A failed turn shows its error and the failed mark.
+- A rejected prompt shows its error under the user message.
 
 ### Admission
 

@@ -23,11 +23,37 @@ pub struct Link {
     client: Mutex<Option<Client>>,
 }
 
-/// The desired set: what `run()` restores after reconnecting.
-#[derive(Default)]
+/// The desired set: what `run()` restores after reconnecting. The focus sent
+/// to the daemon is `visible` while the window is focused and nothing
+/// otherwise.
 struct Desired {
     watch: bool,
     subscribed: BTreeSet<String>,
+    visible: Vec<String>,
+    /// Whether the window has focus. It does when the window opens.
+    focused: bool,
+}
+
+impl Default for Desired {
+    fn default() -> Desired {
+        Desired {
+            watch: false,
+            subscribed: BTreeSet::new(),
+            visible: Vec::new(),
+            focused: true,
+        }
+    }
+}
+
+impl Desired {
+    /// The sessions to focus: the visible ones while the window has focus.
+    fn focus(&self) -> Vec<String> {
+        if self.focused {
+            self.visible.clone()
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 impl Link {
@@ -60,9 +86,9 @@ impl Link {
             *link.client.lock().unwrap() = Some(client.clone());
             link.emit_connection(&app, true);
 
-            let (watch, subscribed) = {
+            let (watch, subscribed, focus) = {
                 let desired = link.desired.lock().unwrap();
-                (desired.watch, desired.subscribed.clone())
+                (desired.watch, desired.subscribed.clone(), desired.focus())
             };
             let mut replay = Vec::new();
             if watch {
@@ -79,6 +105,9 @@ impl Link {
                     let _ = client.request(request).await;
                 });
             }
+            // After the subscriptions, so the daemon has listed every saved
+            // session before it is asked to focus one.
+            Link::send_focus(client.clone(), focus);
 
             while let Some(event) = events.recv().await {
                 if let Event::SessionRemoved { session } = &event {
@@ -107,6 +136,47 @@ impl Link {
             *link.client.lock().unwrap() = None;
             link.emit_connection(&app, false);
         }
+    }
+
+    /// Records the sessions the webview shows and sends the focus.
+    pub fn set_visible(&self, sessions: Vec<String>) {
+        let focus = {
+            let mut desired = self.desired.lock().unwrap();
+            desired.visible = sessions;
+            desired.focus()
+        };
+        if let Ok(client) = self.client() {
+            Link::send_focus(client, focus);
+        }
+    }
+
+    /// Records whether the window has focus and sends the focus.
+    pub fn set_focused(&self, focused: bool) {
+        let focus = {
+            let mut desired = self.desired.lock().unwrap();
+            desired.focused = focused;
+            desired.focus()
+        };
+        if let Ok(client) = self.client() {
+            Link::send_focus(client, focus);
+        }
+    }
+
+    /// Sends `focus` in a spawned task. A failure, such as naming a session
+    /// the daemon no longer has, changes nothing in the daemon and the next
+    /// selection change sends a fresh one, so it is only logged. Spawned on
+    /// Tauri's runtime, since the window event handler runs outside Tokio.
+    fn send_focus(client: Client, sessions: Vec<String>) {
+        tauri::async_runtime::spawn(async move {
+            let request = Request::Focus {
+                sessions: sessions.into_iter().map(Into::into).collect(),
+            };
+            match client.request(request).await {
+                Ok(Response::Error { message }) => eprintln!("ur-app: focus: {message}"),
+                Ok(_) => {}
+                Err(error) => eprintln!("ur-app: focus: {error}"),
+            }
+        });
     }
 
     pub fn connection(&self) -> Connection {

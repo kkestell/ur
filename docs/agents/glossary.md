@@ -77,7 +77,8 @@
 - **Link**: The core's owner of `ur_client::Client`. It reconnects to the daemon and replays the
   desired set after a disconnect.
 - **Desired set**: What the Link restores after reconnecting: watch, subscribed sessions, terminal
-  attachments with their sizes, and focus. It is `Desired` in code.
+  attachments with their sizes, and focus, which is the visible sessions while the window has focus.
+  It is `Desired` in code.
 - **Config file**: `$XDG_CONFIG_HOME/ur/config.toml`, under `~/.config` when the variable is unset.
   It holds the server command and arguments and, from milestone 11, `on_event`. The daemon and
   one-shot client share it.
@@ -179,7 +180,7 @@
   focuses every visible session while its window has focus and nothing otherwise. A daemon client's
   focus clears when it disconnects.
 - **Visible session**: A session shown in a pane of the GUI, reported by the webview through
-  `set_visible`.
+  `set_visible`. Until Pane grid, it is the selected session.
 
 ### Permissions
 
@@ -195,6 +196,8 @@
   turn ended or the server disconnected.
 - **Cancellation**: Sending `session/cancel` and answering every pending permission request for the
   session with `Cancelled`. The session stays `Working` and busy until the prompt returns.
+- **Shortcut**: The key combination for a permission option kind, which answers the selected
+  session's oldest pending request with its first option of that kind.
 
 ### Config options, commands, and usage
 

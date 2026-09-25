@@ -132,7 +132,8 @@ remaining pending requests and tells clients they are resolved.
 
 The GUI draws one button per option, using the label and kind in the request. The CLI's `approve`
 and `deny` answer the session's oldest pending request with its first `allow_*` or `reject_*`
-option.
+option. The GUI's shortcuts do the same by option kind: ⌘Y for `allow_once`, ⇧⌘Y for `allow_always`,
+⌥⌘Z for `reject_once`, and ⇧⌥⌘Z for `reject_always`.
 
 ### Sessions, tabs, and workspaces
 
@@ -353,7 +354,11 @@ webview never touches the socket.
   command, which sends a binary `PTY` frame.
 - The webview tells the core which sessions are visible in panes through `set_visible`. The core
   combines that with the window's focus, which it gets from `WindowEvent::Focused`, and sends
-  `focus` to the daemon as described under Session status.
+  `focus` to the daemon as described under Session status, on each `set_visible` and each window
+  focus change. Focus is part of the desired set, replayed after the subscriptions.
+- Pending permission requests render from the watch store, where they arrive in the session status,
+  not from the thread state. `transcript/permissions.ts` places them among the blocks: each takes
+  the place of the tool call block with its tool call ID, or follows the last block.
 - Native pieces come from Tauri: the dialog plugin for the folder picker, `Menu::popup` for context
   menus, and the window's drag-drop event, which gives the core file paths to read and attach to the
   next prompt. Keyboard shortcuts are handled in the webview.

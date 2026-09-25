@@ -58,21 +58,49 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
   }
 }
 
+/** Whether the session is `needs_permission`, `failed`, or unread. */
+export function needsAttention(summary: SessionSummary): boolean {
+  return (
+    summary.status.type === "needs_permission" ||
+    summary.status.type === "failed" ||
+    summary.unread
+  );
+}
+
 /**
- * The workspace's sessions by last activity, newest first. A session without
- * one was created during this ACP connection and has had no
- * `session_info_update`, so it counts as newest. RFC 3339 timestamps from one
- * server compare as strings.
+ * The workspace's sessions, those needing attention first, then by last
+ * activity, newest first. A session without one was created during this ACP
+ * connection and has had no `session_info_update`, so it counts as newest.
+ * RFC 3339 timestamps from one server compare as strings.
  */
 export function workspaceSessions(state: WatchState, workspace: string): SessionSummary[] {
   return state.sessions
     .filter((session) => session.workspace === workspace)
     .sort((a, b) => {
+      const attention = Number(needsAttention(b)) - Number(needsAttention(a));
+      if (attention !== 0) {
+        return attention;
+      }
       if (a.updated_at === null || b.updated_at === null) {
         return Number(a.updated_at !== null) - Number(b.updated_at !== null);
       }
       return b.updated_at.localeCompare(a.updated_at);
     });
+}
+
+/** The workspaces with a session needing attention first, each group in creation order. */
+export function orderedWorkspaces(state: WatchState): Workspace[] {
+  return [...state.workspaces].sort(
+    (a, b) =>
+      Number(attentionCount(state, b.name) > 0) - Number(attentionCount(state, a.name) > 0),
+  );
+}
+
+/** How many of the workspace's sessions need attention. */
+export function attentionCount(state: WatchState, workspace: string): number {
+  return state.sessions.filter(
+    (session) => session.workspace === workspace && needsAttention(session),
+  ).length;
 }
 
 let state = initialWatch;

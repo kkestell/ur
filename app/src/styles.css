@@ -58,6 +58,17 @@ code,
 
 .workspace-name {
   padding: 4px 12px;
+  display: flex;
+  align-items: center;
+}
+
+.workspace-name .count {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: #444;
+  color: #ddd;
+  font-size: 11px;
 }
 
 .workspace-name::before {
@@ -74,14 +85,48 @@ code,
 
 .row {
   padding: 4px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: default;
+}
+
+.row .label {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: default;
 }
 
 .row.selected {
   background: #333;
+}
+
+.row.unread {
+  font-weight: bold;
+}
+
+.row .status {
+  flex: none;
+}
+
+.row .status.spinner {
+  width: 8px;
+  height: 8px;
+  border-width: 1.5px;
+}
+
+.row .status.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e5c07b;
+}
+
+.row .status.failed {
+  color: #e06c75;
+  font-weight: bold;
 }
 
 .terminal-row {
@@ -168,6 +213,74 @@ code,
   color: #e06c75;
   padding: 0;
   font-family: inherit;
+}
+
+/* A rejected prompt's error reads as part of the prompt. */
+.block.user + .block.error {
+  margin-top: -12px;
+  padding: 4px 16px;
+}
+
+/* Permission requests */
+
+.block.permission {
+  padding: 12px 16px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.permission-title {
+  margin-bottom: 8px;
+}
+
+.permission-content {
+  margin: 0 0 8px;
+  padding: 8px;
+  background: #262626;
+  border-radius: 4px;
+  font-family: Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.permission-options {
+  display: flex;
+  flex-direction: column;
+}
+
+.permission-options .option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: transparent;
+  color: inherit;
+  border: none;
+  border-radius: 4px;
+  font: inherit;
+  text-align: left;
+}
+
+.permission-options .option:hover {
+  background: #333;
+}
+
+.permission-options .icon {
+  width: 14px;
+  color: #aaa;
+}
+
+.permission-options .label {
+  flex: 1;
+}
+
+.permission-options .shortcut {
+  color: #888;
+}
+
+.block.awaiting {
+  color: #888;
 }
 
 /* Editor */

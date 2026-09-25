@@ -52,6 +52,11 @@ export function select(selection: Selection): Promise<void> {
   return invoke("select", { selection });
 }
 
+/** Reports the sessions shown in the window; the core sends `focus` from them. */
+export function setVisible(sessions: string[]): Promise<void> {
+  return invoke("set_visible", { sessions });
+}
+
 export function onWatch(listener: (event: WatchEvent) => void): Promise<() => void> {
   return listen<WatchEvent>("watch", (event) => listener(event.payload));
 }

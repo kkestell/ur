@@ -55,6 +55,13 @@ pub async fn terminal_input(
         .map_err(|error| error.to_string())
 }
 
+/// Reports the sessions the webview shows. The core combines them with the
+/// window's focus and sends `focus` to the daemon.
+#[tauri::command]
+pub fn set_visible(link: State<'_, Link>, sessions: Vec<String>) {
+    link.set_visible(sessions);
+}
+
 /// The current connection, for a webview that started after the `connection`
 /// event it would have needed.
 #[tauri::command]

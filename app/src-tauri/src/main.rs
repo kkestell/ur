@@ -3,6 +3,7 @@ mod gui_state;
 mod link;
 
 use link::Link;
+use tauri::{Manager, WindowEvent};
 
 fn main() {
     let builder = tauri::Builder::default();
@@ -14,6 +15,11 @@ fn main() {
             tauri::async_runtime::spawn(Link::run(app.handle().clone()));
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let WindowEvent::Focused(focused) = event {
+                window.state::<Link>().set_focused(*focused);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::request,
             commands::attach_terminal,
@@ -21,6 +27,7 @@ fn main() {
             commands::connection,
             commands::selection,
             commands::select,
+            commands::set_visible,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the ur app");
