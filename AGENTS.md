@@ -23,6 +23,9 @@ Map each file here as it is added, following the project layout in
   `portable-pty`, their `vt100::Parser`, terminal attachment, and the screen
   snapshot.
 - `crates/ur/tests/terminal.rs` — integration tests that run `ur daemon`.
+- `app/src-tauri/Cargo.toml` — the `webdriver` feature, which embeds
+  `tauri-plugin-wdio-webdriver`'s WebDriver server for the end-to-end suite.
+  Release builds and `pnpm tauri dev` leave it out.
 - `app/src-tauri/src/main.rs` — the Tauri builder, managed `Link`, and commands.
 - `app/src-tauri/src/link.rs` — `Link`: owns the `Client` and forwards terminal
   output to the webview's `Channel`.
@@ -35,6 +38,9 @@ Map each file here as it is added, following the project layout in
   terminal.
 - `app/src/App.tsx` — shows the terminal pane full-window, or the error when
   attaching fails.
+- `app/e2e/harness.ts` — `TestEnvironment`, `Gui`, and `e2eTest`, used by the
+  end-to-end suite and ad-hoc checks.
+- `app/e2e/terminal.test.ts` — the end-to-end tests for terminals.
 
 ## Validation
 
@@ -46,6 +52,9 @@ validation: `cargo fmt --all -- --check`,
 `pnpm -C app build`. Report any skipped or failed check; do
 not call partial validation complete. For documentation-only, comment-only, and
 filename-only changes, use focused searches and diff inspection.
+
+Run the end-to-end suite, `pnpm -C app e2e`, when finishing each section of
+`eng/todo.md`. Do not add end-to-end tests without the user's approval.
 
 ## Documentation
 

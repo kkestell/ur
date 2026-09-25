@@ -1,0 +1,5 @@
+# webdriverio's browser drivers are not used: the tests talk to the WebDriver
+# server embedded in the app.
+allowBuilds:
+  edgedriver: false
+  geckodriver: false

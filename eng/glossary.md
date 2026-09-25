@@ -293,3 +293,13 @@
 - **Hook**: The `on_event` command in the config file, run by the daemon for
   each session status change with the change as JSON on stdin. It is unrelated
   to wire protocol events.
+
+### Testing
+
+- **End-to-end suite**: The WebDriver tests in `app/e2e/`, run by
+  `pnpm -C app e2e` against the built app. Each test owns one guarantee from the
+  end-to-end guarantee list.
+- **End-to-end guarantee list**: The closed list of guarantees in `testing.md`
+  that the end-to-end suite owns.
+- **Ad-hoc check**: A throwaway script outside the repository that uses
+  `app/e2e/harness.ts` to check behavior. It is never committed.

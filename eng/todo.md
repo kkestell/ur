@@ -26,6 +26,13 @@ remaining milestones on top of it.
    running full-screen TUI while the GUI is attached.
 3. Keep the shell and parser alive across GUI disconnects. Reattach and resize
    the same terminal without losing the running application or its screen.
+4. Add an end-to-end suite that drives the built app, with the webview, core,
+   and daemon working together, so milestone checks no longer depend on running
+   the GUI by hand. Run it at the end of each milestone. Keep it to a short list
+   of guarantees, recorded in `testing.md`, that hold across the whole app and
+   cannot be tested in the Rust test suite. Start with this milestone's check:
+   a full-screen application and an editor's unsaved buffer survive closing and
+   reopening the GUI at a different window size.
 
 Check with `top` and an editor holding an unsaved buffer. Close and reopen the
 GUI while the daemon stays running, including at a different window size. The
@@ -57,7 +64,10 @@ with `end_turn`.
    agent in the test process, without a model provider. Cover snapshot then live
    with no gaps or duplicates and overlapping prompts. Use labels, permission
    options, and tool inputs different from Ox; include a minimal agent with no
-   optional history or image capabilities.
+   optional history or image capabilities. Also build the fake server, a
+   server built with `Agent.builder()` that the daemon launches from the config
+   file in end-to-end tests, sharing its scripted behavior with the test agent.
+   Add the config file to `TestEnvironment` in `app/e2e/harness.ts`.
 
 Check: run `ur read --follow` on a session in one terminal and `ur prompt` with
 a prompt that needs no shell command in another. The reply streams into the

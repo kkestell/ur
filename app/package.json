@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "e2e": "export CARGO_TARGET_DIR=\"$(cd .. && pwd)/target/e2e\" && cargo build -p ur && tauri build --debug --no-bundle --features webdriver && tsc -p e2e && node --test --test-concurrency=1 \"e2e/*.test.ts\""
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -18,10 +19,12 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/node": "^22.20.4",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
     "typescript": "~6.0.3",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "webdriverio": "^9.32.0"
   }
 }
