@@ -105,8 +105,8 @@ impl Link {
                     let _ = client.request(request).await;
                 });
             }
-            // After the subscriptions, so the daemon has listed every saved
-            // session before it is asked to focus one.
+            // The daemon has listed every saved session before it accepts a
+            // socket connection, so the focus can name one right away.
             Link::send_focus(client.clone(), focus);
 
             while let Some(event) = events.recv().await {

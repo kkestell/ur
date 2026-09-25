@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Editor } from "./components/Editor";
 import { Sidebar } from "./components/Sidebar";
 import { TerminalPane } from "./components/TerminalPane";
@@ -16,6 +16,10 @@ import { shortcutKind } from "./keys";
 import { useSession } from "./store/sessions";
 import { apply as applyWatch, useWatch } from "./store/watch";
 import { withPermissions } from "./transcript/permissions";
+
+// One array for every render without pending requests, so nothing depending on
+// `requests` re-runs for it.
+const noRequests: PendingPermission[] = [];
 
 export default function App() {
   const watch = useWatch();
@@ -102,7 +106,10 @@ function Session({ id }: { id: string }) {
   const watch = useWatch();
   const thread = useSession(id);
   const status = watch.sessions.find((session) => session.session === id)?.status;
-  const requests = status?.type === "needs_permission" ? status.requests : [];
+  const requests = status?.type === "needs_permission" ? status.requests : noRequests;
+  // Memoized: `Session` renders on every watch event, and a fresh array each
+  // time would scroll the thread to the bottom.
+  const items = useMemo(() => withPermissions(thread?.blocks ?? [], requests), [thread, requests]);
 
   const answer = (request: PendingPermission, optionId: string) => {
     answerPermission(id, request.request_id, optionId);
@@ -130,10 +137,7 @@ function Session({ id }: { id: string }) {
 
   return (
     <div className="session">
-      <Thread
-        items={withPermissions(thread?.blocks ?? [], requests)}
-        onAnswer={(request, option) => answer(request, option.optionId)}
-      />
+      <Thread items={items} onAnswer={(request, option) => answer(request, option.optionId)} />
       <Editor session={id} status={status} />
     </div>
   );

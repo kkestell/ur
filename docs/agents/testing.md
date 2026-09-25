@@ -66,6 +66,7 @@ documentation, give agent session tests replies, permission requests, and errors
 - A prompt the daemon answers busy comes back to the editor.
 - An editor draft does not follow the selection to another session.
 - A session that comes back with its workspace shows its thread.
+- Another session's activity leaves the thread's scroll position alone.
 - A working session shows the spinner.
 - A session waiting for permission shows its mark and its workspace's count.
 - Clicking a permission option answers the request.

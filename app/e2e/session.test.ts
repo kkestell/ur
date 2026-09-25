@@ -93,3 +93,19 @@ e2eTest("a session that comes back with its workspace shows its thread", async (
   await gui.click(".sidebar .row", "New session");
   await gui.waitForText(".block.agent", "you said: hello");
 });
+
+e2eTest("another session's activity leaves the thread's scroll position alone", async (environment) => {
+  await environment.newSession();
+  const other = await environment.ur("new", "home");
+  const gui = await environment.openGui();
+  await gui.setWindowSize(700, 400);
+  await gui.click(".sidebar .row:nth-child(1)");
+  for (let prompt = 1; prompt <= 8; prompt++) {
+    await gui.sendPrompt(`prompt ${prompt}`);
+    await gui.waitForText(".block.agent", `you said: prompt ${prompt}`);
+  }
+  await gui.scrollThread(0);
+  await environment.ur("prompt", other, "hello");
+  await environment.ur("wait", other);
+  assert.equal(await gui.threadScrollTop(), 0);
+});

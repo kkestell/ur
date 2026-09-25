@@ -329,6 +329,18 @@ export class Gui {
     );
   }
 
+  /** Scrolls the thread to `top` pixels. */
+  async scrollThread(top: number): Promise<void> {
+    await this.#session().execute((top) => {
+      document.querySelector(".thread")!.scrollTop = top;
+    }, top);
+  }
+
+  /** The thread's scroll position in pixels. */
+  async threadScrollTop(): Promise<number> {
+    return this.#session().execute(() => document.querySelector(".thread")!.scrollTop);
+  }
+
   /** Sends `request` through the core's `request` command and returns the response. */
   async request(request: object): Promise<unknown> {
     return this.#session().execute((request) => {

@@ -8,7 +8,7 @@
   - [x] [OX-0001](issues.csv:2): Prompting a session leaves its unread flag set
 - [x] Restore agent history: sessions survive daemon and server restarts.
 - [x] Agent GUI: a sidebar of sessions and a thread view to prompt them.
-- [ ] Attention in the GUI: session status in the sidebar and permission requests in the thread.
+- [x] Attention in the GUI: session status in the sidebar and permission requests in the thread.
 - [ ] Thread rendering: Markdown, thinking, and tool calls as in the wireframes.
 - [ ] Session management and editor: workspaces, sessions, slash commands, config options, and
       images in the GUI.
