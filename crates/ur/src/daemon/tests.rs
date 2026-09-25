@@ -33,6 +33,7 @@ impl TestDaemon {
         let dir = tempfile::tempdir().unwrap();
         let socket = dir.path().join("ur.sock");
         let listener = UnixListener::bind(&socket).unwrap();
+        let server = server.map(|channel| ("the fake server".to_string(), channel));
         tokio::spawn(super::run(listener, server));
         TestDaemon { socket, _dir: dir }
     }
@@ -252,7 +253,7 @@ async fn session_requests_fail_without_a_server() {
         (
             "a server that never answers initialize",
             Ok(silent),
-            "initialize failed: no answer after 30 seconds",
+            "initialize failed for the fake server: no answer after 30 seconds",
         ),
     ];
     for (case, server, reason) in cases {

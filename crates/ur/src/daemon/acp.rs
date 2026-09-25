@@ -10,6 +10,7 @@ use agent_client_protocol::{
     Agent, Client, ConnectTo, ConnectionTo, on_receive_notification, on_receive_request,
 };
 use anyhow::{anyhow, bail};
+use serde_json::Value;
 use tokio::sync::Notify;
 use tokio::time::timeout;
 
@@ -20,8 +21,13 @@ use super::state::State;
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Starts the ACP connection to the server and returns once `initialize` has
-/// finished, failed, or gone unanswered for `INITIALIZE_TIMEOUT`. When the ACP connection ends, `State` keeps the reason.
-pub async fn connect(server: impl ConnectTo<Client> + 'static, state: Arc<Mutex<State>>) {
+/// finished, failed, or gone unanswered for `INITIALIZE_TIMEOUT`. When the ACP
+/// connection ends, `State` keeps the reason, which names `command`.
+pub async fn connect(
+    command: String,
+    server: impl ConnectTo<Client> + 'static,
+    state: Arc<Mutex<State>>,
+) {
     let ready = Arc::new(Notify::new());
     tokio::spawn({
         let ready = ready.clone();
@@ -68,9 +74,12 @@ pub async fn connect(server: impl ConnectTo<Client> + 'static, state: Arc<Mutex<
                 })
                 .await;
             let reason = match result {
-                Ok(Ok(())) => "the server closed the ACP connection".to_string(),
-                Ok(Err(error)) => format!("initialize failed: {error:#}"),
-                Err(error) => format!("the ACP connection failed: {error}"),
+                Ok(Ok(())) => format!("{command} closed the ACP connection"),
+                Ok(Err(error)) => format!("initialize failed for {command}: {error:#}"),
+                Err(error) => format!(
+                    "the ACP connection to {command} failed: {}",
+                    describe(&error)
+                ),
             };
             eprintln!("ur daemon: {reason}");
             state.lock().unwrap().set_server(Err(reason));
@@ -88,7 +97,8 @@ pub async fn initialize(connection: &ConnectionTo<Agent>) -> anyhow::Result<Init
                 .client_info(Implementation::new("ur", env!("CARGO_PKG_VERSION"))),
         )
         .block_task()
-        .await?;
+        .await
+        .map_err(|error| anyhow::Error::msg(describe(&error)))?;
     if initialize.protocol_version != ProtocolVersion::V1 {
         bail!(
             "the server uses ACP version {}; ur supports only version 1",
@@ -96,4 +106,19 @@ pub async fn initialize(connection: &ConnectionTo<Agent>) -> anyhow::Result<Init
         );
     }
     Ok(initialize)
+}
+
+/// An SDK error's message and details on one line. The SDK wraps the details
+/// of an error from one of its tasks with the task's source location, which
+/// this leaves out.
+pub fn describe(error: &agent_client_protocol::Error) -> String {
+    let mut data = error.data.as_ref();
+    while let Some(inner) = data.and_then(|data| data.get("spawned_at").and(data.get("data"))) {
+        data = Some(inner);
+    }
+    match data {
+        None | Some(Value::Null) => error.message.clone(),
+        Some(Value::String(details)) => format!("{}: {details}", error.message),
+        Some(details) => format!("{}: {details}", error.message),
+    }
 }

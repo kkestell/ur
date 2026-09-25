@@ -29,22 +29,25 @@ pub async fn start(path: &Path) -> anyhow::Result<()> {
     let listener =
         UnixListener::bind(path).with_context(|| format!("binding {}", path.display()))?;
     let server = Config::read().map(|config| {
-        AcpAgent::new(AcpAgentConfig::new(config.server.command).args(config.server.args))
+        let command = config.server.command;
+        let agent = AcpAgent::new(AcpAgentConfig::new(command.clone()).args(config.server.args));
+        (command, agent)
     });
     run(listener, server).await
 }
 
-/// Connects to the server, then serves daemon clients. Daemon clients that
+/// Connects to the server, then serves daemon clients. `server` holds the
+/// command that runs the server, for errors, and the connection to it. Daemon clients that
 /// connect meanwhile wait in the listen backlog, so no request sees a server
 /// that is still starting. Without a server, terminals and the transcripts
 /// held in memory still work.
 async fn run(
     listener: UnixListener,
-    server: anyhow::Result<impl ConnectTo<Client> + 'static>,
+    server: anyhow::Result<(String, impl ConnectTo<Client> + 'static)>,
 ) -> anyhow::Result<()> {
     let state = Arc::new(Mutex::new(State::default()));
     match server {
-        Ok(server) => acp::connect(server, state.clone()).await,
+        Ok((command, server)) => acp::connect(command, server, state.clone()).await,
         Err(error) => {
             let reason = format!("{error:#}");
             eprintln!("ur daemon: cannot start the server: {reason}");

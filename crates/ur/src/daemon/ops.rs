@@ -11,6 +11,7 @@ use agent_client_protocol::schema::v1::{
 };
 use ur_client::{DaemonMessage, Frame, Response};
 
+use super::acp;
 use super::server::Outbox;
 use super::state::State;
 
@@ -35,7 +36,7 @@ pub fn new_session(
                     Response::SessionCreated { session }
                 }
                 Err(error) => Response::Error {
-                    message: format!("session/new failed: {error}"),
+                    message: format!("session/new failed: {}", acp::describe(&error)),
                 },
             };
             outbox.send(Frame::json(&DaemonMessage::Response { id, response }));
@@ -62,7 +63,10 @@ pub fn prompt(
                 .send_request(PromptRequest::new(session.clone(), content))
                 .on_receiving_result(move |result| async move {
                     if let Err(error) = result {
-                        eprintln!("ur daemon: session/prompt for {session} failed: {error}");
+                        eprintln!(
+                            "ur daemon: session/prompt for {session} failed: {}",
+                            acp::describe(&error)
+                        );
                     }
                     callback_state.lock().unwrap().finish_prompt(&session);
                     Ok(())

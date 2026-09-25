@@ -64,7 +64,11 @@ Ox.
   `acp::connect`, or add it to the reason in `run`. Format the SDK error from
   its `message`, plus the inner `data` string when there is one, so the reason
   reads like `cannot run no-such-command-xyz: No such file or directory
-  (os error 2)`.
+  (os error 2)`. Fixed: `run` passes the configured command to
+  `acp::connect`, which names it in the reason, and `acp::describe` formats
+  SDK errors on one line without the task locations. `ops.rs` and
+  `acp::initialize` use it too. The daemon test for a server that never
+  answers checks that the reason names the server.
 
 ## Checks run
 
@@ -84,7 +88,13 @@ Ox.
 - Ran the daemon with the fake server binary, prompted `hold`, and killed the
   fake server: the next `ur prompt` exited 1 with the reason, and `ur read`
   still printed the transcript held in memory.
-- After the fix: `cargo fmt --all -- --check`,
+- After the error wording fix, the same three failures report
+  `the ACP connection to false failed: Internal error: Process exited with
+  exit status: 1`, `the ACP connection to no-such-command-xyz failed: Internal
+  error: No such file or directory (os error 2)`, and
+  `the ACP connection to <path>/ur-fake-server failed: Internal error: Process
+  exited with signal: 15 (SIGTERM)`.
+- After both fixes: `cargo fmt --all -- --check`,
   `cargo test --workspace --all-targets --all-features`,
   `cargo build --workspace --all-features`,
   `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and
@@ -96,4 +106,4 @@ The implementation matches the plan. Snapshot-then-live ordering, the
 operation guard, updates kept right after `session/new`, and permission
 rejection hold as designed, and the tests cover them. The medium finding, a
 server that never answers `initialize` blocking every request, is fixed in
-`acp.rs`. The low finding, error wording, is open.
+`acp.rs`. The low finding, error wording, is fixed in `acp.rs` and `mod.rs`.
