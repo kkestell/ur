@@ -54,8 +54,8 @@
 - **Server**: The ACP agent process the daemon launches from the config file.
   There is one per daemon. Ox is the server used for development and end-to-end
   checks, not part of ur's architecture.
-- **Ox**: The ACP server at `~/src/ox` that ur is developed and tested against.
-  Its tools, limits, database, and notification timing are not client
+- **Ox**: The ACP server at `~/projects/ox` that ur is developed and tested
+  against. Its tools, limits, database, and notification timing are not client
   requirements.
 - **Test agent**: A server built with the SDK's `Agent.builder()` inside a test
   process. It exercises ACP without a model provider or Ox.

@@ -1,14 +1,14 @@
 # ur architecture
 
-ur is an ACP client. Ox (`~/src/ox`) is the server we develop and test against,
-not part of ur's architecture. Switching to another server with compatible ACP
-capabilities should require changing its launch configuration, not ur's code.
-When all milestones in `todo.md` are done, you can run ten agent sessions across
-three repositories, close the window, come back later, see which sessions need
-attention, and approve, answer, or cancel them from the GUI or the command line.
-Terminal panes keep shells and TUI apps running when the GUI closes. Reopening a
-pane restores the running application's screen. Terminals last for the lifetime
-of the daemon.
+ur is an ACP client. Ox (`~/projects/ox`) is the server we develop and test
+against, not part of ur's architecture. Switching to another server with
+compatible ACP capabilities should require changing its launch configuration,
+not ur's code. When all milestones in `todo.md` are done, you can run ten agent
+sessions across three repositories, close the window, come back later, see which
+sessions need attention, and approve, answer, or cancel them from the GUI or the
+command line. Terminal panes keep shells and TUI apps running when the GUI
+closes. Reopening a pane restores the running application's screen. Terminals
+last for the lifetime of the daemon.
 
 This is a hobby project. Keep the implementation small, make the ordinary
 workflow work, and use testing to find the next problems worth solving. Prefer
