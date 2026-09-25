@@ -1,4 +1,4 @@
-import type { SessionUpdate } from "@agentclientprotocol/sdk";
+import type { SessionUpdate, ToolCallContent } from "@agentclientprotocol/sdk";
 import { expect, test } from "vitest";
 import type { Entry } from "../ipc/bindings/Entry";
 import type { Block, ThreadState } from "./blocks";
@@ -86,6 +86,19 @@ const call: Entry = update({
   status: "pending",
 });
 
+function output(text: string): ToolCallContent {
+  return { type: "content", content: { type: "text", text } };
+}
+
+const callWithOutput: Entry = update({
+  sessionUpdate: "tool_call",
+  toolCallId: "t1",
+  title: "Read a.rs",
+  kind: "read",
+  status: "pending",
+  content: [output("one")],
+});
+
 test.each([
   {
     name: "a status change",
@@ -94,7 +107,14 @@ test.each([
       update({ sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed" }),
     ],
     blocks: [
-      { kind: "tool_call", id: "t1", title: "Read a.rs", toolKind: "read", status: "completed" },
+      {
+        kind: "tool_call",
+        id: "t1",
+        title: "Read a.rs",
+        toolKind: "read",
+        status: "completed",
+        content: [],
+      },
     ],
   },
   {
@@ -104,7 +124,14 @@ test.each([
       update({ sessionUpdate: "tool_call_update", toolCallId: "t1", title: "Read b.rs" }),
     ],
     blocks: [
-      { kind: "tool_call", id: "t1", title: "Read b.rs", toolKind: "read", status: "pending" },
+      {
+        kind: "tool_call",
+        id: "t1",
+        title: "Read b.rs",
+        toolKind: "read",
+        status: "pending",
+        content: [],
+      },
     ],
   },
   {
@@ -120,7 +147,52 @@ test.each([
       }),
     ],
     blocks: [
-      { kind: "tool_call", id: "t1", title: "Read a.rs", toolKind: "read", status: "in_progress" },
+      {
+        kind: "tool_call",
+        id: "t1",
+        title: "Read a.rs",
+        toolKind: "read",
+        status: "in_progress",
+        content: [],
+      },
+    ],
+  },
+  {
+    name: "content replaced",
+    entries: [
+      callWithOutput,
+      update({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t1",
+        content: [output("two"), output("three")],
+      }),
+    ],
+    blocks: [
+      {
+        kind: "tool_call",
+        id: "t1",
+        title: "Read a.rs",
+        toolKind: "read",
+        status: "pending",
+        content: [output("two"), output("three")],
+      },
+    ],
+  },
+  {
+    name: "a null content left unchanged",
+    entries: [
+      callWithOutput,
+      update({ sessionUpdate: "tool_call_update", toolCallId: "t1", content: null }),
+    ],
+    blocks: [
+      {
+        kind: "tool_call",
+        id: "t1",
+        title: "Read a.rs",
+        toolKind: "read",
+        status: "pending",
+        content: [output("one")],
+      },
     ],
   },
   {
@@ -130,8 +202,22 @@ test.each([
       update({ sessionUpdate: "tool_call_update", toolCallId: "t2", status: "completed" }),
     ],
     blocks: [
-      { kind: "tool_call", id: "t1", title: "Read a.rs", toolKind: "read", status: "pending" },
-      { kind: "tool_call", id: "t2", title: "t2", toolKind: undefined, status: "completed" },
+      {
+        kind: "tool_call",
+        id: "t1",
+        title: "Read a.rs",
+        toolKind: "read",
+        status: "pending",
+        content: [],
+      },
+      {
+        kind: "tool_call",
+        id: "t2",
+        title: "t2",
+        toolKind: undefined,
+        status: "completed",
+        content: [],
+      },
     ],
   },
 ])("tool_call_updates_merge_by_id: $name", ({ entries, blocks }) => {

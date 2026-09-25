@@ -60,6 +60,7 @@ function applyUpdate(blocks: Block[], update: SessionUpdate): void {
         title: update.title,
         toolKind: update.kind,
         status: update.status,
+        content: update.content ?? [],
       });
       return;
     case "tool_call_update": {
@@ -74,6 +75,7 @@ function applyUpdate(blocks: Block[], update: SessionUpdate): void {
           title: update.title ?? update.toolCallId,
           toolKind: update.kind ?? undefined,
           status: update.status ?? undefined,
+          content: update.content ?? [],
         });
         return;
       }
@@ -82,6 +84,8 @@ function applyUpdate(blocks: Block[], update: SessionUpdate): void {
         title: update.title ?? block.title,
         toolKind: update.kind ?? block.toolKind,
         status: update.status ?? block.status,
+        // ACP replaces the whole list; `null` or no `content` leaves it.
+        content: update.content ?? block.content,
       };
       return;
     }

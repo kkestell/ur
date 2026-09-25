@@ -346,9 +346,11 @@ webview never touches the socket.
   closing a tab keeps the transcript and reopening does not refetch. Components read the stores
   through `useSyncExternalStore` or zustand.
 - One transcript reducer groups consecutive message and thought chunks, combines a user's text and
-  image parts, and updates tool calls by ID. A fresh snapshot resets that state and uses the same
-  reducer as live events. The reducer is the only code that knows ACP update shapes; components
-  render the blocks it derives.
+  image parts, and updates tool calls by ID. It keeps each tool call's content, which a
+  `tool_call_update` with content replaces whole. A fresh snapshot resets that state and uses the
+  same reducer as live events. The reducer is the only code that knows ACP update shapes; components
+  render the blocks it derives. Whether a Thinking row or tool call is expanded is component state,
+  not part of the blocks.
 - Terminal output goes through a `Channel<tauri::ipc::Response>` of raw bytes, one per attached
   terminal, so it is never JSON-encoded. Terminal input goes to the core through a `terminal_input`
   command, which sends a binary `PTY` frame.

@@ -154,7 +154,7 @@
   entry or, after a load, from replayed `user_message_chunk` updates.
 - **Agent message**: Text from consecutive `agent_message_chunk` updates, rendered as Markdown.
 - **Thought**: Text from consecutive `agent_thought_chunk` updates, rendered as a collapsed
-  "Thinking" row.
+  "Thinking" row. Clicking the row shows the text.
 - **Tool call**: An ACP tool call, identified by its tool call ID and updated by `tool_call_update`.
   ur uses only ACP's tool call fields, never the server's tool names or `raw_input` keys.
 - **Tool call title**: The title the server supplies for a tool call.
@@ -162,8 +162,12 @@
   a Run Command block.
 - **Tool call status**: The ACP state of a tool call: `pending`, `in_progress`, `completed`, or
   `failed`.
+- **Tool call content**: The ACP `ToolCallContent` items of a tool call: text content, diffs, and
+  terminal content. It is the tool call block's `content` in code, rendered by
+  `ToolCallContentView`.
 - **Run Command block**: The filled block for a tool call of kind `execute`, showing its tool call
   title and expanding to its output.
+- **Expanded**: A Thinking row or tool call showing its content. It is `expanded` in code.
 - **Transcript reducer**: The pure webview function in `transcript/reduce.ts` that turns a session
   snapshot and session events into display blocks. It is the only webview code that knows ACP update
   shapes.

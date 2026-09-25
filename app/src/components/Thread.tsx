@@ -1,8 +1,10 @@
 import type { PermissionOption } from "@agentclientprotocol/sdk";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PendingPermission } from "../ipc/bindings/PendingPermission";
 import type { Item } from "../transcript/permissions";
+import { AgentMessage } from "./AgentMessage";
 import { Permission } from "./Permission";
+import { ToolCall, toolIcon } from "./ToolCall";
 
 export function Thread({
   items,
@@ -38,13 +40,18 @@ function ItemView({
     case "user":
       return <div className="block user">{item.text}</div>;
     case "agent":
-      return <div className="block agent">{item.text}</div>;
+      return <AgentMessage text={item.text} />;
     case "thought":
-      return <div className="block thought">{item.text}</div>;
+      return <Thought text={item.text} />;
     case "tool_call":
-      return <div className="block tool-call">{item.title}</div>;
+      return <ToolCall block={item} />;
     case "error":
-      return <div className="block error">{item.message}</div>;
+      return (
+        <div className="block error">
+          <span className="icon">ⓘ</span>
+          <span>{item.message}</span>
+        </div>
+      );
     case "permission":
       return (
         <Permission
@@ -54,4 +61,21 @@ function ItemView({
         />
       );
   }
+}
+
+/**
+ * A collapsed "Thinking" row. Clicking it shows the thought's text, and
+ * clicking again hides it.
+ */
+function Thought({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="block thought">
+      <div className="thought-row" onClick={() => setExpanded(!expanded)}>
+        <span className="icon">{toolIcon("think")}</span>
+        <span className="label">Thinking</span>
+      </div>
+      {expanded && <div className="thought-text">{text}</div>}
+    </div>
+  );
 }

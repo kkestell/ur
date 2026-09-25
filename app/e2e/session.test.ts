@@ -52,7 +52,7 @@ e2eTest("the GUI reconnects after a daemon restart without duplicating the threa
   await environment.startDaemon();
   await gui.waitForText(".block.agent", "you said: hello");
   assert.deepEqual(await gui.texts(".block.user"), ["hello"]);
-  assert.deepEqual(await gui.texts(".block.agent"), ["you said: hello"]);
+  assert.deepEqual(await gui.texts(".block.agent p"), ["you said: hello"]);
 
   await gui.sendPrompt("again");
   await gui.waitForText(".block.agent", "you said: again");

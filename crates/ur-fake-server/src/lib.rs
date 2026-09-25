@@ -14,7 +14,8 @@ use agent_client_protocol::schema::v1::{
     PermissionOption, PermissionOptionKind, PromptRequest, PromptResponse,
     RequestPermissionOutcome, RequestPermissionRequest, SessionCapabilities, SessionId,
     SessionInfo, SessionInfoUpdate, SessionListCapabilities, SessionNotification, SessionUpdate,
-    StopReason, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    StopReason, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
+    ToolKind,
 };
 use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, on_receive_request};
 use serde::{Deserialize, Serialize};
@@ -136,8 +137,8 @@ impl SavedHistory {
 /// each `session/new` response. `session/list` returns one session per page.
 /// `session/prompt` answers an error for a session not created or loaded
 /// during this ACP connection, and otherwise runs the script its text names:
-/// `hold`, `tool`, `tools`, `reject`, `fail`, `title`, `unloadable`, or
-/// anything else for a reply.
+/// `hold`, `tool`, `tools`, `reject`, `fail`, `title`, `unloadable`,
+/// `render`, or anything else for a reply.
 pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> {
     // The sessions created or loaded during this ACP connection.
     let loaded = Arc::new(Mutex::new(HashSet::<SessionId>::new()));
@@ -318,6 +319,7 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                             }
                             "title" => script.title()?,
                             "unloadable" => script.unloadable()?,
+                            "render" => script.render()?,
                             _ => script.reply(&text)?,
                         };
                         responder.respond(PromptResponse::new(stop))
@@ -427,6 +429,29 @@ impl Script {
         self.history
             .with_session(&self.session, |saved| saved.unloadable = true);
         self.reply("unloadable")
+    }
+
+    /// Sends a thought, a completed `execute` tool call with its output, a
+    /// completed `read` tool call with its content, and a Markdown message
+    /// with bold text, a list, and inline code.
+    fn render(&self) -> agent_client_protocol::Result<StopReason> {
+        self.update(SessionUpdate::AgentThoughtChunk(ContentChunk::new(
+            "weighing the tallies".into(),
+        )))?;
+        self.update(SessionUpdate::ToolCall(
+            ToolCall::new("run-1", "ls *.tally")
+                .kind(ToolKind::Execute)
+                .status(ToolCallStatus::Completed)
+                .content(vec![ToolCallContent::from("a.tally\nb.tally")]),
+        ))?;
+        self.update(SessionUpdate::ToolCall(
+            ToolCall::new("read-1", "read a.tally")
+                .kind(ToolKind::Read)
+                .status(ToolCallStatus::Completed)
+                .content(vec![ToolCallContent::from("one tally")]),
+        ))?;
+        self.message("**Two** tallies:\n\n- `a.tally`\n- `b.tally`\n")?;
+        Ok(StopReason::EndTurn)
     }
 
     /// Replies `you said: <text>`, one agent message chunk per word.

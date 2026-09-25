@@ -15,7 +15,7 @@ function pending(request_id: number, toolCallId: string, title?: string): Pendin
 
 const blocks: Block[] = [
   { kind: "user", text: "count" },
-  { kind: "tool_call", id: "t1", title: "count the tallies" },
+  { kind: "tool_call", id: "t1", title: "count the tallies", content: [] },
   { kind: "agent", text: "counting" },
 ];
 

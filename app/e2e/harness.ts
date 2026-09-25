@@ -329,6 +329,21 @@ export class Gui {
     );
   }
 
+  /**
+   * Clicks the element matching `selector` and returns the text it writes to
+   * the clipboard, which is recorded instead of written.
+   */
+  async clickCopy(selector: string): Promise<string> {
+    return this.#session().execute(
+      (selector) =>
+        new Promise<string>((resolve) => {
+          navigator.clipboard.writeText = async (text) => resolve(text);
+          document.querySelector<HTMLElement>(selector)!.click();
+        }),
+      selector,
+    );
+  }
+
   /** Scrolls the thread to `top` pixels. */
   async scrollThread(top: number): Promise<void> {
     await this.#session().execute((top) => {

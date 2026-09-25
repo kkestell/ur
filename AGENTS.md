@@ -73,7 +73,8 @@ Map each file here as it is added, following the project layout in `docs/agents/
   connection, workspaces, and sessions outside React, ordered by attention.
 - `app/src/store/sessions.ts` — every subscribed session's `ThreadState`, `useSession()`, which
   subscribes once, and `useThread()`.
-- `app/src/transcript/blocks.ts` — `Block` and `ThreadState`, the thread's display types.
+- `app/src/transcript/blocks.ts` — `Block` and `ThreadState`, the thread's display types. The tool
+  call block carries its tool call content.
 - `app/src/transcript/reduce.ts` — the transcript reducer `reduce()` and `applyEntry()`, the only
   webview code that reads `SessionUpdate` shapes.
 - `app/src/transcript/permissions.ts` — `withPermissions()` and `Item`: the pending permission
@@ -82,9 +83,16 @@ Map each file here as it is added, following the project layout in `docs/agents/
   option kind.
 - `app/src/components/Sidebar.tsx` — the workspaces, their sessions, and the Terminal row, with each
   session's status mark and attention counts.
-- `app/src/components/Thread.tsx` — the items of the selected session.
-- `app/src/components/Permission.tsx` — one pending permission request: its tool call title and
-  content, one row per option, and "Awaiting Confirmation."
+- `app/src/components/Thread.tsx` — the items of the selected session, and `Thought`, the Thinking
+  row.
+- `app/src/components/AgentMessage.tsx` — `AgentMessage`: an agent message rendered as Markdown,
+  with the copy button.
+- `app/src/components/ToolCall.tsx` — `ToolCall`, the Run Command block or the tool call row, and
+  `toolIcon()`, the glyph for each tool kind.
+- `app/src/components/ToolCallContent.tsx` — `ToolCallContentView`: tool call content as
+  preformatted text.
+- `app/src/components/Permission.tsx` — one pending permission request: its tool call title, its
+  content through `ToolCallContentView`, one row per option, and "Awaiting Confirmation."
 - `app/src/components/Editor.tsx` — the prompt textarea with Send and Stop.
 - `app/src/components/TerminalPane.tsx` — the xterm.js view of the GUI's terminal.
 - `app/src/App.tsx` — the layout, the selection, the empty states, `set_visible` for the rendered
@@ -95,6 +103,8 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `app/e2e/session.test.ts` — the end-to-end tests for agent sessions against the fake server.
 - `app/e2e/attention.test.ts` — the end-to-end tests for session status, unread sessions, and
   permission requests.
+- `app/e2e/thread.test.ts` — the end-to-end tests for thread rendering, against the fake server's
+  `render` script.
 
 ## Validation
 

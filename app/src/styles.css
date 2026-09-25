@@ -199,26 +199,182 @@ code,
   font-family: Menlo, monospace;
 }
 
-.block.thought {
-  color: #888;
+.block.error {
+  display: flex;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e06c75;
+  font-family: inherit;
 }
 
-.block.tool-call {
+/* A rejected prompt's error sits close under its user message. */
+.block.user + .block.error {
+  margin-top: -6px;
+}
+
+/* Agent messages */
+
+.block.agent {
+  white-space: normal;
+}
+
+.block.agent :is(p, ul, ol, pre, table, blockquote) {
+  margin: 0 0 8px;
+}
+
+.block.agent :is(ul, ol) {
+  padding-left: 24px;
+}
+
+.block.agent :is(h1, h2, h3, h4, h5, h6) {
+  margin: 16px 0 8px;
+  font-size: 1em;
+  line-height: 1.3;
+}
+
+.block.agent h1 {
+  font-size: 1.4em;
+}
+
+.block.agent h2 {
+  font-size: 1.2em;
+}
+
+.block.agent > :first-child {
+  margin-top: 0;
+}
+
+.block.agent code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #2a2a2a;
+  font-size: 12px;
+}
+
+.block.agent pre {
+  padding: 8px 14px;
+  border-radius: 4px;
+  background: #252525;
+  font-family: Menlo, monospace;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.block.agent pre code {
+  padding: 0;
+  background: none;
+}
+
+.block.agent table {
+  border-collapse: collapse;
+}
+
+.block.agent :is(th, td) {
+  padding: 4px 8px;
+  border: 1px solid #3a3a3a;
+}
+
+.block.agent blockquote {
+  padding-left: 12px;
+  border-left: 2px solid #3a3a3a;
+  color: #aaa;
+}
+
+.block.agent .copy {
+  display: block;
+  margin-left: auto;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  color: #888;
+  font: inherit;
+}
+
+.block.agent .copy:hover {
+  color: #ddd;
+}
+
+/* Thinking rows and tool calls */
+
+.thought-row,
+.tool-call-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+}
+
+.thought-row .icon,
+.tool-call-row .icon {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  color: #aaa;
+}
+
+.tool-call-row .label {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.block.error {
-  color: #e06c75;
-  padding: 0;
-  font-family: inherit;
+/* Under the glyph, with the text aligned to the label. */
+.thought-text {
+  margin: 4px 0 0 6px;
+  padding-left: 13px;
+  border-left: 1px solid #3a3a3a;
+  color: #888;
 }
 
-/* A rejected prompt's error reads as part of the prompt. */
-.block.user + .block.error {
-  margin-top: -12px;
-  padding: 4px 16px;
+.block.run-command {
+  border-radius: 4px;
+  background: #2a2a2a;
+}
+
+.run-command-header {
+  padding: 8px 14px;
+  cursor: default;
+}
+
+.run-command-label {
+  color: #888;
+  font-family: Menlo, monospace;
+  font-size: 11px;
+}
+
+/* Tool call content */
+
+.tool-call-content {
+  margin: 0;
+  font-family: Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.tool-call .tool-call-content {
+  margin-top: 6px;
+  padding: 8px 14px;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #888;
+  font-size: 12px;
+}
+
+.run-command .tool-call-content {
+  padding: 8px 14px;
+  border-top: 1px solid #3a3a3a;
+  color: #888;
+  font-size: 12px;
+}
+
+.permission .tool-call-content {
+  margin-bottom: 8px;
+  padding: 8px;
+  background: #262626;
+  border-radius: 4px;
 }
 
 /* Permission requests */
@@ -232,16 +388,6 @@ code,
 
 .permission-title {
   margin-bottom: 8px;
-}
-
-.permission-content {
-  margin: 0 0 8px;
-  padding: 8px;
-  background: #262626;
-  border-radius: 4px;
-  font-family: Menlo, monospace;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
 }
 
 .permission-options {

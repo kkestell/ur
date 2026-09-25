@@ -9,7 +9,7 @@
 - [x] Restore agent history: sessions survive daemon and server restarts.
 - [x] Agent GUI: a sidebar of sessions and a thread view to prompt them.
 - [x] Attention in the GUI: session status in the sidebar and permission requests in the thread.
-- [ ] Thread rendering: Markdown, thinking, and tool calls as in the wireframes.
+- [x] Thread rendering: Markdown, thinking, and tool calls as in the wireframes.
 - [ ] Session management and editor: workspaces, sessions, slash commands, config options, and
       images in the GUI.
 - [ ] Workspace terminal controls: terminals listed and managed under their workspace.

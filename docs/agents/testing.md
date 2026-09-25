@@ -74,6 +74,11 @@ documentation, give agent session tests replies, permission requests, and errors
 - A session that finishes a turn while not shown is unread until it is shown.
 - A failed turn shows its error and the failed mark.
 - A rejected prompt shows its error under the user message.
+- Agent messages render as Markdown.
+- The copy button copies the message's Markdown source.
+- A Thinking row shows its thought when clicked and hides it when clicked again.
+- A Run Command block shows its output when clicked.
+- A tool call row shows its content when clicked.
 
 ### Admission
 
