@@ -311,11 +311,12 @@ so the webview writes no protocol types by hand.
 - The supervisor calls `connect_with`, sends `initialize`, stores a clone of
   `ConnectionTo<Agent>` in `State`, and awaits a shutdown-or-closed signal. The
   daemon accepts socket connections only after `initialize`, so no request sees
-  a server that is still starting. Each connection has a generation number
-  carried on every op result; `State` ignores anything from an earlier
-  generation. On exit the supervisor fails `Working` and `NeedsPermission`
-  sessions, clears pending requests, bumps the generation, and reconnects with
-  backoff.
+  a server that is still starting. A server that has not answered after 30
+  seconds counts as a failed `initialize`, so it cannot block terminals. Each
+  connection has a generation number carried on every op result; `State`
+  ignores anything from an earlier generation. On exit the supervisor fails
+  `Working` and `NeedsPermission` sessions, clears pending requests, bumps the
+  generation, and reconnects with backoff.
 - The guard lives in `State` as `session.op`. Under the lock: if `op` is set,
   return busy; otherwise send the request through the connection clone, set
   `op`, and, for a prompt, append the user prompt entry and set `Working`.

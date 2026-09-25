@@ -238,22 +238,42 @@ async fn permission_requests_are_rejected() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn session_requests_fail_without_a_server() {
-    let daemon = TestDaemon::run(Err(anyhow!("the config file is missing")));
-    let client = daemon.connect().await;
+    // The paused clock skips ahead to the initialize timeout. The agent side
+    // of this channel stays open and never answers.
+    let (silent, _agent) = Channel::duplex();
+    let cases = [
+        (
+            "a config error",
+            Err(anyhow!("the config file is missing")),
+            "the config file is missing",
+        ),
+        (
+            "a server that never answers initialize",
+            Ok(silent),
+            "initialize failed: no answer after 30 seconds",
+        ),
+    ];
+    for (case, server, reason) in cases {
+        let daemon = TestDaemon::run(server);
+        let client = daemon.connect().await;
 
-    let request = Request::NewSession {
-        path: PathBuf::from("/some/workspace"),
-    };
-    match client.request(request).await.unwrap() {
-        Response::Error { message } => {
-            assert!(message.contains("the config file is missing"), "{message}");
+        let request = Request::NewSession {
+            path: PathBuf::from("/some/workspace"),
+        };
+        match client.request(request).await.unwrap() {
+            Response::Error { message } => {
+                assert!(message.contains(reason), "{case}: {message}");
+            }
+            other => panic!("{case}: unexpected response {other:?}"),
         }
-        other => panic!("unexpected response {other:?}"),
+        assert!(
+            matches!(
+                client.request(Request::OpenTerminal).await.unwrap(),
+                Response::Opened { .. }
+            ),
+            "{case}: open_terminal works"
+        );
     }
-    assert!(matches!(
-        client.request(Request::OpenTerminal).await.unwrap(),
-        Response::Opened { .. }
-    ));
 }

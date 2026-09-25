@@ -20,4 +20,5 @@ vt100.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 ur-fake-server.workspace = true
