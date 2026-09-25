@@ -81,6 +81,13 @@ impl Link {
             }
 
             while let Some(event) = events.recv().await {
+                if let Event::SessionRemoved { session } = &event {
+                    link.desired
+                        .lock()
+                        .unwrap()
+                        .subscribed
+                        .remove(&session.to_string());
+                }
                 let name = match &event {
                     // The terminal attachment path already ends its output.
                     Event::TerminalExited { .. } => continue,

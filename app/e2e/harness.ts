@@ -259,6 +259,15 @@ export class Gui {
 
   /** Types `text` into the editor and presses Enter. */
   async sendPrompt(text: string): Promise<void> {
+    await this.typePrompt(text);
+    await this.#session().execute(() => {
+      const textarea = document.querySelector(".editor textarea")!;
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+  }
+
+  /** Replaces the editor's text with `text`, as typing it would. */
+  async typePrompt(text: string): Promise<void> {
     await this.#session().execute((text) => {
       const textarea = document.querySelector<HTMLTextAreaElement>(".editor textarea")!;
       // React tracks the value it set, so set it the way typing does.
@@ -266,10 +275,13 @@ export class Gui {
       setter.call(textarea, text);
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     }, text);
-    await this.#session().execute(() => {
-      const textarea = document.querySelector(".editor textarea")!;
-      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    });
+  }
+
+  /** The editor's text. */
+  async promptText(): Promise<string> {
+    return this.#session().execute(
+      () => document.querySelector<HTMLTextAreaElement>(".editor textarea")!.value,
+    );
   }
 
   /** Sends `request` through the core's `request` command and returns the response. */

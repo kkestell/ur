@@ -58,7 +58,8 @@ export default function App() {
       <TerminalPane onError={setTerminalError} />
     );
   } else if (selected?.type === "session") {
-    main = <Session id={selected.session} />;
+    // Keyed so the editor's draft and message stay with their session.
+    main = <Session key={selected.session} id={selected.session} />;
   } else if (watch.workspaces.length === 0) {
     main = (
       <div className="empty">

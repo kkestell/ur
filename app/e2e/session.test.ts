@@ -57,3 +57,39 @@ e2eTest("the GUI reconnects after a daemon restart without duplicating the threa
   await gui.sendPrompt("again");
   await gui.waitForText(".block.agent", "you said: again");
 });
+
+e2eTest("a prompt the daemon answers busy comes back to the editor", async (environment) => {
+  await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.click(".sidebar .row", "New session");
+  await gui.sendPrompt("tool");
+  await gui.waitForText(".editor-actions button", "Stop");
+  await gui.sendPrompt("second");
+  await gui.waitForText(".editor-message", "The session is busy.");
+  assert.equal(await gui.promptText(), "second");
+});
+
+e2eTest("an editor draft does not follow the selection to another session", async (environment) => {
+  await environment.newSession();
+  await environment.ur("new", "home");
+  const gui = await environment.openGui();
+  await gui.click(".sidebar .row:nth-child(1)");
+  await gui.typePrompt("first draft");
+  await gui.click(".sidebar .row:nth-child(2)");
+  await gui.waitForText(".sidebar .row.selected:nth-child(2)", "New session");
+  assert.equal(await gui.promptText(), "");
+});
+
+e2eTest("a session that comes back with its workspace shows its thread", async (environment) => {
+  await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.click(".sidebar .row", "New session");
+  await gui.sendPrompt("hello");
+  await gui.waitForText(".block.agent", "you said: hello");
+
+  await environment.ur("workspace", "rm", "home");
+  await gui.waitForNone(".sidebar .row:not(.terminal-row)");
+  await environment.ur("workspace", "add", "home", environment.home);
+  await gui.click(".sidebar .row", "New session");
+  await gui.waitForText(".block.agent", "you said: hello");
+});

@@ -13,15 +13,23 @@ export function Editor({ session, status }: { session: string; status: Status | 
     }
     setMessage(undefined);
     setText("");
+    // A rejected prompt comes back to the textarea, unless something new was
+    // typed meanwhile.
+    const restore = () => setText((current) => (current === "" ? text : current));
     request({ type: "prompt", session, content: [{ type: "text", text }] })
       .then((response) => {
         if (response.type === "busy") {
           setMessage("The session is busy.");
+          restore();
         } else if (response.type === "error") {
           setMessage(response.message);
+          restore();
         }
       })
-      .catch((error) => setMessage(String(error)));
+      .catch((error) => {
+        setMessage(String(error));
+        restore();
+      });
   };
 
   const stop = () => {

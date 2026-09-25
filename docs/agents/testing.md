@@ -61,6 +61,9 @@ requests, and errors.
 - Stop cancels a running turn.
 - The selected session and its transcript survive closing and reopening the GUI.
 - The GUI reconnects after a daemon restart without duplicating the thread, and a new prompt works.
+- A prompt the daemon answers busy comes back to the editor.
+- An editor draft does not follow the selection to another session.
+- A session that comes back with its workspace shows its thread.
 
 ### Admission
 

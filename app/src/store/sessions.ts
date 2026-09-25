@@ -16,6 +16,9 @@ export function apply(event: SessionEvent): void {
   const next = reduce(threads.get(event.session) ?? { blocks: [] }, event);
   if (next === undefined) {
     threads.delete(event.session);
+    // A session that comes back, when its workspace is added again, is
+    // subscribed afresh.
+    subscribed.delete(event.session);
   } else {
     threads.set(event.session, next);
   }

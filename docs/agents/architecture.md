@@ -184,7 +184,7 @@ unchanged. The GUI groups them for display as described below. JSON client reque
 watch
 add_workspace | remove_workspace
 new_session(workspace) | delete_session
-subscribe(session) | unsubscribe(session) | focus(sessions)
+subscribe(session) | focus(sessions)
 prompt(session, content) | cancel(session)
 answer_permission(session, request_id, option_id)
 set_config_option(session, option_id, value)
@@ -267,13 +267,13 @@ app/src-tauri/src/
 app/src/
   ipc/            request(), onWatch(), onSession(id), attachTerminal(id),
                   typed by the generated bindings
-  store/          watch.ts, sessions.ts as Map<id, SessionState>, terminals.ts
-  transcript/     reduce.ts: (SessionState, Event) -> SessionState, pure and
+  store/          watch.ts, sessions.ts as Map<id, ThreadState> with
+                  useSession(id), terminals.ts
+  transcript/     reduce.ts: (ThreadState, Event) -> ThreadState, pure and
                   unit tested; blocks.ts display types
   components/     Sidebar, Thread, Editor, Permission, TerminalPane, Layout,
                   Tab
-  hooks/          useSession(id) with refcounted subscribe and unsubscribe,
-                  useTerminal(id)
+  hooks/          useTerminal(id)
   keys.ts
 ```
 
@@ -359,8 +359,10 @@ webview never touches the socket.
   next prompt. Keyboard shortcuts are handled in the webview.
 - The core writes the GUI state file described below.
 
-The `useSession` hook installs the session's event listener, then sends `subscribe`; it unsubscribes
-when the last component using that session unmounts. The Link keeps the desired set: watch,
+The `useSession` hook sends `subscribe` the first time a session is used and never unsubscribes: the
+wire protocol has no `unsubscribe`, and the session store keeps every subscribed session's thread so
+reselecting it does not refetch. A session removed with its workspace leaves both the store and the
+desired set, so it is subscribed afresh if it comes back. The Link keeps the desired set: watch,
 subscribed sessions, terminal attachments with their sizes, and focus. After a disconnect it
 reconnects and replays that set. The webview has no reconnect logic: snapshots replace store state,
 terminal views restore through the terminal attachment path, and a `connection` event drives the
