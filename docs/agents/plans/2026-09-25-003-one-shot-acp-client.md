@@ -2,14 +2,14 @@
 
 ## Goal
 
-Build the One-shot ACP client section of `eng/todo.md`.
+Build the One-shot ACP client section of `docs/agents/todo.md`.
 `ur agent-run <workspace> <prompt>` reads the server command from the config
 file, starts the server, sends `initialize`, `session/new`, and
 `session/prompt`, prints each ACP update as one JSON line, and asks on stdin
 when the server requests permission. When the prompt returns, it prints the
 stop reason and exits.
 
-When this is done, the check in `eng/todo.md` passes with Ox: in Ask mode (Ox's
+When this is done, the check in `docs/agents/todo.md` passes with Ox: in Ask mode (Ox's
 default mode), a prompt that runs `ls` stops at a permission request, approving
 it prints the tool call and the answer, and the last line is `end_turn`.
 
@@ -60,7 +60,7 @@ server cannot continue the tool call until it gets the answer, and holding the
 loop keeps the question the last thing printed. The handler waits only on the
 answers input, never on the ACP connection, so it cannot deadlock. This is
 specific to `agent-run`; the daemon's handlers only forward, as described
-under Daemon architecture in `eng/architecture.md`.
+under Daemon architecture in `docs/agents/architecture.md`.
 
 ### Protocol version and client capabilities
 
@@ -105,7 +105,7 @@ test agent over `Channel::duplex()`.
 
 - server, config file, capabilities, one-shot client, session, turn, stop
   reason, permission option, cancellation, test agent — as defined in
-  `eng/glossary.md`.
+  `docs/agents/glossary.md`.
 - `Config { server: ServerConfig }` and `ServerConfig { command, args }` — the
   config file as read by `config.rs`.
 - answers input — the line input `run` reads permission answers from; stdin in
@@ -135,7 +135,7 @@ prompt text it received.
 - `rejects_an_unsupported_protocol_version`: the test agent answers
   `initialize` with protocol version 2; `run` fails with an error naming it.
 
-Run the check in `eng/todo.md` with Ox by hand.
+Run the check in `docs/agents/todo.md` with Ox by hand.
 
 ## Implementation plan
 
@@ -152,11 +152,11 @@ Run the check in `eng/todo.md` with Ox by hand.
    a daemon, and call `one_shot::start`.
 5. Add the tests in the Test plan.
 6. Write a config file with `command = "ox"` and run the check in
-   `eng/todo.md`.
+   `docs/agents/todo.md`.
 
 ## Documentation updates
 
 - `AGENTS.md`: map `crates/ur/src/config.rs` and `crates/ur/src/one_shot.rs`,
   and change the `main.rs` entry to list `daemon` and `agent-run`.
-- `eng/architecture.md`: under ACP boundary, show the config file's `[server]`
+- `docs/agents/architecture.md`: under ACP boundary, show the config file's `[server]`
   table in place of the loose `command = "ox"` and `args = []`.

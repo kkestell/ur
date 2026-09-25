@@ -3,8 +3,8 @@
 ## Scope and coverage
 
 Reviewed the uncommitted milestone 0 work against
-`eng/plans/2026-09-25-001-working-terminal.md`, milestone 0 in `eng/todo.md`,
-and `eng/architecture.md`. I read `eng/work/2026-09-25-001-working-terminal.md`
+`docs/agents/plans/2026-09-25-001-working-terminal.md`, milestone 0 in `docs/agents/todo.md`,
+and `docs/agents/architecture.md`. I read `docs/agents/work/2026-09-25-001-working-terminal.md`
 for the departures from the plan and the manual verification. The code:
 
 - `crates/ur-client/` (framing, protocol types, `Client`).
@@ -12,7 +12,7 @@ for the departures from the plan and the manual verification. The code:
 - `app/src-tauri/src/` (`Link`, commands, GUI state file).
 - `app/src/` (IPC wrappers, `TerminalPane`, `App`, generated bindings).
 - The workspace manifests and the documentation changes in `AGENTS.md` and
-  `eng/architecture.md`.
+  `docs/agents/architecture.md`.
 
 Lenses: correctness, concurrency, resources, error handling, testing,
 documentation, Rust idioms, and Rust Cargo.
@@ -25,7 +25,7 @@ Gaps:
   typed by dispatching `insertText` events. The user's manual pass under
   Checks run covered real key presses.
 - The `webdriver` feature and `tauri-plugin-wdio-webdriver` belong to
-  `eng/plans/2026-09-25-002-end-to-end-suite.md` and were not reviewed.
+  `docs/agents/plans/2026-09-25-002-end-to-end-suite.md` and were not reviewed.
 - Scaffolded files (icons, `tsconfig*.json`, `vite.config.ts`, lockfiles) were
   checked only for their effect on the build.
 

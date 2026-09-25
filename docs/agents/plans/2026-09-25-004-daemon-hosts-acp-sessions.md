@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build the Daemon hosts ACP sessions section of `eng/todo.md`. The daemon
+Build the Daemon hosts ACP sessions section of `docs/agents/todo.md`. The daemon
 launches the server from the config file and keeps one ACP connection. Daemon
 clients create sessions, send prompts, and subscribe to a session's transcript:
 a session snapshot followed by every later transcript entry, in order, with no
@@ -10,7 +10,7 @@ gaps or duplicates. A prompt sent while the session's operation guard is held
 answers busy and changes nothing. The CLI gains `ur new <path>`,
 `ur prompt <session> <text>`, and `ur read <session> [--follow]`.
 
-When this is done, the check in `eng/todo.md` passes with Ox: `ur read --follow`
+When this is done, the check in `docs/agents/todo.md` passes with Ox: `ur read --follow`
 streams the reply to a prompt sent with `ur prompt`, and a second
 `ur read --follow` started partway through shows the whole transcript once.
 
@@ -46,7 +46,7 @@ streams the reply to a prompt sent with `ur prompt`, and a second
 
 ### Handlers apply ACP updates to `State` directly
 
-This replaces the ingest task in `eng/architecture.md`. The notification handler
+This replaces the ingest task in `docs/agents/architecture.md`. The notification handler
 locks `State`, appends the ACP update entry, queues the `entry` event to the
 session's subscribers, and returns. It never awaits, so it holds the SDK's
 dispatch loop only for the lock.
@@ -78,7 +78,7 @@ or the server later exits, the daemon logs the reason to stderr and keeps
 running. Terminals keep working, subscribe still serves the transcripts held in
 memory, and `new_session` and `prompt` answer an error naming the reason. The
 daemon does not restart the server, and a request in flight when the server
-exits may go unanswered; the Restore agent history section of `eng/todo.md`
+exits may go unanswered; the Restore agent history section of `docs/agents/todo.md`
 handles server exit.
 
 ### Prompts return when sent
@@ -178,10 +178,10 @@ dispatch loop stays free while it waits for a permission answer or the hold.
 - server, ACP connection, daemon client, session, transcript, transcript entry,
   ACP update entry, user prompt entry, session snapshot, subscribe, operation
   guard (`session.op`), busy, outbox, `State`, test agent, config file — as
-  defined in `eng/glossary.md`.
+  defined in `docs/agents/glossary.md`.
 - fake server — the scripted server in `crates/ur-fake-server`: its binary is
   what the daemon launches in end-to-end tests, and its library is the test
-  agent in the daemon's tests. Added to `eng/glossary.md`.
+  agent in the daemon's tests. Added to `docs/agents/glossary.md`.
 - script — what the fake server does for a prompt, chosen by the prompt's text:
   `hold`, `tool`, or the reply.
 - `Hold` — the fake server's handle that ends a `hold` script with `release()`.
@@ -218,11 +218,11 @@ The terminal integration tests in `crates/ur/tests/terminal.rs` stay as they
 are; their daemon has no config file. The end-to-end suite gains no tests; its
 daemon now launches the fake server, and the terminal tests must still pass.
 
-Run the check in `eng/todo.md` with Ox by hand.
+Run the check in `docs/agents/todo.md` with Ox by hand.
 
 ## Implementation plan
 
-The groups follow the numbered tasks in the section of `eng/todo.md`.
+The groups follow the numbered tasks in the section of `docs/agents/todo.md`.
 
 Sessions and prompts:
 
@@ -278,7 +278,7 @@ Tests and the fake server:
     `target/e2e/debug/ur-fake-server`, and starts the daemon with
     `XDG_CONFIG_HOME` pointing at it. `app/package.json`: the `e2e` script
     builds `-p ur -p ur-fake-server`.
-13. Run the check in `eng/todo.md` with Ox and the end-to-end suite.
+13. Run the check in `docs/agents/todo.md` with Ox and the end-to-end suite.
 
 ## Documentation updates
 
@@ -286,14 +286,14 @@ Tests and the fake server:
   `daemon/tests.rs`, `cli/`, and `crates/ur-fake-server`; add `new`, `prompt`,
   and `read` to the `main.rs` entry; update the `protocol.rs`, `client.rs`,
   and `harness.ts` entries.
-- `eng/architecture.md`: under Daemon architecture, replace the ingest task
+- `docs/agents/architecture.md`: under Daemon architecture, replace the ingest task
   with handlers that apply updates directly, `State` methods that queue events
   under the lock, and ops that handle responses in `on_receiving_result`
   callbacks, with the ordering reasons above. Update the Runtime section's
   `block_task()` sentence to match, remove `ingest.rs` from the project layout,
   change `mod.rs`'s description, and add `crates/ur-fake-server`.
-- `eng/glossary.md`: remove Ingest task, drop `AcpIncoming` from Generation,
+- `docs/agents/glossary.md`: remove Ingest task, drop `AcpIncoming` from Generation,
   change `State` to say its methods queue events on outboxes, and add fake
   server.
-- `eng/testing.md`: `TestEnvironment` writes a config file that launches the
+- `docs/agents/testing.md`: `TestEnvironment` writes a config file that launches the
   fake server; daemon tests use the fake server in process.

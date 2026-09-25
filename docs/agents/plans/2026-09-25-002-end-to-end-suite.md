@@ -5,7 +5,7 @@
 Milestone checks need the real GUI: the webview, the core, and the daemon
 working together. Today they are run by hand. Add an end-to-end suite that
 drives the built app through WebDriver, run with `pnpm -C app e2e` at the end of
-each milestone. Keep it small: a closed list of guarantees in `eng/testing.md`,
+each milestone. Keep it small: a closed list of guarantees in `docs/agents/testing.md`,
 each owned by one test, covering the most important and trickiest behavior.
 Everything else, including one-off checks after a milestone, uses the same
 harness from throwaway scripts that are never committed.
@@ -92,7 +92,7 @@ Related code. WebDriver key actions are not used.
 
 ### Admission to the suite
 
-`eng/testing.md` gets an end-to-end section holding the guarantee list, the
+`docs/agents/testing.md` gets an end-to-end section holding the guarantee list, the
 admission bar, and the non-goals. A guarantee is admitted only when it holds
 across the daemon, the core, and the webview together and cannot be tested in
 the Rust test suite, and only with the user's approval. Non-goals: styling,
@@ -103,14 +103,14 @@ repository, and their scripts and screenshots are not committed.
 ### The fake server
 
 The fake server is not part of this change. Milestone 2 builds it when the
-daemon first launches a server; `eng/todo.md` records that.
+daemon first launches a server; `docs/agents/todo.md` records that.
 
 ## Naming
 
 - end-to-end suite — The WebDriver tests in `app/e2e/`, run by
   `pnpm -C app e2e`. Each test owns one guarantee from the end-to-end guarantee
   list.
-- end-to-end guarantee list — The closed list of guarantees in `eng/testing.md`
+- end-to-end guarantee list — The closed list of guarantees in `docs/agents/testing.md`
   that the end-to-end suite owns.
 - ad-hoc check — A throwaway script outside the repository that uses the harness
   to check behavior after a milestone. It is never committed.
@@ -122,9 +122,9 @@ daemon first launches a server; `eng/todo.md` records that.
   `TestEnvironment`, saves a screenshot on failure, and stops the environment.
 - fake server — A server built with the SDK's `Agent.builder()` that the daemon
   launches from the config file in end-to-end tests. Named here so milestone 2
-  uses the same term; added to `eng/glossary.md` when it exists.
+  uses the same term; added to `docs/agents/glossary.md` when it exists.
 - terminal, screen snapshot, daemon, core, webview, GUI state file — as defined
-  in `eng/glossary.md`.
+  in `docs/agents/glossary.md`.
 
 ## Test plan
 
@@ -165,14 +165,14 @@ Each test fails with the terminal text in its message and a screenshot in
 
 ## Documentation updates
 
-- `eng/testing.md`: an End-to-end suite section with the end-to-end guarantee
+- `docs/agents/testing.md`: an End-to-end suite section with the end-to-end guarantee
   list (the two guarantees above), the admission bar, the non-goals, and ad-hoc
   checks, as under Admission to the suite.
 - `AGENTS.md`: map `app/e2e/harness.ts`, `app/e2e/terminal.test.ts`, and the
   `webdriver` feature. Under Validation, run `pnpm -C app e2e` at the end of
   each milestone, and do not add end-to-end tests without the user's approval.
-- `eng/glossary.md`: add end-to-end suite, end-to-end guarantee list, and ad-hoc
+- `docs/agents/glossary.md`: add end-to-end suite, end-to-end guarantee list, and ad-hoc
   check.
-- `eng/todo.md`: milestone 2, task 4 also builds the fake server, shares its
+- `docs/agents/todo.md`: milestone 2, task 4 also builds the fake server, shares its
   scripted behavior with the test agent, and adds the config file to
   `TestEnvironment`.

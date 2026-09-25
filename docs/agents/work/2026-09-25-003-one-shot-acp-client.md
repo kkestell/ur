@@ -2,14 +2,14 @@
 
 ## Plan
 
-`eng/plans/2026-09-25-003-one-shot-acp-client.md`
+`docs/agents/plans/2026-09-25-003-one-shot-acp-client.md`
 
 ## Summary
 
 `ur agent-run <workspace> <prompt>` reads the `[server]` table from the config
 file, runs one prompt, prints each line of output the plan describes, answers
 permission requests from stdin, and ends with the stop reason. The plan's goal
-is met: the check in `eng/todo.md` passes with Ox. The three tests in the plan
+is met: the check in `docs/agents/todo.md` passes with Ox. The three tests in the plan
 own new guarantees in `crates/ur/src/one_shot.rs`; no existing test gained,
 lost, or moved a guarantee.
 
@@ -18,7 +18,7 @@ lost, or moved a guarantee.
 - `crates/ur/Cargo.toml` enables tokio's `io-std` and `io-util` features for
   stdin and `read_line`.
 - `Cargo.lock` pins `agent-client-protocol` to 2.1.0. The requirement `2.1.0`
-  resolved to 2.2.0, and `eng/architecture.md` and the plan name 2.1.0.
+  resolved to 2.2.0, and `docs/agents/architecture.md` and the plan name 2.1.0.
 - The test agent also records the permission outcome and whether it received
   `session/cancel`. `answers_permission_from_input` asserts both, so the
   end-of-input case checks that the cancellation was sent.
@@ -50,7 +50,7 @@ printf '[server]\ncommand = "ox"\n' > /tmp/ur-check/config/ur/config.toml
 touch /tmp/ur-check/ws/alpha.txt /tmp/ur-check/ws/beta.txt
 ```
 
-1. The check in `eng/todo.md`: approving the `ls` permission request.
+1. The check in `docs/agents/todo.md`: approving the `ls` permission request.
 
    ```sh
    echo 1 | XDG_CONFIG_HOME=/tmp/ur-check/config target/debug/ur agent-run \

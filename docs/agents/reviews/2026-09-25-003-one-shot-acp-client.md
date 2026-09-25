@@ -2,10 +2,10 @@
 
 ## Scope and coverage
 
-Reviewed commit `b47986c`, the One-shot ACP client section of `eng/todo.md`:
+Reviewed commit `b47986c`, the One-shot ACP client section of `docs/agents/todo.md`:
 `crates/ur/src/one_shot.rs`, `crates/ur/src/config.rs`,
 `crates/ur/src/main.rs`, the Cargo manifests, and the documentation changes,
-against `eng/plans/2026-09-25-003-one-shot-acp-client.md`. Also read the SDK's
+against `docs/agents/plans/2026-09-25-003-one-shot-acp-client.md`. Also read the SDK's
 `AcpAgent` process handling (`agent-client-protocol-2.1.0/src/acp_agent.rs`)
 for how the server's stdio, stderr, and exit are handled.
 
@@ -35,7 +35,7 @@ simplicity, documentation, rust-idioms, rust-cargo.
 
 - The reproduction above, before and after the fix. After the fix, the error
   appears when the server exits.
-- The check in `eng/todo.md` with Ox, after the fix: approving the `ls`
+- The check in `docs/agents/todo.md` with Ox, after the fix: approving the `ls`
   permission request printed the tool call and the answer, the last line was
   `end_turn`, and the exit status was 0.
 - `ox </dev/null` exits, so the server does not outlive `agent-run` when it is
@@ -51,6 +51,6 @@ simplicity, documentation, rust-idioms, rust-cargo.
 
 ## Verdict
 
-The one-shot client meets its plan and passes the check in `eng/todo.md`. The
+The one-shot client meets its plan and passes the check in `docs/agents/todo.md`. The
 one finding, a hang after the server exits during a permission request, is
 fixed in `main.rs`.

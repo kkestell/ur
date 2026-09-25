@@ -3,7 +3,7 @@ THIS DOCUMENT MUST BE KEPT UP TO DATE
 ## Code
 
 Map each file here as it is added, following the project layout in
-`eng/architecture.md`.
+`docs/agents/architecture.md`.
 
 - `Cargo.toml` — the Cargo workspace and shared dependency versions.
 - `.cargo/config.toml` — sets `TS_RS_EXPORT_DIR` so `cargo test` writes the
@@ -79,30 +79,31 @@ validation: `cargo fmt --all -- --check`,
 not call partial validation complete. For documentation-only, comment-only, and
 filename-only changes, use focused searches and diff inspection.
 
-Run the end-to-end suite, `pnpm -C app e2e`, when finishing each section of
-`eng/todo.md`. Do not add end-to-end tests without the user's approval.
+Run the end-to-end suite, `pnpm -C app e2e`, when finishing each top-level item
+in `docs/agents/todo.md`. Do not add end-to-end tests without the user's
+approval.
+
+## Ox workflow
+
+Plans, work logs, reviews, and issues live in `docs/agents/`.
+
+- `/ox-plan` explores a change and writes a plan to `docs/agents/plans/`.
+- `/ox-work` implements a plan, writes a work log to `docs/agents/work/`, and commits.
+- `/ox-review` reviews code, writes a review to `docs/agents/reviews/`, and records each finding in `docs/agents/issues.csv`.
+- `docs/agents/todo.md` is the task list. High and medium severity issues are added under the task they affect, or as new top-level items.
+- `docs/agents/issues.csv` is the issue log. Each row has an id (`OX-NNNN`), a created time, a title, a severity (`low`, `medium`, `high`), the review lens that found it, a status (`unplanned`, `planned`, `wontfix`, `fixed`), and the review that found it. Issues found outside a review leave the lens and review empty. Append rows; never reorder or delete them, because `todo.md` links to rows by line number.
 
 ## Documentation
-
-Use `YYYY-MM-DD-NNN-slug.md` filenames for:
-
-- Plans in `eng/plans/`.
-- Work logs in `eng/work/`, named with the plan's slug.
-- Code reviews in `eng/reviews/`.
-
-Plan reviews stay in the conversation. Do not create review documents for plans.
-Include this rule explicitly when asking Claude or another agent to review a
-plan.
 
 Never mention "milestones", "phases", etc. in code comments or documentation (other than todo.md) -- describe the work instead.
 
 Read before planning and changing code:
 
-- `eng/architecture.md`
-- `eng/todo.md`
-- `eng/code-style.md`
-- `eng/glossary.md`
-- `eng/testing.md`
+- `docs/agents/architecture.md`
+- `docs/agents/todo.md`
+- `docs/agents/code-style.md`
+- `docs/agents/glossary.md`
+- `docs/agents/testing.md`
 
 ## Backwards Compatibility
 

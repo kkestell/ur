@@ -3,8 +3,8 @@
 ## Scope and coverage
 
 Reviewed commit `74964bb` against
-`eng/plans/2026-09-25-004-daemon-hosts-acp-sessions.md` and the Daemon hosts
-ACP sessions section of `eng/todo.md`: `crates/ur/src/daemon/` (`mod.rs`,
+`docs/agents/plans/2026-09-25-004-daemon-hosts-acp-sessions.md` and the Daemon hosts
+ACP sessions section of `docs/agents/todo.md`: `crates/ur/src/daemon/` (`mod.rs`,
 `acp.rs`, `ops.rs`, `state.rs`, `server.rs`, `tests.rs`), `crates/ur/src/cli/`,
 `crates/ur/src/main.rs`, the `one_shot.rs` change, `crates/ur-client`
 (`protocol.rs`, `client.rs`, the generated bindings), `crates/ur-fake-server`,
@@ -16,7 +16,7 @@ read its source in `agent-client-protocol-2.1.0`.
 Lenses: correctness, concurrency, error-handling, testing, api-design,
 documentation, rust-idioms.
 
-Gaps: I did not run the end-to-end suite or the check in `eng/todo.md` with
+Gaps: I did not run the end-to-end suite or the check in `docs/agents/todo.md` with
 Ox.
 
 ## Findings

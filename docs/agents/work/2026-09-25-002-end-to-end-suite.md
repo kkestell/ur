@@ -2,7 +2,7 @@
 
 ## Plan
 
-`eng/plans/2026-09-25-002-end-to-end-suite.md`
+`docs/agents/plans/2026-09-25-002-end-to-end-suite.md`
 
 ## Summary
 
@@ -24,8 +24,8 @@ a guarantee.
 - `app/e2e/tsconfig.json` also sets `target` and `lib` to ES2023, for
   `findLast` and `replaceAll`, and `erasableSyntaxOnly`, so `tsc` rejects
   syntax Node's type stripping cannot run.
-- `AGENTS.md` and `eng/testing.md` say "when finishing each section of
-  `eng/todo.md`" instead of "at the end of each milestone", following the
+- `AGENTS.md` and `docs/agents/testing.md` say "when finishing each section of
+  `docs/agents/todo.md`" instead of "at the end of each milestone", following the
   `AGENTS.md` rule against naming milestones outside `todo.md`.
 
 ## Decisions

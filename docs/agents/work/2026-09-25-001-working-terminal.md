@@ -2,7 +2,7 @@
 
 ## Plan
 
-`eng/plans/2026-09-25-001-working-terminal.md`
+`docs/agents/plans/2026-09-25-001-working-terminal.md`
 
 ## Summary
 

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build the Status, permissions, and workspaces section of `eng/todo.md`.
+Build the Status, permissions, and workspaces section of `docs/agents/todo.md`.
 Workspaces are saved in the state file, and every session belongs to one. A
 daemon client that sends `watch` gets a watch snapshot of workspaces and
 sessions, then every change to them. Each session has a session status and an
@@ -12,7 +12,7 @@ the first answer wins, and cancellation answers every pending request with
 gains `ur workspace add|rm`, `ur ls`, `ur cancel`, `ur approve|deny`, and
 `ur wait`, and `ur new` takes a workspace name.
 
-When this is done, the check in `eng/todo.md` passes with Ox: two sessions in
+When this is done, the check in `docs/agents/todo.md` passes with Ox: two sessions in
 two workspaces, `ur wait --until attention` on both, and one approved from a
 second terminal.
 
@@ -58,16 +58,16 @@ connection replaces the earlier registration. After that, the daemon sends:
 
 Workspaces are listed in the order they were added, and sessions in the order
 they were created. Session titles and last activity are left for the Restore
-agent history section of `eng/todo.md`.
+agent history section of `docs/agents/todo.md`.
 
 ### Pending permission requests travel in the session status
 
 `Status::NeedsPermission { requests }` carries each `PendingPermission`, oldest
-first, as the status table in `eng/architecture.md` already specifies. Watch
+first, as the status table in `docs/agents/architecture.md` already specifies. Watch
 therefore delivers every pending permission request to every watching daemon
 client, and a status change tells them a request is resolved. The session
-snapshot stays as it is: the transcript only. `eng/architecture.md` and
-`eng/glossary.md` are updated to match.
+snapshot stays as it is: the transcript only. `docs/agents/architecture.md` and
+`docs/agents/glossary.md` are updated to match.
 
 The daemon numbers pending permission requests from 1 with a `u32` counter
 shared by all sessions. It does not use the JSON-RPC ID, which can be a string,
@@ -80,7 +80,7 @@ a number, or null. `u32` keeps the TypeScript binding `number`, as for
 `responders: HashMap<u32, Responder<RequestPermissionResponse>>` (keyed by
 request ID, alongside the requests listed in the status), and `cancelling:
 bool`. Status changes follow the table under Session status in
-`eng/architecture.md`:
+`docs/agents/architecture.md`:
 
 - A new session is `Idle { last_stop: None }`.
 - Sending a prompt sets `Working`. This also clears `Failed`.
@@ -97,7 +97,7 @@ A rejected prompt takes the same path. Its turn error entry follows its user
 prompt entry because no update arrives in between.
 
 Server exit during a turn still leaves the session `Working`. The Restore agent
-history section of `eng/todo.md` handles that.
+history section of `docs/agents/todo.md` handles that.
 
 ### Focus
 
@@ -136,7 +136,7 @@ to `socket_path()`, so the daemon and the core agree on the directory. A missing
 file means no workspaces. The daemon reads the file at startup, and an
 unreadable file stops the daemon with an error that names the path. Reading at
 startup belongs here, since without it the file has no reader. The Restore
-agent history section of `eng/todo.md` adds `session/list` on top.
+agent history section of `docs/agents/todo.md` adds `session/list` on top.
 
 `add_workspace { name, path }` answers an error for an empty name, a name
 already in use, or a path that is not an absolute path to a directory. The
@@ -201,10 +201,10 @@ call, asks for permission, and returns the outcome. New scripts:
   unread, needs attention, focus, pending permission request, permission
   option, first answer wins, resolved, cancellation, turn error entry,
   rejected prompt, busy, operation guard, outbox, `State`, fake server — as
-  defined in `eng/glossary.md`.
+  defined in `docs/agents/glossary.md`.
 - `Workspace { name, path }` — a workspace on the wire and in the state file.
 - `SessionSummary { session, workspace, status, unread }` — one session as watch
-  shows it. Added to `eng/glossary.md` as session summary.
+  shows it. Added to `docs/agents/glossary.md` as session summary.
 - `PendingPermission { request_id, request }` — a pending permission request
   on the wire: the daemon's request ID and the ACP `RequestPermissionRequest`.
 - request ID — the daemon's `u32` number for a pending permission request.
@@ -279,12 +279,12 @@ for the next `session_changed` for a session and returns its summary.
 
 `crates/ur/tests/terminal.rs` sets `XDG_STATE_HOME` to its temporary directory.
 The end-to-end suite gains no tests. Run it at the end, since this finishes a
-section of `eng/todo.md` and `gui_state.rs` changes. Run the check in
-`eng/todo.md` with Ox by hand.
+section of `docs/agents/todo.md` and `gui_state.rs` changes. Run the check in
+`docs/agents/todo.md` with Ox by hand.
 
 ## Implementation plan
 
-The groups follow the numbered tasks in the section of `eng/todo.md`.
+The groups follow the numbered tasks in the section of `docs/agents/todo.md`.
 
 Workspaces and watch:
 
@@ -343,14 +343,14 @@ Wait and tests:
 11. `crates/ur/src/daemon/tests.rs`: the tests in the Test plan.
     `crates/ur/tests/terminal.rs`: set `XDG_STATE_HOME`. Regenerate
     `app/src/ipc/bindings/` with `cargo test`.
-12. Run the end-to-end suite and the check in `eng/todo.md` with Ox.
+12. Run the end-to-end suite and the check in `docs/agents/todo.md` with Ox.
 
 ## Documentation updates
 
 - `AGENTS.md`: map `daemon/state_file.rs`, `cli/workspace.rs`, `cli/ls.rs`,
   `cli/cancel.rs`, `cli/answer.rs`, and `cli/wait.rs`. Update the `main.rs`,
   `cli/`, `protocol.rs`, `state.rs`, and `mod.rs` entries.
-- `eng/architecture.md`: under Wire protocol, say that `subscribe` covers the
+- `docs/agents/architecture.md`: under Wire protocol, say that `subscribe` covers the
   transcript and config options, and that pending permission requests travel in
   the session status in `watch`. List the watch change events, and change
   `new_session` to take a workspace. Under Permissions, give the daemon's
@@ -358,7 +358,7 @@ Wait and tests:
   sessions it shows, including `ur read`. Under The ACP server owns saved
   history, say that the daemon reads the state file at startup and stops when
   it cannot.
-- `eng/glossary.md`: remove pending permission requests from Subscribe and
+- `docs/agents/glossary.md`: remove pending permission requests from Subscribe and
   Session snapshot. Add them to Watch. Add session summary, add the request ID
   to Pending permission request, and add `tools`, `reject`, and `fail` to Fake
   server.

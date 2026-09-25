@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build milestone 0 in `eng/todo.md`: the daemon runs a login shell through
+Build milestone 0 in `docs/agents/todo.md`: the daemon runs a login shell through
 `portable-pty`, and the GUI shows it in xterm.js. The daemon feeds all shell
 output through `vt100::Parser`, so closing the GUI leaves the shell and its
 applications running, and reopening the GUI (at any window size) restores the
@@ -13,7 +13,7 @@ check passes with `top` and an editor holding an unsaved buffer.
 
 There is no code yet. These references shape the work:
 
-- `eng/architecture.md` — Wire protocol, Project layout, Terminals in the
+- `docs/agents/architecture.md` — Wire protocol, Project layout, Terminals in the
   daemon, GUI architecture, GUI state, and Transport define the pieces built
   here.
 - `vt100-0.16.2/src/screen.rs` — `state_formatted()` writes the visible grid,
@@ -122,7 +122,7 @@ closed.
 
 - terminal, terminal ID, terminal attachment, screen snapshot, terminal
   attachment format, outbox, frame, request, event, daemon client, core,
-  webview, Link, GUI state file, selection — as defined in `eng/glossary.md`.
+  webview, Link, GUI state file, selection — as defined in `docs/agents/glossary.md`.
 - `TerminalId` — The `u32` terminal ID the daemon assigns, counting from 1.
 - `ClientMessage { id, request }` — The `JSON` frame payload from a daemon
   client: a request and its ID.
@@ -167,7 +167,7 @@ contains given text or five seconds pass.
 - `shell_exit_ends_the_terminal`: after `exit`, the `pty` receiver closes and
   attaching the same ID is an error.
 
-The GUI has no automated tests. The milestone 0 check in `eng/todo.md` covers
+The GUI has no automated tests. The milestone 0 check in `docs/agents/todo.md` covers
 it.
 
 ## Implementation plan
@@ -238,14 +238,14 @@ it.
 - `app/src-tauri/src/commands.rs`: `attach_terminal` follows Selection and
   reattachment.
 - Add the remaining integration tests.
-- Run the milestone 0 check in `eng/todo.md`.
+- Run the milestone 0 check in `docs/agents/todo.md`.
 
 ## Documentation updates
 
 - `AGENTS.md`: map each added file. Add `pnpm -C app build` to Validation. If
   `cargo build --workspace` needs `app/dist` in a clean checkout, list the
   `pnpm` build first.
-- `eng/architecture.md`: under GUI architecture, list `attach_terminal` among
+- `docs/agents/architecture.md`: under GUI architecture, list `attach_terminal` among
   the core commands and give the terminal `Channel` type as
   `Channel<tauri::ipc::Response>`. Under Terminals in the daemon, record the
   terminal attachment order and the alternate-screen prefix as the terminal

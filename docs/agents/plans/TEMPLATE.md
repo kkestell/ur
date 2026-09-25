@@ -20,7 +20,7 @@ needed to understand them.
 ## Naming
 
 Define each project term used in the plan. Use its definition from
-`eng/glossary.md` if it has one. Use the same term in tasks, code, comments, and
+`docs/agents/glossary.md` if it has one. Use the same term in tasks, code, comments, and
 documentation. Do not use different names for the same thing or give an existing
 term a new meaning.
 

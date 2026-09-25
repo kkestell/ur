@@ -2,7 +2,7 @@
 
 ## Plan
 
-`eng/plans/2026-09-25-004-daemon-hosts-acp-sessions.md`
+`docs/agents/plans/2026-09-25-004-daemon-hosts-acp-sessions.md`
 
 ## Summary
 
@@ -10,7 +10,7 @@ The daemon launches the server from the config file, keeps one ACP connection,
 and serves `new_session`, `subscribe`, and `prompt`. `ur new`, `ur prompt`, and
 `ur read [--follow]` use them. The fake server is a workspace crate, and the
 end-to-end suite's daemon launches it. The plan's goal is met: the check in
-`eng/todo.md` passes with Ox.
+`docs/agents/todo.md` passes with Ox.
 
 The five tests in `crates/ur/src/daemon/tests.rs` own new guarantees. No
 existing test gained, lost, or moved a guarantee.
@@ -57,7 +57,7 @@ existing test gained, lost, or moved a guarantee.
 
 ## Manual verification
 
-1. The check in `eng/todo.md` with Ox.
+1. The check in `docs/agents/todo.md` with Ox.
 
    ```sh
    T=$(mktemp -d); mkdir -p $T/config/ur $T/ws

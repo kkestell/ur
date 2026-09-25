@@ -2,7 +2,7 @@
 
 ## Plan
 
-`eng/plans/2026-09-25-005-status-permissions-and-workspaces.md`
+`docs/agents/plans/2026-09-25-005-status-permissions-and-workspaces.md`
 
 ## Summary
 
@@ -14,7 +14,7 @@ answer wins, and cancellation answers every pending request with `Cancelled`.
 Prompt errors become turn error entries and set `Failed`. The CLI gains
 `ur workspace add|rm`, `ur ls`, `ur cancel`, `ur approve|deny`, and `ur wait`,
 and `ur new` takes a workspace name. The plan's goal is met: the check in
-`eng/todo.md` passes with Ox.
+`docs/agents/todo.md` passes with Ox.
 
 Test guarantees: the ten tests the plan lists own new guarantees.
 `permission_requests_are_rejected` is deleted with its guarantee.
@@ -68,7 +68,7 @@ target/debug/ur daemon &
 P='Run the shell command `ls` in this directory and tell me what it prints.'
 ```
 
-1. The check in `eng/todo.md` with Ox.
+1. The check in `docs/agents/todo.md` with Ox.
 
    ```sh
    target/debug/ur workspace add one $T/ws1

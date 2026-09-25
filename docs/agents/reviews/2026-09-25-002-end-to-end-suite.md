@@ -2,11 +2,11 @@
 
 ## Scope and coverage
 
-Reviewed commit `46a6434` against `eng/plans/2026-09-25-002-end-to-end-suite.md`
+Reviewed commit `46a6434` against `docs/agents/plans/2026-09-25-002-end-to-end-suite.md`
 and its work log: `app/e2e/harness.ts`, `app/e2e/terminal.test.ts`,
 `app/e2e/tsconfig.json`, the `e2e` script and dependencies in
 `app/package.json`, `app/pnpm-workspace.yaml`, `.gitignore`, and the updates to
-`AGENTS.md`, `eng/testing.md`, `eng/glossary.md`, and `eng/todo.md`. Also read
+`AGENTS.md`, `docs/agents/testing.md`, `docs/agents/glossary.md`, and `docs/agents/todo.md`. Also read
 the code the suite depends on: the `webdriver` feature in `app/src-tauri/`,
 `TerminalPane.tsx`, `gui_state.rs`, and how the daemon starts shells in
 `terminal.rs`.
