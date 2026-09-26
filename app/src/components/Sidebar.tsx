@@ -63,7 +63,7 @@ export function Sidebar({
                     }
                   }}
                 >
-                  <MessageSquare className="shrink-0 text-fg-dim" size={16} strokeWidth={1.75} />
+                  <MessageSquare className="shrink-0 text-fg-dim" size={12} strokeWidth={1.75} />
                   <span className="label min-w-0 flex-1 truncate">{session.title ?? "New session"}</span>
                   <StatusMark status={session.status} />
                 </div>
@@ -84,7 +84,7 @@ export function Sidebar({
                     void showTerminalMenu(terminal);
                   }}
                 >
-                  <Terminal className="terminal-icon shrink-0 text-fg-dim" size={16} strokeWidth={1.75} />
+                  <Terminal className="terminal-icon shrink-0 text-fg-dim" size={12} strokeWidth={1.75} />
                   <span className="label min-w-0 flex-1 truncate">{terminal.title}</span>
                 </div>
               ))}

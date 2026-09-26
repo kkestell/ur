@@ -1,13 +1,13 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
-import { Terminal, X } from "lucide-react";
+import { MessageSquare, Terminal, X } from "lucide-react";
 import type { TabItem } from "../layout";
 import { useWatch } from "../store/watch";
 import { StatusMark } from "./StatusMark";
 
 /**
- * A session or terminal tab: its title, its status mark when relevant, and
- * Close Tab. A terminal tab has no title until its `terminal_changed`
- * arrives.
+ * A session or terminal tab: its icon, its title, its status mark when
+ * relevant, and Close Tab. A terminal tab has no title until its
+ * `terminal_changed` arrives.
  */
 export function Tab({ api, params }: IDockviewPanelHeaderProps<TabItem>) {
   const watch = useWatch();
@@ -23,8 +23,10 @@ export function Tab({ api, params }: IDockviewPanelHeaderProps<TabItem>) {
     title = watch.terminals.find((terminal) => terminal.terminal === params.terminal)?.title;
   }
   return (
-    <div className="tab flex h-full max-w-48 items-center gap-2 px-1">
-      {params.type === "terminal" && <Terminal className="tab-kind terminal-icon shrink-0 text-fg-muted" size={16} strokeWidth={1.75} />}
+    <div className="tab flex h-full max-w-96 items-center gap-2 px-1">
+      {params.type === "session"
+        ? <MessageSquare className="tab-kind shrink-0 text-fg-muted" size={12} strokeWidth={1.75} />
+        : <Terminal className="tab-kind terminal-icon shrink-0 text-fg-muted" size={12} strokeWidth={1.75} />}
       <span className="label min-w-0 flex-1 truncate" title={title}>{title}</span>
       {mark}
       <button

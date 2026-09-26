@@ -4,7 +4,7 @@ import type { PendingPermission } from "../ipc/bindings/PendingPermission";
 import type { Item } from "../transcript/permissions";
 import { AgentMessage } from "./AgentMessage";
 import { Permission } from "./Permission";
-import { ToolCall, toolIcon } from "./ToolCall";
+import { ToolCall, ToolIcon } from "./ToolCall";
 
 export function Thread({
   items,
@@ -84,10 +84,10 @@ function Thought({ text }: { text: string }) {
   return (
     <div className="block thought mb-3 leading-relaxed last:mb-0">
       <div className="thought-row flex min-h-7 cursor-default items-center gap-2" onClick={() => setExpanded(!expanded)}>
-        <span className="icon w-4 shrink-0 text-center text-fg-muted">{toolIcon("think")}</span>
+        <ToolIcon kind="think" />
         <span className="label">Thinking</span>
       </div>
-      {expanded && <div className="thought-text ml-2 border-l border-outline pl-[15px] whitespace-pre-wrap text-fg-dim">{text}</div>}
+      {expanded && <div className="thought-text ml-[5px] border-l border-outline pl-[14px] whitespace-pre-wrap text-fg-dim">{text}</div>}
     </div>
   );
 }

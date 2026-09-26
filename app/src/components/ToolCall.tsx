@@ -1,11 +1,12 @@
 import type { ToolKind } from "@agentclientprotocol/sdk";
+import { ArrowDown, ArrowLeftRight, ArrowRight, Dot, type LucideIcon, Pencil, Search, Sparkle, X } from "lucide-react";
 import { useState } from "react";
 import type { Block } from "../transcript/blocks";
 import { ToolCallContentView } from "./ToolCallContent";
 
 /**
  * A tool call: a Run Command block for tool kind `execute`, and otherwise a
- * row with the glyph for its tool kind. Clicking the row or the command shows
+ * row with the icon for its tool kind. Clicking the row or the command shows
  * the tool call content beneath it, and clicking again hides it.
  */
 export function ToolCall({ block }: { block: Extract<Block, { kind: "tool_call" }> }) {
@@ -26,7 +27,7 @@ export function ToolCall({ block }: { block: Extract<Block, { kind: "tool_call" 
     <div className="block tool-call mb-3 leading-relaxed last:mb-0">
       <div className="tool-call-row flex min-h-7 cursor-default items-center gap-2" onClick={toggle}>
         {/* A tool call without a tool kind is `other`, ACP's default. */}
-        <span className="icon w-4 shrink-0 text-center text-fg-muted">{toolIcon(block.toolKind ?? "other")}</span>
+        <ToolIcon kind={block.toolKind ?? "other"} />
         <span className="label min-w-0 truncate">{block.title}</span>
       </div>
       {expanded && <div className="mt-2 space-y-2 rounded border border-outline p-3 text-fg-dim"><ToolCallContentView content={block.content} /></div>}
@@ -34,25 +35,20 @@ export function ToolCall({ block }: { block: Extract<Block, { kind: "tool_call" 
   );
 }
 
-/** The glyph for a tool kind. `execute` has none: it is a Run Command block. */
-export function toolIcon(kind: Exclude<ToolKind, "execute">): string {
-  switch (kind) {
-    case "read":
-    case "search":
-      return "⌕";
-    case "edit":
-      return "✎";
-    case "delete":
-      return "✕";
-    case "move":
-      return "⇢";
-    case "fetch":
-      return "⇣";
-    case "think":
-      return "✧";
-    case "switch_mode":
-      return "⇄";
-    case "other":
-      return "•";
-  }
+/** The icon for a tool kind. `execute` has none: it is a Run Command block. */
+export function ToolIcon({ kind }: { kind: Exclude<ToolKind, "execute"> }) {
+  const Icon = toolIcons[kind];
+  return <Icon className="icon shrink-0 text-fg-muted" size={12} strokeWidth={1.75} />;
 }
+
+const toolIcons: Record<Exclude<ToolKind, "execute">, LucideIcon> = {
+  read: Search,
+  search: Search,
+  edit: Pencil,
+  delete: X,
+  move: ArrowRight,
+  fetch: ArrowDown,
+  think: Sparkle,
+  switch_mode: ArrowLeftRight,
+  other: Dot,
+};

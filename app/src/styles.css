@@ -39,6 +39,8 @@
  * around `.panes`, so the colors are set on `.panes`. Each tab has a divider
  * on its right. The line along the bottom of the tab bar runs under the
  * inactive tabs and stops at the active tab, which has the pane's background.
+ * Tabs shrink to fit the tab bar down to their minimum width, and past that
+ * the tab bar scrolls.
  * The window's top border and the pane separators are the line above the tabs.
  */
 .panes {
@@ -64,6 +66,8 @@
 }
 
 .panes .dv-tab {
+  flex-shrink: 1;
+  min-width: 8rem;
   border-right: 1px solid var(--color-divider);
   border-bottom: 1px solid var(--color-divider);
 }

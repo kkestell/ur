@@ -66,19 +66,30 @@ export function Layout({
       setVisibleSessions(visibleSessions(api));
       onSelection((api.activePanel?.params as TabItem | undefined) ?? null);
     };
+    // Scrolls each pane's active tab fully into view once dockview has
+    // rendered the change.
+    let frame = 0;
+    const revealActiveTabs = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        for (const tab of document.querySelectorAll<HTMLElement>(
+          ".panes .dv-tabs-container .dv-tab.dv-active-tab",
+        )) {
+          tab.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }
+      });
+    };
     update();
     onReady(api);
+    revealActiveTabs();
     const saving = api.onDidLayoutChange(() => {
       saveLayout(api.toJSON()).catch(console.error);
       update();
+      revealActiveTabs();
     });
-    const activating = api.onDidActivePanelChange(update);
-    const frame = requestAnimationFrame(() => {
-      for (const tab of document.querySelectorAll<HTMLElement>(
-        ".panes .dv-tabs-container .dv-tab.dv-active-tab",
-      )) {
-        tab.scrollIntoView({ block: "nearest", inline: "nearest" });
-      }
+    const activating = api.onDidActivePanelChange(() => {
+      update();
+      revealActiveTabs();
     });
     return () => {
       cancelAnimationFrame(frame);

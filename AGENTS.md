@@ -112,15 +112,17 @@ Map each file here as it is added, following the project layout in `docs/agents/
   and the tabs.
 - `app/src/components/Layout.tsx` — `Layout`: `DockviewReact` with `SessionPanel` (the thread, the
   editor, and the permission shortcuts for the selection), `TerminalPanel`, `PaneActions` (the
-  pane's `+`), and the watermark with the empty states; restoring and saving the layout, closing
-  tabs whose session or terminal is gone, and `setVisible()` for the visible sessions.
-- `app/src/components/Tab.tsx` — `Tab`: the tab's title, terminal icon, status mark, and Close Tab.
+  pane's `+`), and the watermark with the empty states; restoring and saving the layout, scrolling
+  each pane's active tab into view, closing tabs whose session or terminal is gone, and
+  `setVisible()` for the visible sessions.
+- `app/src/components/Tab.tsx` — `Tab`: the tab's session or terminal icon, title, status mark, and
+  Close Tab.
 - `app/src/components/Thread.tsx` — the items of the selected session, with user message thumbnails,
   and `Thought`, the Thinking row.
 - `app/src/components/AgentMessage.tsx` — `AgentMessage`: an agent message rendered as Markdown,
   with links that open in the default browser, and the copy button.
 - `app/src/components/ToolCall.tsx` — `ToolCall`, the Run Command block or the tool call row, and
-  `toolIcon()`, the glyph for each tool kind.
+  `ToolIcon`, the icon for each tool kind.
 - `app/src/components/ToolCallContent.tsx` — `ToolCallContentView`: tool call content as
   preformatted text.
 - `app/src/components/Permission.tsx` — one pending permission request: its tool call title, its

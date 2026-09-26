@@ -46,6 +46,20 @@ e2eTest("tabs do not show a hidden-tab counter", async (environment) => {
   await gui.waitForNone(".dv-tabs-overflow-dropdown-default");
 });
 
+e2eTest("activating a tab scrolls it fully into view", async (environment) => {
+  const count = 16;
+  for (let index = 0; index < count; index++) {
+    await environment.newSession();
+  }
+  const gui = await environment.openGui();
+  for (let index = 1; index <= count; index++) {
+    await gui.click(`.workspace-sessions .row:nth-child(${index})`);
+    await waitFor(`tab ${index} to be fully visible`, () => gui.activeTabsVisible());
+  }
+  await gui.click(".workspace-sessions .row:nth-child(1)");
+  await waitFor("the first tab to be fully visible", () => gui.activeTabsVisible());
+});
+
 e2eTest("every tab shows Close Tab without hovering", async (environment) => {
   await environment.newSession();
   const gui = await environment.openGui();
