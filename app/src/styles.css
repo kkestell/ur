@@ -276,6 +276,10 @@ code,
   border: 1px solid #3a3a3a;
 }
 
+.block.agent a {
+  color: #74ade8;
+}
+
 .block.agent blockquote {
   padding-left: 12px;
   border-left: 2px solid #3a3a3a;

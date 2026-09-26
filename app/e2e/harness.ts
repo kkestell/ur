@@ -344,6 +344,11 @@ export class Gui {
     );
   }
 
+  /** The webview's URL. */
+  async url(): Promise<string> {
+    return this.#session().getUrl();
+  }
+
   /** Scrolls the thread to `top` pixels. */
   async scrollThread(top: number): Promise<void> {
     await this.#session().execute((top) => {

@@ -255,7 +255,8 @@ crates/ur-client/src/
                   pty(id) -> Receiver<Bytes>, pty_input(id, bytes)
 
 app/src-tauri/src/
-  main.rs         builder, dialog plugin, managed Link, window focus hook
+  main.rs         builder, dialog plugin, opener plugin, managed Link, window
+                  focus hook
   link.rs         owns ur_client::Client; reconnect loop; Desired { watch,
                   subscribed, attached, focus }; forwards events to app.emit
                   and PTY bytes to the terminal Channel
@@ -361,9 +362,10 @@ webview never touches the socket.
 - Pending permission requests render from the watch store, where they arrive in the session status,
   not from the thread state. `transcript/permissions.ts` places them among the blocks: each takes
   the place of the tool call block with its tool call ID, or follows the last block.
-- Native pieces come from Tauri: the dialog plugin for the folder picker, `Menu::popup` for context
-  menus, and the window's drag-drop event, which gives the core file paths to read and attach to the
-  next prompt. Keyboard shortcuts are handled in the webview.
+- Native pieces come from Tauri: the dialog plugin for the folder picker, the opener plugin, which
+  opens links in agent messages in the default browser, `Menu::popup` for context menus, and the
+  window's drag-drop event, which gives the core file paths to read and attach to the next prompt.
+  Keyboard shortcuts are handled in the webview.
 - The core writes the GUI state file described below.
 
 The `useSession` hook sends `subscribe` the first time a session is used and never unsubscribes: the

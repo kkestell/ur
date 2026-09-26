@@ -5,4 +5,4 @@ OX-0003,2026-09-25 16:15,Removing a workspace during a load leaves waiting subsc
 OX-0004,2026-09-25 16:15,Last activity is never tested,low,testing,unplanned,reviews/2026-09-25-007-restore-agent-history.md
 OX-0005,2026-09-25 17:21,A terminal attach error persists until the GUI restarts,low,correctness,unplanned,reviews/2026-09-25-008-agent-gui.md
 OX-0006,2026-09-25 18:18,An interrupted turn reloaded from the server reads as a rejected prompt,low,correctness,unplanned,reviews/2026-09-25-009-attention-in-the-gui.md
-OX-0007,2026-09-25 18:46,Agent message links replace the app with a web page,high,correctness,unplanned,reviews/2026-09-25-010-thread-rendering.md
+OX-0007,2026-09-25 18:46,Agent message links replace the app with a web page,high,correctness,fixed,reviews/2026-09-25-010-thread-rendering.md

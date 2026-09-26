@@ -1,6 +1,17 @@
 import { memo } from "react";
-import Markdown from "react-markdown";
+import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+// The opener plugin opens a link with target="_blank" in its default
+// application, the default browser for web pages. A link without it would
+// replace the app with the linked page.
+const components: Components = {
+  a: ({ href, title, children }) => (
+    <a href={href} title={title} target="_blank">
+      {children}
+    </a>
+  ),
+};
 
 /**
  * An agent message rendered as Markdown, with a copy button under it that
@@ -14,7 +25,7 @@ export const AgentMessage = memo(function AgentMessage({ text }: { text: string 
   };
   return (
     <div className="block agent">
-      <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm]} components={components}>{text}</Markdown>
       <button className="copy" title="Copy" onClick={copy}>
         ⧉
       </button>

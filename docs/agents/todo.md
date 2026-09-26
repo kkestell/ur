@@ -10,7 +10,7 @@
 - [x] Agent GUI: a sidebar of sessions and a thread view to prompt them.
 - [x] Attention in the GUI: session status in the sidebar and permission requests in the thread.
 - [x] Thread rendering: Markdown, thinking, and tool calls as in the wireframes.
-  - [ ] [OX-0007](issues.csv:8): Agent message links replace the app with a web page
+  - [x] [OX-0007](issues.csv:8): Agent message links replace the app with a web page
 - [ ] Session management and editor: workspaces, sessions, slash commands, config options, and
       images in the GUI.
 - [ ] Workspace terminal controls: terminals listed and managed under their workspace.

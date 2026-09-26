@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout as sleep } from "node:timers/promises";
 import { type Gui, type TestEnvironment, e2eTest } from "./harness.ts";
 
 /** Opens the GUI on a new session and runs the fake server's `render` script. */
@@ -46,4 +47,19 @@ e2eTest("a tool call row shows its content when clicked", async (environment) =>
   await gui.waitForNone(".tool-call .tool-call-content");
   await gui.click(".tool-call-row", "read a.tally");
   await gui.waitForText(".tool-call .tool-call-content", "one tally");
+});
+
+e2eTest("clicking a link in an agent message leaves the app in place", async (environment) => {
+  await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.click(".sidebar .row", "New session");
+  // The fake server repeats the prompt, link and all. A relative link opens
+  // no browser.
+  await gui.sendPrompt("see [main](src/main.rs)");
+  const app = await gui.url();
+  await gui.click(".block.agent a", "main");
+  // A navigation would replace the app within this time.
+  await sleep(1000);
+  assert.equal(await gui.url(), app);
+  assert.ok(await gui.hasElement(".sidebar"), "the app is gone");
 });

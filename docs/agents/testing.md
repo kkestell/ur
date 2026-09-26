@@ -80,6 +80,7 @@ documentation, give agent session tests replies, permission requests, and errors
 - A Thinking row shows its thought when clicked and hides it when clicked again.
 - A Run Command block shows its output when clicked.
 - A tool call row shows its content when clicked.
+- Clicking a link in an agent message leaves the app in place.
 
 ### Admission
 

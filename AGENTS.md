@@ -54,8 +54,10 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `crates/ur/tests/terminal.rs` — integration tests that run `ur daemon`.
 - `app/src-tauri/Cargo.toml` — the `webdriver` feature, which embeds `tauri-plugin-wdio-webdriver`'s
   WebDriver server for the end-to-end suite. Release builds and `pnpm tauri dev` leave it out.
-- `app/src-tauri/src/main.rs` — the Tauri builder, managed `Link`, `setup`, which starts
-  `Link::run()`, and the commands.
+- `app/src-tauri/src/main.rs` — the Tauri builder, the opener plugin, managed `Link`, `setup`, which
+  starts `Link::run()`, and the commands.
+- `app/src-tauri/capabilities/default.json` — the main window's permissions: Tauri's core defaults
+  and the opener plugin's `open_url` for http, https, mailto, and tel URLs.
 - `app/src-tauri/src/link.rs` — `Link`: the reconnect loop `run()`, which owns the `Client`, replays
   the desired set `Desired { watch, subscribed, visible, focused }` after each connect, forwards
   events to the webview under the `watch`, `session`, and `connection` event names, and forwards
@@ -86,7 +88,7 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `app/src/components/Thread.tsx` — the items of the selected session, and `Thought`, the Thinking
   row.
 - `app/src/components/AgentMessage.tsx` — `AgentMessage`: an agent message rendered as Markdown,
-  with the copy button.
+  with links that open in the default browser, and the copy button.
 - `app/src/components/ToolCall.tsx` — `ToolCall`, the Run Command block or the tool call row, and
   `toolIcon()`, the glyph for each tool kind.
 - `app/src/components/ToolCallContent.tsx` — `ToolCallContentView`: tool call content as
@@ -104,7 +106,7 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `app/e2e/attention.test.ts` — the end-to-end tests for session status, unread sessions, and
   permission requests.
 - `app/e2e/thread.test.ts` — the end-to-end tests for thread rendering, against the fake server's
-  `render` script.
+  `render` script, and for agent message links.
 
 ## Validation
 
