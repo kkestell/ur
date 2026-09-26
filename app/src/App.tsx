@@ -1,11 +1,13 @@
 import type { DockviewApi, SerializedDockview } from "dockview-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Layout } from "./components/Layout";
 import { Sidebar } from "./components/Sidebar";
 import { SidebarHandle, defaultSidebarWidth } from "./components/SidebarHandle";
 import { connection, layout as loadLayout, request, saveSidebarWidth, sidebarWidth } from "./ipc";
-import { type TabItem, openTab } from "./layout";
-import { apply as applyWatch, useWatch } from "./store/watch";
+import { newSession, newTerminal } from "./actions";
+import { newShortcut, tabShortcut } from "./keys";
+import { type TabItem, openTab, tabId, tabWorkspace } from "./layout";
+import { apply as applyWatch, orderedWorkspaces, useWatch } from "./store/watch";
 
 export default function App() {
   const watch = useWatch();
@@ -15,6 +17,7 @@ export default function App() {
   const [saved, setSaved] = useState<SerializedDockview | null>();
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [selection, setSelection] = useState<TabItem | null>(null);
+  const recentlyClosed = useRef<TabItem[]>([]);
   // `undefined` until the saved sidebar width is read.
   const [width, setWidth] = useState<number>();
 
@@ -38,6 +41,51 @@ export default function App() {
       setSaved(undefined);
     }
   }, [watch.connected]);
+
+  // Capture shortcuts before the editor or terminal handles the key.
+  useEffect(() => {
+    if (api === null) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      const opens = newShortcut(event);
+      const action = tabShortcut(event, navigator.platform.startsWith("Mac"));
+      if (opens === undefined && action === undefined) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat) {
+        return;
+      }
+      if (action === "close") {
+        if (api.activePanel !== undefined) {
+          api.removePanel(api.activePanel);
+        }
+        return;
+      }
+      if (action === "reopen") {
+        while (recentlyClosed.current.length > 0) {
+          const item = recentlyClosed.current.pop()!;
+          if (tabWorkspace(watch, item) !== undefined && api.getPanel(tabId(item)) === undefined) {
+            openTab(api, item);
+            break;
+          }
+        }
+        return;
+      }
+      const workspace =
+        (selection === null ? undefined : tabWorkspace(watch, selection)) ??
+        orderedWorkspaces(watch)[0]?.name;
+      if (workspace === undefined) {
+        return;
+      }
+      const onOpen = (item: TabItem) => openTab(api, item);
+      void (opens === "session" ? newSession(workspace, onOpen) : newTerminal(workspace, onOpen));
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [api, selection, watch]);
 
   if (!watch.connected) {
     return (
@@ -77,7 +125,12 @@ export default function App() {
       </div>
       <div className="main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {watch.hasSnapshot && (
-          <Layout saved={saved} onReady={setApi} onSelection={setSelection} />
+          <Layout
+            saved={saved}
+            onReady={setApi}
+            onSelection={setSelection}
+            onTabClosed={(item) => recentlyClosed.current.push(item)}
+          />
         )}
       </div>
     </div>

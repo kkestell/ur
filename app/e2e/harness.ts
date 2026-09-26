@@ -450,25 +450,30 @@ export class Gui {
   }
 
   /**
-   * Presses ⌘ with the key whose `KeyboardEvent.code` is `code`, and ⇧ or ⌥
-   * as given, on the window, where the permission shortcuts listen.
+   * Dispatches a shortcut at the window or a focused control.
    */
-  async pressShortcut(code: string, { shift = false, alt = false } = {}): Promise<void> {
+  async pressShortcut(
+    code: string,
+    { shift = false, alt = false, ctrl = false, target }: { shift?: boolean; alt?: boolean; ctrl?: boolean; target?: string } = {},
+  ): Promise<void> {
     await this.#session().execute(
-      (code, shift, alt) => {
+      (code, shift, alt, ctrl, target) => {
         const event = new KeyboardEvent("keydown", {
           code,
-          metaKey: true,
+          metaKey: !ctrl,
+          ctrlKey: ctrl,
           shiftKey: shift,
           altKey: alt,
           bubbles: true,
           cancelable: true,
         });
-        window.dispatchEvent(event);
+        (target ? (window as unknown as ShownWindow).shown(target)[0] : window).dispatchEvent(event);
       },
       code,
       shift,
       alt,
+      ctrl,
+      target,
     );
   }
 

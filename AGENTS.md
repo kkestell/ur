@@ -4,6 +4,7 @@ THIS DOCUMENT MUST BE KEPT UP TO DATE
 
 Map each file here as it is added, following the project layout in `docs/agents/architecture.md`.
 
+- `README.md` — the project description and keyboard shortcut table.
 - `Makefile` — `make check` runs every validation check; `make format` formats the Rust code and the
   Markdown files; `make e2e` runs the end-to-end suite; `make run` starts the daemon and the GUI for
   poking around.
@@ -99,12 +100,13 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `app/src/transcript/permissions.ts` — `withPermissions()` and `Item`: the pending permission
   requests placed among the blocks, each merged with the tool call block of the same ID.
 - `app/src/keys.ts` — `shortcutKind()` and `shortcutLabel()`, the shortcut for each permission
-  option kind.
+  option kind, `newShortcut()` for ⌘N and ⇧⌘N, and `tabShortcut()` for close and reopen.
 - `app/src/actions.ts` — `addWorkspace()`, `newSession()` and `newTerminal()`, which open the new
   tab through `onOpen`, `closeTerminal()`, `removeWorkspace()`, `deleteSession()`,
   `showWorkspaceMenu()`, `showNewMenu()`, `showSessionMenu()`, and `showTerminalMenu()`: the folder
   picker, confirmations, error messages, and native menus.
-- `app/src/layout.ts` — `TabItem`, `tabId()`, `openTab()`, `goneTabs()`, and `visibleSessions()`.
+- `app/src/layout.ts` — `TabItem`, `tabId()`, `openTab()`, `tabWorkspace()`, `goneTabs()`, and
+  `visibleSessions()`.
 - `app/src/slash.ts` — `slashQuery()` and `matchingCommands()`, the command list's matching.
 - `app/src/usage.ts` — `usageText()`, the usage indicator's popover lines.
 - `app/src/components/Sidebar.tsx` — the header's `+`, the workspaces, their sessions and terminal
@@ -117,9 +119,9 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `app/src/components/Layout.tsx` — `Layout`: `DockviewReact` with `SessionPanel` (the thread, the
   editor, and the permission shortcuts for the selection), `TerminalPanel`, `PaneActions` (the
   pane's `+`), and the watermark with the empty states; tab moves with pointer events, and divider
-  and tab presses that start no text selection; restoring and saving the layout, scrolling each
-  pane's active tab into view, closing tabs whose session or terminal is gone, and `setVisible()`
-  for the visible sessions.
+  and tab presses that start no text selection; reporting user-closed tabs, restoring and saving the
+  layout, scrolling each pane's active tab into view, closing tabs whose session or terminal is
+  gone, and `setVisible()` for the visible sessions.
 - `app/src/components/Tab.tsx` — `Tab`: the tab's session or terminal icon, title, status mark, and
   Close Tab.
 - `app/src/components/Thread.tsx` — the items of the selected session, with user message thumbnails,
@@ -150,8 +152,9 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `app/vite.config.ts` — configures Vite with React and Tailwind CSS.
 - `app/index.html` — the webview document and root element.
 - `app/src/App.tsx` — the window: the saved layout, read on each connect, the `DockviewApi` and the
-  selection, the sidebar, whose choices open tabs, with its saved width and `SidebarHandle`, and
-  `Layout` once the watch snapshot arrives.
+  selection, the sidebar, whose choices open tabs, with its saved width and `SidebarHandle`, the
+  new, close, and reopen shortcuts and in-memory closed-tab history, and `Layout` once the watch
+  snapshot arrives.
 - `app/e2e/harness.ts` — `TestEnvironment`, `Gui`, and `e2eTest`, used by the end-to-end suite and
   ad-hoc checks. `TestEnvironment` writes a config file that launches the fake server with its saved
   history file and adds the `home` workspace; `Gui.showTerminal()` opens a terminal in it and opens

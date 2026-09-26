@@ -33,3 +33,22 @@ export function shortcutLabel(kind: PermissionOptionKind): string {
   const shortcut = shortcuts.find((shortcut) => shortcut.kind === kind)!;
   return (shortcut.shift ? "⇧" : "") + (shortcut.alt ? "⌥" : "") + "⌘" + shortcut.key.toUpperCase();
 }
+
+/** What ⌘N or ⇧⌘N opens: a new session or a new terminal. */
+export function newShortcut(event: Keys): "session" | "terminal" | undefined {
+  if (!event.metaKey || event.ctrlKey || event.altKey || event.code !== "KeyN") {
+    return undefined;
+  }
+  return event.shiftKey ? "terminal" : "session";
+}
+
+/** The tab action for the platform's Command or Ctrl shortcut. */
+export function tabShortcut(event: Keys, mac: boolean): "close" | "reopen" | undefined {
+  if (event.metaKey !== mac || event.ctrlKey === mac || event.altKey) {
+    return undefined;
+  }
+  if (event.code === "KeyW" && !event.shiftKey) {
+    return "close";
+  }
+  return event.code === "KeyT" && event.shiftKey ? "reopen" : undefined;
+}

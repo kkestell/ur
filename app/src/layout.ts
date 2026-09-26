@@ -27,6 +27,13 @@ export function openTab(api: DockviewApi, item: TabItem, group?: DockviewGroupPa
   });
 }
 
+/** The workspace of the item's session or terminal. */
+export function tabWorkspace(watch: WatchState, item: TabItem): string | undefined {
+  return item.type === "session"
+    ? watch.sessions.find((session) => session.session === item.session)?.workspace
+    : watch.terminals.find((terminal) => terminal.terminal === item.terminal)?.workspace;
+}
+
 /**
  * The tabs to close because their session or terminal is gone. Without
  * `previous`, when the layout is restored, that is every tab whose session or

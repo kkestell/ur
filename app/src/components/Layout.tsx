@@ -14,9 +14,9 @@ import { addWorkspace, showNewMenu } from "../actions";
 import { request, saveLayout, setVisible } from "../ipc";
 import type { PendingPermission } from "../ipc/bindings/PendingPermission";
 import { shortcutKind } from "../keys";
-import { type TabItem, goneTabs, openTab, tabId, visibleSessions } from "../layout";
+import { type TabItem, goneTabs, openTab, tabId, tabWorkspace, visibleSessions } from "../layout";
 import { useSession } from "../store/sessions";
-import { type WatchState, useWatch } from "../store/watch";
+import { useWatch } from "../store/watch";
 import { withPermissions } from "../transcript/permissions";
 import { Editor } from "./Editor";
 import { Tab } from "./Tab";
@@ -38,15 +38,18 @@ export function Layout({
   saved,
   onReady,
   onSelection,
+  onTabClosed,
 }: {
   saved: SerializedDockview | null;
   onReady: (api: DockviewApi | null) => void;
   onSelection: (selection: TabItem | null) => void;
+  onTabClosed: (item: TabItem) => void;
 }) {
   const watch = useWatch();
   const [api, setApi] = useState<DockviewApi>();
   const [visible, setVisibleSessions] = useState<string[]>([]);
   const previous = useRef(watch);
+  const cleaning = useRef(new Set<string>());
 
   const ready = ({ api }: DockviewReadyEvent) => {
     if (saved !== null) {
@@ -91,10 +94,16 @@ export function Layout({
       update();
       revealActiveTabs();
     });
+    const removing = api.onDidRemovePanel((panel) => {
+      if (!cleaning.current.has(panel.id)) {
+        onTabClosed(panel.params as TabItem);
+      }
+    });
     return () => {
       cancelAnimationFrame(frame);
       saving.dispose();
       activating.dispose();
+      removing.dispose();
       onReady(null);
       onSelection(null);
     };
@@ -125,7 +134,12 @@ export function Layout({
 
   useEffect(() => {
     if (api !== undefined) {
-      closeTabs(api, goneTabs(tabItems(api), watch, previous.current));
+      const gone = goneTabs(tabItems(api), watch, previous.current);
+      for (const item of gone) {
+        cleaning.current.add(tabId(item));
+      }
+      closeTabs(api, gone);
+      cleaning.current.clear();
     }
     previous.current = watch;
   }, [api, watch]);
@@ -190,12 +204,6 @@ function PaneActions({ activePanel, group, containerApi }: IDockviewHeaderAction
       </button>
     </div>
   );
-}
-
-function tabWorkspace(watch: WatchState, item: TabItem): string | undefined {
-  return item.type === "session"
-    ? watch.sessions.find((session) => session.session === item.session)?.workspace
-    : watch.terminals.find((terminal) => terminal.terminal === item.terminal)?.workspace;
 }
 
 /** The empty states, shown when no tab is open. */

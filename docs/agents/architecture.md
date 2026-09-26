@@ -144,6 +144,12 @@ waits for the prompt to return, then calls `session/delete`. Choosing a session 
 sidebar activates its tab if it has one, wherever it is, and otherwise opens it in the active pane.
 Closing a tab only changes the layout.
 
+⌘N opens a new session and ⇧⌘N a new terminal in the active pane. Each opens in the workspace of the
+active tab, or in the first workspace in the sidebar when no tab is open. ⌘W on macOS or Ctrl+W on
+other platforms closes the active tab. ⇧⌘T or Ctrl+Shift+T reopens the most recently closed tab in
+the active pane. The GUI keeps closed tabs only in memory for its current run; it skips tabs whose
+session or terminal is gone or whose tab was opened again from the sidebar.
+
 Remove Workspace cancels its running turns and stops its terminals after confirmation, then removes
 the workspace from the sidebar. Saved history and the lifecycle of agent tools and background jobs
 remain the server's concern.

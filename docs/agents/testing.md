@@ -101,6 +101,12 @@ documentation, give agent session tests replies, permission requests, and errors
 - The layout and each pane's active tab survive closing and reopening the GUI, and each restored
   active tab is fully visible in its pane's tab bar.
 - Close Tab leaves its terminal running.
+- The close shortcut closes the active tab with the editor or terminal focused, leaving its session
+  or terminal in the sidebar.
+- Closed tabs reopen newest first in the active pane, including tabs closed with Close Tab.
+- Recently closed tabs are forgotten after restarting the GUI.
+- Reopen skips a tab already opened from the sidebar and a terminal that has been removed.
+- Removing a session and moving a tab do not add tabs to reopen history.
 - A terminal tab keeps its size while another tab is shown.
 - A session's tab shows its status mark.
 - A session shown in a pane that is not active does not become unread.

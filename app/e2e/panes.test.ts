@@ -66,6 +66,101 @@ e2eTest("activating a tab scrolls it fully into view", async (environment) => {
   await waitFor("the first tab to be fully visible", () => gui.activeTabsVisible());
 });
 
+e2eTest("⌘N opens a new session and ⇧⌘N a new terminal in the active pane", async (environment) => {
+  const gui = await environment.openGui();
+  await gui.pressShortcut("KeyN");
+  await waitForPanes(gui, ["*[*New session]"]);
+  await gui.pressShortcut("KeyN", { shift: true });
+  await waitForPanes(gui, ["*[New session, *sh]"]);
+  await gui.waitForText(".sidebar .row:has(.terminal-icon) .label", "sh");
+});
+
+e2eTest("the close shortcut removes only the active tab, even with the editor or terminal focused", async (environment) => {
+  const gui = await environment.openGui();
+  await gui.showTerminal();
+  await gui.pressShortcut("KeyW", { target: ".xterm-helper-textarea" });
+  await waitForPanes(gui, []);
+  await gui.waitForText(".sidebar .row:has(.terminal-icon)", "sh");
+  await gui.pressShortcut("KeyN");
+  await waitForPanes(gui, ["*[*New session]"]);
+  await gui.pressShortcut("KeyW", { target: ".editor textarea" });
+  await waitForPanes(gui, []);
+  await gui.waitForText(".sidebar .row", "New session");
+});
+
+e2eTest("Ctrl+W remains available to a terminal on macOS", async (environment) => {
+  const gui = await environment.openGui();
+  await gui.showTerminal();
+  await gui.pressShortcut("KeyW", { ctrl: true, target: ".xterm-helper-textarea" });
+  await waitForPanes(gui, ["*[*sh]"]);
+});
+
+e2eTest("closed tabs reopen newest first in the active pane", async (environment) => {
+  const { gui } = await twoPanes(environment);
+  await gui.pressShortcut("KeyW");
+  await waitForPanes(gui, ["*[*sh]"]);
+  await gui.click(".tab .tab-close");
+  await waitForPanes(gui, []);
+  await gui.pressShortcut("KeyT", { shift: true });
+  await waitForPanes(gui, ["*[*sh]"]);
+  await gui.pressShortcut("KeyT", { shift: true });
+  await waitForPanes(gui, ["*[sh, *tallies]"]);
+});
+
+e2eTest("recently closed tabs are forgotten after restarting the GUI", async (environment) => {
+  const gui = await environment.openGui();
+  await gui.showTerminal();
+  await gui.pressShortcut("KeyW");
+  await waitForPanes(gui, []);
+  await gui.close();
+  const reopened = await environment.openGui();
+  await reopened.pressShortcut("KeyT", { shift: true });
+  await waitForPanes(reopened, []);
+});
+
+e2eTest("reopen skips a tab already opened from the sidebar", async (environment) => {
+  const gui = await environment.openGui();
+  await gui.showTerminal();
+  await gui.pressShortcut("KeyW");
+  await waitForPanes(gui, []);
+  await gui.click(".sidebar .row:has(.terminal-icon)");
+  await waitForPanes(gui, ["*[*sh]"]);
+  await gui.pressShortcut("KeyT", { shift: true });
+  await waitForPanes(gui, ["*[*sh]"]);
+});
+
+e2eTest("reopen skips a terminal that has been removed", async (environment) => {
+  const gui = await environment.openGui();
+  const opened = (await gui.request({ type: "open_terminal", workspace: "home" })) as { terminal: number };
+  await gui.click(".sidebar .row:has(.terminal-icon)");
+  await waitForPanes(gui, ["*[*sh]"]);
+  await gui.pressShortcut("KeyW");
+  await waitForPanes(gui, []);
+  await gui.request({ type: "close_terminal", terminal: opened.terminal });
+  await gui.waitForNone(".sidebar .row:has(.terminal-icon)");
+  await gui.pressShortcut("KeyT", { shift: true });
+  await waitForPanes(gui, []);
+});
+
+e2eTest("removing a session does not add its tab to reopen history", async (environment) => {
+  const session = await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.click(".sidebar .row", "New session");
+  await waitForPanes(gui, ["*[*New session]"]);
+  await gui.request({ type: "delete_session", session });
+  await waitForPanes(gui, []);
+  await gui.pressShortcut("KeyT", { shift: true });
+  await waitForPanes(gui, []);
+});
+
+e2eTest("moving a tab does not add it to reopen history", async (environment) => {
+  const { gui } = await twoPanes(environment);
+  await gui.dragTab("tallies", 0, "center");
+  await waitForPanes(gui, ["*[sh, *tallies]"]);
+  await gui.pressShortcut("KeyT", { shift: true });
+  await waitForPanes(gui, ["*[sh, *tallies]"]);
+});
+
 e2eTest("every tab shows Close Tab without hovering", async (environment) => {
   await environment.newSession();
   const gui = await environment.openGui();
