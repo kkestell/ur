@@ -1,22 +1,21 @@
 # ur
 
-ur is a desktop client for ACP agents. It keeps sessions and terminals available across app restarts
-while its daemon is running.
+ur is a desktop client for ACP agents. It keeps sessions and terminals available when you close and
+reopen the app.
 
 ## Install on macOS
 
-Download the unsigned Apple Silicon DMG from
-[GitHub Releases](https://github.com/kkestell/ur/releases/latest), or build it from this repository
-with `scripts/build-macos`. A local build writes the DMG to `target/release/bundle/dmg/`. Open it
-and drag `ur.app` to Applications. No Apple developer account, signing certificate, or paid service
-is needed to build it. Because the app is unsigned, macOS may block its first launch. After trying
-to open it, go to System Settings → Privacy & Security and choose **Open Anyway** for ur, following
+Download `ur-macos-arm64.dmg` from the
+[latest release](https://github.com/kkestell/ur/releases/latest). Open the DMG and drag ur to
+Applications. The app is unsigned, so macOS may block its first launch. If that happens, try to open
+ur, then go to System Settings → Privacy & Security and choose **Open Anyway**, following
 [Apple's instructions](https://support.apple.com/en-us/102445).
 
-Open ur, choose the executable of an installed ACP server, and add each argument in its own field.
-Then add a workspace with the **+** beside Workspaces, create a session, and send a prompt. ur
-starts its bundled daemon automatically. Closing the window leaves the daemon and terminals running;
-reopening the app reconnects to them. The ACP server is installed separately.
+## Get started
+
+Install an ACP-compatible agent separately. Open ur, choose the agent's executable, and add any
+launch arguments in separate fields. Then add a workspace with the **+** beside Workspaces, create a
+session, and send a prompt. Sessions and terminals stay available when you close and reopen ur.
 
 ## Keyboard shortcuts
 
