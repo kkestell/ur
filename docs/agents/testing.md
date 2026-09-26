@@ -41,23 +41,22 @@ outlive a daemon restart. A failing test saves a screenshot to `app/e2e/artifact
 The server setup test starts without a config file or daemon so the GUI launches its bundled daemon.
 `scripts/check-macos-package` checks the app and unsigned DMG after a release build.
 
-The macOS end-to-end suite opens real app windows and makes each one frontmost. Run it only when the
-desktop can be interrupted; the current WebKit setup does not render session panes while its window
-is hidden.
+On macOS, the `webdriver` feature keeps the app in the background, so the suite runs without taking
+focus or showing windows. The app never becomes the active application and has no Dock icon. Its
+window is transparent, lets clicks pass through, and sits in front so WebKit keeps the page visible.
+The GUI treats its window as focused from launch and never receives a focus change, so its visible
+sessions stay focused.
 
 Tests drive the GUI the way the user does, through clicks, the editor, and the terminal, and assert
 on what the window shows. `TestEnvironment.request()` sends setup requests to the daemon socket for
 actions the GUI does through native dialogs or menus, which WebDriver cannot drive, and
-`Gui.request()` sends a request through the core's `request` command for the same reason.
-`openGui()` makes `ur-app` the frontmost application with `Gui.focusWindow()`, since the GUI focuses
-its visible sessions only while its window has focus and WebDriver cannot focus the window; a test
-that depends on focus calls it again before that step. A tab that is not active stays mounted but
-hidden, so the helpers look only at shown elements. `Gui.showTerminal()` opens a terminal in `home`
-and opens its tab by clicking its terminal row, so its view is the only xterm.js on the page; a
-reopened GUI restores the tab from the layout. Terminal tests assert on terminal text, read from the
-xterm.js rows, and type through `Gui.type`, not WebDriver key actions. The fake server's prompt
-scripts, named in `fake_server()`'s documentation, give agent session tests replies, permission
-requests, and errors.
+`Gui.request()` sends a request through the core's `request` command for the same reason. A tab that
+is not active stays mounted but hidden, so the helpers look only at shown elements.
+`Gui.showTerminal()` opens a terminal in `home` and opens its tab by clicking its terminal row, so
+its view is the only xterm.js on the page; a reopened GUI restores the tab from the layout. Terminal
+tests assert on terminal text, read from the xterm.js rows, and type through `Gui.type`, not
+WebDriver key actions. The fake server's prompt scripts, named in `fake_server()`'s documentation,
+give agent session tests replies, permission requests, and errors.
 
 ### End-to-end guarantee list
 

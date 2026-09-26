@@ -73,7 +73,6 @@ e2eTest("a session that finishes a turn while not shown is unread until it is sh
   await gui.waitForNone(".sidebar .row.unread");
   await environment.prompt(hidden, "hello");
   await gui.waitForText(".sidebar .row.unread", "New session");
-  await gui.focusWindow();
   await gui.click(".sidebar .row.unread", "New session");
   await gui.waitForNone(".sidebar .row.unread");
 });

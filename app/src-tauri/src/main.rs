@@ -1,3 +1,5 @@
+#[cfg(all(feature = "webdriver", target_os = "macos"))]
+mod background;
 mod commands;
 mod gui_state;
 mod link;
@@ -11,9 +13,11 @@ fn main() {
         .plugin(tauri_plugin_opener::init());
     #[cfg(feature = "webdriver")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
-    builder
+    let app = builder
         .manage(Link::new(ur_client::socket_path()))
         .setup(|app| {
+            #[cfg(all(feature = "webdriver", target_os = "macos"))]
+            background::show_main_window(app)?;
             tauri::async_runtime::spawn(Link::run(app.handle().clone()));
             Ok(())
         })
@@ -34,6 +38,13 @@ fn main() {
             commands::save_sidebar_width,
             commands::set_visible,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running the ur app");
+        .build(tauri::generate_context!())
+        .expect("error while building the ur app");
+    #[cfg(all(feature = "webdriver", target_os = "macos"))]
+    let app = {
+        let mut app = app;
+        background::prohibit_activation(&mut app);
+        app
+    };
+    app.run(|_, _| {});
 }

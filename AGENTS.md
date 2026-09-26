@@ -66,7 +66,8 @@ Map each file here as it is added, following the project layout in `docs/agents/
   server.
 - `crates/ur/tests/terminal.rs` — integration tests that run `ur daemon`.
 - `app/src-tauri/Cargo.toml` — the `webdriver` feature, which embeds `tauri-plugin-wdio-webdriver`'s
-  WebDriver server for the end-to-end suite. Release builds and `pnpm tauri dev` leave it out.
+  WebDriver server for the end-to-end suite and keeps the app in the background on macOS. Release
+  builds and `pnpm tauri dev` leave it out.
 - `app/src-tauri/src/main.rs` — the Tauri builder, the dialog and opener plugins, managed `Link`,
   `setup`, which starts `Link::run()`, and the commands.
 - `app/src-tauri/capabilities/default.json` — the main window's permissions: Tauri's core defaults,
@@ -81,6 +82,9 @@ Map each file here as it is added, following the project layout in `docs/agents/
   task per attached terminal, which `detach()` aborts before sending `detach_terminal`;
   `set_visible()` and `set_focused()`, which send `focus` for the visible sessions while the window
   has focus.
+- `app/src-tauri/src/background.rs` — with the `webdriver` feature on macOS, `prohibit_activation()`
+  and `show_main_window()`, which keep the app from becoming active and show its window transparent
+  and click-through while its webview renders.
 - `app/src-tauri/src/commands.rs` — the core commands `request`, `attach_terminal`,
   `detach_terminal`, `terminal_input`, `connection`, `layout`, `save_layout`, `sidebar_width`,
   `save_sidebar_width`, and `set_visible`.

@@ -235,7 +235,6 @@ export class TestEnvironment {
     this.#guis.push(gui);
     await waitFor("the WebDriver server", webdriverReady);
     await gui.connect();
-    await gui.focusWindow();
     // The workspace comes with the watch snapshot.
     if (expectWorkspace) await waitFor("the sidebar to render", () => gui.hasElement(".workspace"));
     return gui;
@@ -309,19 +308,6 @@ export class Gui {
           (element) => getComputedStyle(element).visibility !== "hidden",
         );
     });
-  }
-
-  /**
-   * Makes `ur-app` the frontmost application. The GUI focuses its visible
-   * sessions only while its window has focus, and WebDriver cannot focus the
-   * window.
-   */
-  async focusWindow(): Promise<void> {
-    const script = `tell application "System Events" to set frontmost of (first process whose unix id is ${this.#process.pid}) to true`;
-    await promisify(execFile)("osascript", ["-e", script]);
-    await waitFor("the window to have focus", () =>
-      this.#session().execute(() => document.hasFocus()),
-    );
   }
 
   /**

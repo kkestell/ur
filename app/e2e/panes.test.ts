@@ -283,7 +283,6 @@ e2eTest("a session shown in a pane that is not active does not become unread", a
   // The left pane is active, and the right one still shows `tallies`.
   await gui.click(".sidebar .row:has(.terminal-icon)");
   await waitForPanes(gui, ["*[*sh]", "[*tallies]"]);
-  await gui.focusWindow();
   await environment.prompt(session, "hello");
   await environment.waitForIdle(session);
   // The daemon decides unread when the turn ends, before waitForIdle returns.
