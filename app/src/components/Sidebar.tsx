@@ -1,3 +1,4 @@
+import { addWorkspace, showSessionMenu, showWorkspaceMenu } from "../actions";
 import type { Selection } from "../ipc";
 import type { SessionSummary } from "../ipc/bindings/SessionSummary";
 import { type WatchState, attentionCount, orderedWorkspaces, workspaceSessions } from "../store/watch";
@@ -11,14 +12,26 @@ export function Sidebar({
   selection: Selection | null;
   onSelect: (selection: Selection) => void;
 }) {
+  const canDelete = watch.capabilities?.sessionCapabilities?.delete != null;
   return (
     <nav className="sidebar">
-      <div className="sidebar-header">Workspaces</div>
+      <div className="sidebar-header">
+        <span className="label">Workspaces</span>
+        <button className="icon-button" title="Add Workspace" onClick={() => void addWorkspace()}>
+          +
+        </button>
+      </div>
       {orderedWorkspaces(watch).map((workspace) => {
         const count = attentionCount(watch, workspace.name);
         return (
           <div key={workspace.name} className="workspace">
-            <div className="workspace-name">
+            <div
+              className="workspace-name"
+              onContextMenu={(event) => {
+                event.preventDefault();
+                void showWorkspaceMenu(watch, workspace.name, onSelect);
+              }}
+            >
               <span className="label">{workspace.name}</span>
               {count > 0 && <span className="count">{count}</span>}
             </div>
@@ -34,6 +47,12 @@ export function Sidebar({
                     (session.unread ? " unread" : "")
                   }
                   onClick={() => onSelect({ type: "session", session: session.session })}
+                  onContextMenu={(event) => {
+                    if (canDelete) {
+                      event.preventDefault();
+                      void showSessionMenu(session);
+                    }
+                  }}
                 >
                   <span className="label">{session.title ?? "New session"}</span>
                   <StatusMark status={session.status} />

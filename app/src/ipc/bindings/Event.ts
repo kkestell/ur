@@ -3,4 +3,8 @@ import type { Entry } from "./Entry";
 import type { SessionSummary } from "./SessionSummary";
 import type { Workspace } from "./Workspace";
 
-export type Event = { "type": "terminal_exited", terminal: number, } | { "type": "watch_snapshot", workspaces: Array<Workspace>, sessions: Array<SessionSummary>, } | { "type": "workspace_added", workspace: Workspace, } | { "type": "workspace_removed", name: string, } | { "type": "session_changed", summary: SessionSummary, } | { "type": "session_snapshot", session: string, transcript: Array<Entry>, } | { "type": "entry", session: string, entry: Entry, } | { "type": "session_removed", session: string, };
+export type Event = { "type": "terminal_exited", terminal: number, } | { "type": "watch_snapshot", workspaces: Array<Workspace>, sessions: Array<SessionSummary>, 
+/**
+ * The current ACP connection's capabilities, or `None` without one.
+ */
+capabilities: import("@agentclientprotocol/sdk").AgentCapabilities | null, } | { "type": "capabilities_changed", capabilities: import("@agentclientprotocol/sdk").AgentCapabilities, } | { "type": "workspace_added", workspace: Workspace, } | { "type": "workspace_removed", name: string, } | { "type": "session_changed", summary: SessionSummary, } | { "type": "session_deleted", session: string, } | { "type": "session_snapshot", session: string, transcript: Array<Entry>, config_options: Array<import("@agentclientprotocol/sdk").SessionConfigOption>, } | { "type": "entry", session: string, entry: Entry, } | { "type": "config_options_changed", session: string, config_options: Array<import("@agentclientprotocol/sdk").SessionConfigOption>, } | { "type": "session_removed", session: string, };

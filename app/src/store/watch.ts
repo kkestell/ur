@@ -1,3 +1,4 @@
+import type { AgentCapabilities } from "@agentclientprotocol/sdk";
 import { useSyncExternalStore } from "react";
 import { type Connection, type WatchEvent, onConnection, onWatch } from "../ipc";
 import type { SessionSummary } from "../ipc/bindings/SessionSummary";
@@ -8,6 +9,8 @@ export type WatchState = {
   socket: string;
   workspaces: Workspace[];
   sessions: SessionSummary[];
+  /** The current ACP connection's capabilities, or `null` without one. */
+  capabilities: AgentCapabilities | null;
 };
 
 export type ConnectionEvent = { type: "connection" } & Connection;
@@ -17,11 +20,12 @@ export const initialWatch: WatchState = {
   socket: "",
   workspaces: [],
   sessions: [],
+  capabilities: null,
 };
 
 /**
- * Applies one watch or connection event. A disconnect clears the workspaces
- * and sessions; the next watch snapshot fills them again.
+ * Applies one watch or connection event. A disconnect clears the workspaces,
+ * sessions, and capabilities; the next watch snapshot fills them again.
  */
 export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEvent): WatchState {
   switch (event.type) {
@@ -32,9 +36,17 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
         socket: event.socket,
         workspaces: event.connected ? state.workspaces : [],
         sessions: event.connected ? state.sessions : [],
+        capabilities: event.connected ? state.capabilities : null,
       };
     case "watch_snapshot":
-      return { ...state, workspaces: event.workspaces, sessions: event.sessions };
+      return {
+        ...state,
+        workspaces: event.workspaces,
+        sessions: event.sessions,
+        capabilities: event.capabilities,
+      };
+    case "capabilities_changed":
+      return { ...state, capabilities: event.capabilities };
     case "workspace_added":
       return { ...state, workspaces: [...state.workspaces, event.workspace] };
     case "workspace_removed":
@@ -55,6 +67,11 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
       }
       return { ...state, sessions };
     }
+    case "session_deleted":
+      return {
+        ...state,
+        sessions: state.sessions.filter((session) => session.session !== event.session),
+      };
   }
 }
 

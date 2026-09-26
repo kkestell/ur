@@ -3,7 +3,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    ContentBlock, ContentChunk, SessionId, SessionUpdate, StopReason,
+    AgentCapabilities, ContentBlock, ContentChunk, SessionConfigKind, SessionConfigOption,
+    SessionConfigOptionValue, SessionId, SessionUpdate, StopReason,
 };
 use agent_client_protocol::{Channel, ConnectTo};
 use anyhow::anyhow;
@@ -133,11 +134,12 @@ impl TestDaemon {
 }
 
 /// One daemon client's view of a subscribed session: the session snapshot,
-/// then each `entry` event.
+/// then each `entry` and `config_options_changed` event.
 struct Subscription {
     session: SessionId,
     snapshot: Vec<Entry>,
     transcript: Vec<Entry>,
+    config_options: Vec<SessionConfigOption>,
     events: UnboundedReceiver<Event>,
 }
 
@@ -150,12 +152,7 @@ impl Subscription {
                 .await
                 .unwrap_or_else(|_| panic!("entry {len} arrives: {:?}", self.transcript))
                 .expect("the socket connection stays open");
-            match event {
-                Event::Entry { session, entry } if session == self.session => {
-                    self.transcript.push(entry);
-                }
-                other => panic!("unexpected event {other:?}"),
-            }
+            self.record(event);
         }
         &self.transcript
     }
@@ -169,19 +166,47 @@ impl Subscription {
                 .unwrap_or_else(|_| panic!("a session snapshot arrives: {:?}", self.transcript))
                 .expect("the socket connection stays open");
             match event {
-                Event::Entry { session, entry } if session == self.session => {
-                    self.transcript.push(entry);
-                }
                 Event::SessionSnapshot {
                     session,
                     transcript,
+                    config_options,
                 } if session == self.session => {
                     self.snapshot = transcript.clone();
                     self.transcript = transcript;
+                    self.config_options = config_options;
                     return &self.transcript;
                 }
-                other => panic!("unexpected event {other:?}"),
+                other => self.record(other),
             }
+        }
+    }
+
+    /// Waits for the next `config_options_changed`, keeping the entries before
+    /// it, and returns the config options.
+    async fn next_config_options(&mut self) -> &[SessionConfigOption] {
+        loop {
+            let event = timeout(WAIT, self.events.recv())
+                .await
+                .unwrap_or_else(|_| panic!("config options arrive: {:?}", self.transcript))
+                .expect("the socket connection stays open");
+            let changed = matches!(event, Event::ConfigOptionsChanged { .. });
+            self.record(event);
+            if changed {
+                return &self.config_options;
+            }
+        }
+    }
+
+    fn record(&mut self, event: Event) {
+        match event {
+            Event::Entry { session, entry } if session == self.session => {
+                self.transcript.push(entry);
+            }
+            Event::ConfigOptionsChanged {
+                session,
+                config_options,
+            } if session == self.session => self.config_options = config_options,
+            other => panic!("unexpected event {other:?}"),
         }
     }
 }
@@ -190,6 +215,7 @@ impl Subscription {
 struct Watch {
     workspaces: Vec<Workspace>,
     sessions: Vec<SessionSummary>,
+    capabilities: Option<Box<AgentCapabilities>>,
     events: UnboundedReceiver<Event>,
     _client: Client,
 }
@@ -236,9 +262,11 @@ async fn watch(daemon: &TestDaemon) -> Watch {
         Ok(Event::WatchSnapshot {
             workspaces,
             sessions,
+            capabilities,
         }) => Watch {
             workspaces,
             sessions,
+            capabilities,
             events,
             _client: client,
         },
@@ -322,10 +350,12 @@ async fn subscribe(client: &Client, session: &SessionId) -> Subscription {
         Ok(Event::SessionSnapshot {
             session: snapshot_session,
             transcript,
+            config_options,
         }) if snapshot_session == *session => Subscription {
             session: session.clone(),
             snapshot: transcript.clone(),
             transcript,
+            config_options,
             events,
         },
         other => panic!("expected the session snapshot before the response, got {other:?}"),
@@ -366,6 +396,33 @@ async fn cancel(client: &Client, session: &SessionId) -> Response {
         session: session.clone(),
     };
     client.request(request).await.unwrap()
+}
+
+async fn delete(client: &Client, session: &SessionId) -> Response {
+    let request = Request::DeleteSession {
+        session: session.clone(),
+    };
+    client.request(request).await.unwrap()
+}
+
+async fn set_pace(client: &Client, session: &SessionId, pace: &str) -> Response {
+    let request = Request::SetConfigOption {
+        session: session.clone(),
+        config_id: "pace".into(),
+        value: SessionConfigOptionValue::value_id(pace.to_string()),
+    };
+    client.request(request).await.unwrap()
+}
+
+/// The current value of the fake server's `pace` config option.
+fn pace(config_options: &[SessionConfigOption]) -> String {
+    match config_options {
+        [option] => match &option.kind {
+            SessionConfigKind::Select(select) => select.current_value.to_string(),
+            other => panic!("expected a select config option, got {other:?}"),
+        },
+        other => panic!("expected one config option, got {other:?}"),
+    }
 }
 
 /// The pending permission requests of a `NeedsPermission` status.
@@ -1184,4 +1241,148 @@ async fn without_history_capabilities_old_sessions_cannot_be_prompted() {
     let mut watcher = watch(&daemon).await;
     assert_eq!(prompt(&client, &new, "hi").await, Response::Done);
     assert_eq!(watcher.next_turn_end(&new).await, idle(StopReason::EndTurn));
+}
+
+#[tokio::test]
+async fn deleting_a_session_removes_it() {
+    let hold = Hold::default();
+    let daemon = TestDaemon::start(&hold);
+    let client = daemon.connect().await;
+    let session = new_session(&client, "home").await;
+    let kept = create_session(&client, "home").await;
+    let mut subscription = subscribe(&client, &session).await;
+    subscription.wait_for(1).await;
+    let mut watcher = watch(&daemon).await;
+
+    assert_eq!(delete(&client, &session).await, Response::Done);
+
+    assert_eq!(
+        watcher.next().await,
+        Event::SessionDeleted {
+            session: session.clone()
+        }
+    );
+    let removed = timeout(WAIT, subscription.events.recv())
+        .await
+        .expect("session_removed arrives");
+    assert_eq!(
+        removed,
+        Some(Event::SessionRemoved {
+            session: session.clone()
+        })
+    );
+    let restarted = daemon.restart(&hold);
+    assert_eq!(
+        watch(&restarted).await.sessions,
+        [new_summary(&kept, "home")]
+    );
+
+    let daemon = TestDaemon::start_with(&Hold::default(), SavedHistory::unadvertised());
+    let client = daemon.connect().await;
+    let session = new_session(&client, "home").await;
+    assert_eq!(
+        delete(&client, &session).await,
+        Response::Error {
+            message: "the server cannot delete sessions".to_string()
+        }
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_running_session_cancels_its_turn_first() {
+    let daemon = TestDaemon::start(&Hold::default());
+    let client = daemon.connect().await;
+    let session = new_session(&client, "home").await;
+    let mut watcher = watch(&daemon).await;
+    assert_eq!(prompt(&client, &session, "tool").await, Response::Done);
+    watcher.next_change(&session).await;
+    requests(watcher.next_change(&session).await);
+
+    // Polling the first delete once sends it, so it reaches the daemon before
+    // the second.
+    let mut first = Box::pin(delete(&client, &session));
+    assert!(futures::poll!(&mut first).is_pending());
+    assert_eq!(delete(&client, &session).await, Response::Busy);
+
+    assert_eq!(watcher.next_change(&session).await.status, Status::Working);
+    assert_eq!(
+        watcher.next_change(&session).await.status,
+        idle(StopReason::Cancelled)
+    );
+    assert_eq!(
+        watcher.next().await,
+        Event::SessionDeleted {
+            session: session.clone()
+        }
+    );
+    assert_eq!(first.await, Response::Done);
+}
+
+#[tokio::test]
+async fn set_config_option_changes_the_config_options() {
+    let daemon = TestDaemon::start(&Hold::default());
+    let client = daemon.connect().await;
+    let session = new_session(&client, "home").await;
+    let mut subscription = subscribe(&client, &session).await;
+    subscription.wait_for(1).await;
+    assert_eq!(pace(&subscription.config_options), "steady");
+
+    assert_eq!(set_pace(&client, &session, "brisk").await, Response::Done);
+    assert_eq!(pace(subscription.next_config_options().await), "brisk");
+
+    match set_pace(&client, &session, "sluggish").await {
+        Response::Error { message } => assert!(
+            message.starts_with("session/set_config_option failed:"),
+            "{message}"
+        ),
+        other => panic!("unexpected response {other:?}"),
+    }
+    // The daemon queues any event before the response.
+    assert!(subscription.events.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn config_option_updates_change_the_config_options() {
+    let daemon = TestDaemon::start(&Hold::default());
+    let client = daemon.connect().await;
+    let session = new_session(&client, "home").await;
+    let mut subscription = subscribe(&client, &session).await;
+
+    assert_eq!(prompt(&client, &session, "pace").await, Response::Done);
+
+    assert_eq!(pace(subscription.next_config_options().await), "brisk");
+}
+
+#[tokio::test]
+async fn a_load_restores_the_config_options() {
+    let hold = Hold::default();
+    let daemon = TestDaemon::start(&hold);
+    let client = daemon.connect().await;
+    let session = new_session(&client, "home").await;
+    assert_eq!(set_pace(&client, &session, "brisk").await, Response::Done);
+
+    let restarted = daemon.restart(&hold);
+
+    let subscription = subscribe(&restarted.connect().await, &session).await;
+    assert_eq!(pace(&subscription.config_options), "brisk");
+}
+
+#[tokio::test]
+async fn watch_reports_the_capabilities() {
+    let daemon = TestDaemon::start(&Hold::default());
+    let mut watcher = watch(&daemon).await;
+    let advertised = |capabilities: &AgentCapabilities| {
+        capabilities.session_capabilities.delete.is_some() && capabilities.prompt_capabilities.image
+    };
+    let capabilities = watcher.capabilities.take().expect("the server started");
+    assert!(advertised(&capabilities), "{capabilities:?}");
+
+    daemon.kill_server();
+
+    let capabilities = loop {
+        if let Event::CapabilitiesChanged { capabilities } = watcher.next().await {
+            break capabilities;
+        }
+    };
+    assert!(advertised(&capabilities), "{capabilities:?}");
 }

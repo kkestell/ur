@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { type SessionEvent, onSession, request } from "../ipc";
-import type { ThreadState } from "../transcript/blocks";
+import { type ThreadState, emptyThread } from "../transcript/blocks";
 import { reduce } from "../transcript/reduce";
 
 // Every session's thread state stays, so reselecting a session does not
@@ -13,7 +13,7 @@ const listeners = new Set<() => void>();
 const subscribed = new Set<string>();
 
 export function apply(event: SessionEvent): void {
-  const next = reduce(threads.get(event.session) ?? { blocks: [] }, event);
+  const next = reduce(threads.get(event.session) ?? emptyThread, event);
   if (next === undefined) {
     threads.delete(event.session);
     // A session that comes back, when its workspace is added again, is

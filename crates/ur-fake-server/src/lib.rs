@@ -8,14 +8,16 @@ use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    AgentCapabilities, AvailableCommand, AvailableCommandsUpdate, ContentBlock, ContentChunk,
-    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse,
-    PermissionOption, PermissionOptionKind, PromptRequest, PromptResponse,
-    RequestPermissionOutcome, RequestPermissionRequest, SessionCapabilities, SessionId,
+    AgentCapabilities, AvailableCommand, AvailableCommandsUpdate, ConfigOptionUpdate, ContentBlock,
+    ContentChunk, Cost, DeleteSessionRequest, DeleteSessionResponse, InitializeRequest,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PermissionOption,
+    PermissionOptionKind, PromptCapabilities, PromptRequest, PromptResponse,
+    RequestPermissionOutcome, RequestPermissionRequest, SessionCapabilities, SessionConfigOption,
+    SessionConfigOptionValue, SessionConfigSelectOption, SessionDeleteCapabilities, SessionId,
     SessionInfo, SessionInfoUpdate, SessionListCapabilities, SessionNotification, SessionUpdate,
-    StopReason, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
-    ToolKind,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StopReason, ToolCall,
+    ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
 };
 use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, on_receive_request};
 use serde::{Deserialize, Serialize};
@@ -42,7 +44,8 @@ struct Saved {
     /// The file the saved history is written to after every change, if any.
     #[serde(skip)]
     file: Option<PathBuf>,
-    /// Whether the fake server advertises `loadSession` and `session/list`.
+    /// Whether the fake server advertises `loadSession`, `session/list`, and
+    /// `session/delete`.
     advertised: bool,
     /// The number of sessions created so far, so IDs are never reused.
     created: u32,
@@ -59,18 +62,38 @@ struct SavedSession {
     updates: Vec<SessionUpdate>,
     /// Set by the `unloadable` script.
     unloadable: bool,
+    /// The current value of the `pace` config option: `steady` or `brisk`.
+    pace: String,
+}
+
+/// The values of the `pace` config option.
+const PACES: [(&str, &str); 2] = [("steady", "Steady"), ("brisk", "Brisk")];
+
+/// The fake server's one config option, `pace`, set to `pace`.
+fn config_options(pace: &str) -> Vec<SessionConfigOption> {
+    let values: Vec<_> = PACES
+        .iter()
+        .map(|(value, name)| SessionConfigSelectOption::new(*value, *name))
+        .collect();
+    vec![SessionConfigOption::select(
+        "pace",
+        "Pace",
+        pace.to_string(),
+        values,
+    )]
 }
 
 impl Default for SavedHistory {
-    /// Saved history with `loadSession` and `session/list` advertised.
+    /// Saved history with `loadSession`, `session/list`, and `session/delete`
+    /// advertised.
     fn default() -> SavedHistory {
         SavedHistory::new(true)
     }
 }
 
 impl SavedHistory {
-    /// Saved history with neither `loadSession` nor `session/list`
-    /// advertised. Both methods answer method not found.
+    /// Saved history with none of `loadSession`, `session/list`, and
+    /// `session/delete` advertised. Those methods answer method not found.
     pub fn unadvertised() -> SavedHistory {
         SavedHistory::new(false)
     }
@@ -131,14 +154,16 @@ impl SavedHistory {
     }
 }
 
-/// The fake server. It advertises protocol version 1 and, unless `history` is
-/// unadvertised, `loadSession` and `session/list`. It names sessions `fake-1`,
-/// `fake-2`, and so on, and sends an `available_commands_update` right after
-/// each `session/new` response. `session/list` returns one session per page.
-/// `session/prompt` answers an error for a session not created or loaded
-/// during this ACP connection, and otherwise runs the script its text names:
-/// `hold`, `tool`, `tools`, `reject`, `fail`, `title`, `unloadable`,
-/// `render`, or anything else for a reply.
+/// The fake server. It advertises protocol version 1, image prompts, and,
+/// unless `history` is unadvertised, `loadSession`, `session/list`, and
+/// `session/delete`. It names sessions `fake-1`, `fake-2`, and so on, and
+/// sends an `available_commands_update` right after each `session/new`
+/// response. Every session has the select config option `pace`, which
+/// `session/new` and `session/load` return. `session/list` returns one session
+/// per page. `session/prompt` answers an error for a session not created or
+/// loaded during this ACP connection, and otherwise runs the script its text
+/// blocks name: `hold`, `tool`, `tools`, `reject`, `fail`, `title`,
+/// `unloadable`, `pace`, `usage`, `render`, or anything else for a reply.
 pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> {
     // The sessions created or loaded during this ACP connection.
     let loaded = Arc::new(Mutex::new(HashSet::<SessionId>::new()));
@@ -149,10 +174,13 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
             {
                 let history = history.clone();
                 async move |_: InitializeRequest, responder, _connection| {
-                    let mut capabilities = AgentCapabilities::new();
+                    let mut capabilities = AgentCapabilities::new()
+                        .prompt_capabilities(PromptCapabilities::new().image(true));
                     if history.advertised() {
                         capabilities = capabilities.load_session(true).session_capabilities(
-                            SessionCapabilities::new().list(SessionListCapabilities::new()),
+                            SessionCapabilities::new()
+                                .list(SessionListCapabilities::new())
+                                .delete(SessionDeleteCapabilities::new()),
                         );
                     }
                     responder.respond(
@@ -179,11 +207,15 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                             title: None,
                             updates: Vec::new(),
                             unloadable: false,
+                            pace: "steady".to_string(),
                         });
                         session
                     });
                     loaded.lock().unwrap().insert(session.clone());
-                    responder.respond(NewSessionResponse::new(session.clone()))?;
+                    responder.respond(
+                        NewSessionResponse::new(session.clone())
+                            .config_options(config_options("steady")),
+                    )?;
                     let command = AvailableCommand::new("tally", "count the tallies");
                     let update =
                         SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(vec![
@@ -246,40 +278,94 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                             .respond_with_error(agent_client_protocol::Error::method_not_found());
                     }
                     let session = request.session_id;
-                    let replay = history
-                        .with_session(&session, |saved| (saved.unloadable, saved.updates.clone()));
-                    let updates = match replay {
+                    let replay = history.with_session(&session, |saved| {
+                        (saved.unloadable, saved.updates.clone(), saved.pace.clone())
+                    });
+                    let (updates, pace) = match replay {
                         None => {
                             return responder
                                 .respond_with_internal_error(format!("no session {session}"));
                         }
-                        Some((true, _)) => {
+                        Some((true, _, _)) => {
                             return responder.respond_with_internal_error(
                                 "the fake server cannot load this session",
                             );
                         }
-                        Some((false, updates)) => updates,
+                        Some((false, updates, pace)) => (updates, pace),
                     };
                     for update in updates {
                         connection
                             .send_notification(SessionNotification::new(session.clone(), update))?;
                     }
                     loaded.lock().unwrap().insert(session);
-                    responder.respond(LoadSessionResponse::new())
+                    responder
+                        .respond(LoadSessionResponse::new().config_options(config_options(&pace)))
+                }
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let history = history.clone();
+                async move |request: SetSessionConfigOptionRequest, responder, _connection| {
+                    let pace = match (&*request.config_id.0, &request.value) {
+                        ("pace", SessionConfigOptionValue::ValueId { value })
+                            if PACES.iter().any(|(pace, _)| **pace == *value.0) =>
+                        {
+                            value.0.to_string()
+                        }
+                        _ => {
+                            return responder.respond_with_error(
+                                agent_client_protocol::Error::invalid_params(),
+                            );
+                        }
+                    };
+                    let set = history.with_session(&request.session_id, |saved| {
+                        saved.pace = pace.clone();
+                    });
+                    if set.is_none() {
+                        return responder.respond_with_internal_error(format!(
+                            "no session {}",
+                            request.session_id
+                        ));
+                    }
+                    responder.respond(SetSessionConfigOptionResponse::new(config_options(&pace)))
+                }
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let history = history.clone();
+                let loaded = loaded.clone();
+                async move |request: DeleteSessionRequest, responder, _connection| {
+                    if !history.advertised() {
+                        return responder
+                            .respond_with_error(agent_client_protocol::Error::method_not_found());
+                    }
+                    let session = request.session_id;
+                    history.edit(|saved| saved.sessions.retain(|saved| saved.id != session));
+                    loaded.lock().unwrap().remove(&session);
+                    responder.respond(DeleteSessionResponse::new())
                 }
             },
             on_receive_request!(),
         )
         .on_receive_request(
             async move |request: PromptRequest, responder, connection: ConnectionTo<Client>| {
-                let text = match &request.prompt[..] {
-                    [ContentBlock::Text(text)] => text.text.clone(),
-                    other => {
-                        return responder.respond_with_internal_error(format!(
-                            "expected one text block: {other:?}"
-                        ));
+                let mut text = String::new();
+                let mut images = 0;
+                for block in &request.prompt {
+                    match block {
+                        ContentBlock::Text(block) => text.push_str(&block.text),
+                        ContentBlock::Image(_) => images += 1,
+                        other => {
+                            return responder.respond_with_internal_error(format!(
+                                "expected text and image blocks: {other:?}"
+                            ));
+                        }
                     }
-                };
+                }
                 let session = request.session_id;
                 if !loaded.lock().unwrap().contains(&session) {
                     return responder
@@ -287,10 +373,12 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                 }
                 // Saved for replay only, so live transcripts hold the daemon's
                 // user prompt entry instead.
-                history.save(
-                    &session,
-                    SessionUpdate::UserMessageChunk(ContentChunk::new(text.as_str().into())),
-                );
+                for block in request.prompt {
+                    history.save(
+                        &session,
+                        SessionUpdate::UserMessageChunk(ContentChunk::new(block)),
+                    );
+                }
                 // Scripts wait for a permission answer or the hold, so they run
                 // outside the dispatch loop.
                 let hold = hold.clone();
@@ -320,7 +408,9 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                             "title" => script.title()?,
                             "unloadable" => script.unloadable()?,
                             "render" => script.render()?,
-                            _ => script.reply(&text)?,
+                            "pace" => script.pace()?,
+                            "usage" => script.usage()?,
+                            _ => script.reply(&text, images)?,
                         };
                         responder.respond(PromptResponse::new(stop))
                     }
@@ -429,7 +519,25 @@ impl Script {
     fn unloadable(&self) -> agent_client_protocol::Result<StopReason> {
         self.history
             .with_session(&self.session, |saved| saved.unloadable = true);
-        self.reply("unloadable")
+        self.reply("unloadable", 0)
+    }
+
+    /// Sets `pace` to `brisk` with a `config_option_update`.
+    fn pace(&self) -> agent_client_protocol::Result<StopReason> {
+        self.history
+            .with_session(&self.session, |saved| saved.pace = "brisk".to_string());
+        self.update(SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
+            config_options("brisk"),
+        )))?;
+        Ok(StopReason::EndTurn)
+    }
+
+    /// Reports 1200 of 8000 tokens used, at a cost of 0.25 USD.
+    fn usage(&self) -> agent_client_protocol::Result<StopReason> {
+        self.update(SessionUpdate::UsageUpdate(
+            UsageUpdate::new(1200, 8000).cost(Cost::new(0.25, "USD")),
+        ))?;
+        Ok(StopReason::EndTurn)
     }
 
     /// Sends a thought, a completed `execute` tool call with its output, a
@@ -455,9 +563,16 @@ impl Script {
         Ok(StopReason::EndTurn)
     }
 
-    /// Replies `you said: <text>`, one agent message chunk per word.
-    fn reply(&self, text: &str) -> agent_client_protocol::Result<StopReason> {
-        for word in format!("you said: {text}").split_inclusive(' ') {
+    /// Replies `you said: <text>`, one agent message chunk per word, followed
+    /// by `(N images)` when the prompt had any.
+    fn reply(&self, text: &str, images: usize) -> agent_client_protocol::Result<StopReason> {
+        let mut reply = format!("you said: {text}");
+        match images {
+            0 => {}
+            1 => reply.push_str(" (1 image)"),
+            n => reply.push_str(&format!(" ({n} images)")),
+        }
+        for word in reply.split_inclusive(' ') {
             self.message(word)?;
         }
         Ok(StopReason::EndTurn)

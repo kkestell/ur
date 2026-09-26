@@ -19,7 +19,7 @@ function pending(
 }
 
 const blocks: Block[] = [
-  { kind: "user", text: "count" },
+  { kind: "user", text: "count", images: [] },
   { kind: "tool_call", id: "t1", title: "count the tallies", content: [] },
   { kind: "agent", text: "counting" },
 ];

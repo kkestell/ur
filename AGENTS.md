@@ -15,14 +15,17 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `.cargo/config.toml` — sets `TS_RS_EXPORT_DIR` so `cargo test` writes the TypeScript bindings to
   `app/src/ipc/bindings/`.
 - `crates/ur-client/src/frame.rs` — `Frame` and `FrameCodec`, the wire protocol framing.
-- `crates/ur-client/src/protocol.rs` — `TerminalId`, `Request`, `Response`, `Event`, `Workspace`,
-  `SessionSummary`, `Status`, `PendingPermission`, `Entry`, `ClientMessage`, `DaemonMessage`,
-  `socket_path()`, and `state_dir()`.
+- `crates/ur-client/src/protocol.rs` — `TerminalId`, `Request` (with `delete_session` and
+  `set_config_option`), `Response`, `Event` (with `capabilities_changed`, `session_deleted`, and
+  `config_options_changed`), `Workspace`, `SessionSummary`, `Status`, `PendingPermission`, `Entry`,
+  `ClientMessage`, `DaemonMessage`, `socket_path()`, and `state_dir()`.
 - `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the core and the CLI, with
   `request()`, `events()`, `pty()`, and `pty_input()`.
 - `crates/ur-fake-server/` — the fake server: `lib.rs` exports `fake_server()`, `Hold`, and
   `SavedHistory`, and `main.rs` serves it over stdin and stdout, keeping its saved history in the
-  file its argument names, if any.
+  file its argument names, if any. It advertises image prompts and, with saved history,
+  `session/delete`, gives every session the `pace` config option, and answers
+  `session/set_config_option` and `session/delete`.
 - `crates/ur/src/main.rs` — the `ur` command line: `daemon`, `agent-run`, `workspace add|rm`, `ls`,
   `new`, `prompt`, `read`, `cancel`, `approve`, `deny`, and `wait`.
 - `crates/ur/src/cli/` — `connect()`, `watch()`, and one file per CLI subcommand: `workspace.rs`,
@@ -35,16 +38,16 @@ Map each file here as it is added, following the project layout in `docs/agents/
   config file; `run()`: reads the state file, starts the supervisor, then serves.
 - `crates/ur/src/daemon/state.rs` — `State`: the ACP connection with its capabilities and
   generation, workspaces, watchers, and sessions, saved or loaded, with their transcripts, session
-  titles, operation guards and the loads they hold, statuses, unread flags, focus, pending
-  permission requests, and subscribers.
+  titles, config options, operation guards and the loads and deletes they hold, statuses, unread
+  flags, focus, pending permission requests, and subscribers.
 - `crates/ur/src/daemon/state_file.rs` — `read()` and `write()` for the state file.
 - `crates/ur/src/daemon/acp.rs` — `supervise()`: the supervisor, which starts the server again after
   it exits, and each ACP connection's handlers; `list_sessions()`; `initialize()`, shared with the
   one-shot client.
 - `crates/ur/src/daemon/ops.rs` — `add_workspace()`, which also lists the workspace's saved
   sessions, and `remove_workspace()`, which write the state file; `new_session()`, `subscribe()`,
-  `prompt()`, and `load()`, which handle the server's responses in `on_receiving_result` callbacks;
-  and `cancel()`.
+  `prompt()`, `load()`, `delete_session()`, and `set_config_option()`, which handle the server's
+  responses in `on_receiving_result` callbacks; and `cancel()`.
 - `crates/ur/src/daemon/server.rs` — the accept loop, each socket connection's reader and writer,
   request handling, and `Outbox`.
 - `crates/ur/src/daemon/terminal.rs` — `Terminals`: login shells through `portable-pty`, their
@@ -54,15 +57,18 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `crates/ur/tests/terminal.rs` — integration tests that run `ur daemon`.
 - `app/src-tauri/Cargo.toml` — the `webdriver` feature, which embeds `tauri-plugin-wdio-webdriver`'s
   WebDriver server for the end-to-end suite. Release builds and `pnpm tauri dev` leave it out.
-- `app/src-tauri/src/main.rs` — the Tauri builder, the opener plugin, managed `Link`, `setup`, which
-  starts `Link::run()`, and the commands.
-- `app/src-tauri/capabilities/default.json` — the main window's permissions: Tauri's core defaults
-  and the opener plugin's `open_url` for http, https, mailto, and tel URLs.
+- `app/src-tauri/src/main.rs` — the Tauri builder, the dialog and opener plugins, managed `Link`,
+  `setup`, which starts `Link::run()`, and the commands.
+- `app/src-tauri/capabilities/default.json` — the main window's permissions: Tauri's core defaults,
+  the dialog plugin's `open`, `ask`, and `message`, and the opener plugin's `open_url` for http,
+  https, mailto, and tel URLs.
+- `app/src-tauri/tauri.conf.json` — the app and window config. `dragDropEnabled` is off, so the
+  webview receives HTML drop events with `File` objects.
 - `app/src-tauri/src/link.rs` — `Link`: the reconnect loop `run()`, which owns the `Client`, replays
   the desired set `Desired { watch, subscribed, visible, focused }` after each connect, forwards
-  events to the webview under the `watch`, `session`, and `connection` event names, and forwards
-  terminal output to the webview's `Channel`; `set_visible()` and `set_focused()`, which send
-  `focus` for the visible sessions while the window has focus.
+  events to the webview under the `watch`, `session`, and `connection` event names, routing each
+  event type to one name, and forwards terminal output to the webview's `Channel`; `set_visible()`
+  and `set_focused()`, which send `focus` for the visible sessions while the window has focus.
 - `app/src-tauri/src/commands.rs` — the core commands `request`, `attach_terminal`,
   `terminal_input`, `connection`, `selection`, `select`, and `set_visible`.
 - `app/src-tauri/src/gui_state.rs` — the GUI state file: `Saved { terminal, selection }` per socket
@@ -72,21 +78,29 @@ Map each file here as it is added, following the project layout in `docs/agents/
   `onConnection()` listeners; `bindings/` is generated by `cargo test` and committed.
 - `app/src/store/watch.ts` — `WatchState`, `reduceWatch()`, `needsAttention()`,
   `workspaceSessions()`, `orderedWorkspaces()`, `attentionCount()`, and `useWatch()`: the
-  connection, workspaces, and sessions outside React, ordered by attention.
+  connection, workspaces, sessions, and the server's capabilities outside React, ordered by
+  attention.
 - `app/src/store/sessions.ts` — every subscribed session's `ThreadState`, `useSession()`, which
   subscribes once, and `useThread()`.
-- `app/src/transcript/blocks.ts` — `Block` and `ThreadState`, the thread's display types. The tool
-  call block carries its tool call content.
+- `app/src/transcript/blocks.ts` — `Block` and `ThreadState`, the thread's display types. The user
+  block carries its images and the tool call block its tool call content; `ThreadState` also holds
+  the slash commands, the latest usage, and the config options.
 - `app/src/transcript/reduce.ts` — the transcript reducer `reduce()` and `applyEntry()`, the only
   webview code that reads `SessionUpdate` shapes.
 - `app/src/transcript/permissions.ts` — `withPermissions()` and `Item`: the pending permission
   requests placed among the blocks, each merged with the tool call block of the same ID.
 - `app/src/keys.ts` — `shortcutKind()` and `shortcutLabel()`, the shortcut for each permission
   option kind.
-- `app/src/components/Sidebar.tsx` — the workspaces, their sessions, and the Terminal row, with each
-  session's status mark and attention counts.
-- `app/src/components/Thread.tsx` — the items of the selected session, and `Thought`, the Thinking
-  row.
+- `app/src/actions.ts` — `addWorkspace()`, `newSession()`, `removeWorkspace()`, `deleteSession()`,
+  `showWorkspaceMenu()`, and `showSessionMenu()`: the folder picker, confirmations, error messages,
+  and native menus.
+- `app/src/slash.ts` — `slashQuery()` and `matchingCommands()`, the command list's matching.
+- `app/src/usage.ts` — `usageText()`, the usage indicator's popover lines.
+- `app/src/components/Sidebar.tsx` — the header's `+`, the workspaces, their sessions, and the
+  Terminal row, with each session's status mark, attention counts, and the workspace and session
+  menus.
+- `app/src/components/Thread.tsx` — the items of the selected session, with user message thumbnails,
+  and `Thought`, the Thinking row.
 - `app/src/components/AgentMessage.tsx` — `AgentMessage`: an agent message rendered as Markdown,
   with links that open in the default browser, and the copy button.
 - `app/src/components/ToolCall.tsx` — `ToolCall`, the Run Command block or the tool call row, and
@@ -95,16 +109,24 @@ Map each file here as it is added, following the project layout in `docs/agents/
   preformatted text.
 - `app/src/components/Permission.tsx` — one pending permission request: its tool call title, its
   content through `ToolCallContentView`, one row per option, and "Awaiting Confirmation."
-- `app/src/components/Editor.tsx` — the prompt textarea with Send and Stop.
+- `app/src/components/Editor.tsx` — `Editor` and `ImageAttachment`: the command list, image
+  attachment chips, the prompt textarea, and the bottom row of the usage indicator, config pickers,
+  and Send or Stop.
+- `app/src/components/ConfigPicker.tsx` — `ConfigPicker`, the list or toggle for one config option.
+- `app/src/components/UsageIndicator.tsx` — `UsageIndicator`, the ring and its popover.
 - `app/src/components/TerminalPane.tsx` — the xterm.js view of the GUI's terminal.
-- `app/src/App.tsx` — the layout, the selection, the empty states, `set_visible` for the rendered
-  selection, and the permission shortcuts.
+- `app/src/main.tsx` — renders `App`, and stops files dropped outside the editor from navigating the
+  webview.
+- `app/src/App.tsx` — the layout, the selection, the empty states with Add Workspace, the session
+  header, `set_visible` for the rendered selection, and the permission shortcuts.
 - `app/e2e/harness.ts` — `TestEnvironment`, `Gui`, and `e2eTest`, used by the end-to-end suite and
   ad-hoc checks. `TestEnvironment` writes a config file that launches the fake server.
 - `app/e2e/terminal.test.ts` — the end-to-end tests for terminals.
 - `app/e2e/session.test.ts` — the end-to-end tests for agent sessions against the fake server.
 - `app/e2e/attention.test.ts` — the end-to-end tests for session status, unread sessions, and
   permission requests.
+- `app/e2e/editor.test.ts` — the end-to-end tests for the editor: slash commands, config pickers,
+  the usage indicator, and image attachments.
 - `app/e2e/thread.test.ts` — the end-to-end tests for thread rendering, against the fake server's
   `render` script, and for agent message links.
 

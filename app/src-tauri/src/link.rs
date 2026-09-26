@@ -121,11 +121,14 @@ impl Link {
                     // The terminal attachment path already ends its output.
                     Event::TerminalExited { .. } => continue,
                     Event::WatchSnapshot { .. }
+                    | Event::CapabilitiesChanged { .. }
                     | Event::WorkspaceAdded { .. }
                     | Event::WorkspaceRemoved { .. }
-                    | Event::SessionChanged { .. } => "watch",
+                    | Event::SessionChanged { .. }
+                    | Event::SessionDeleted { .. } => "watch",
                     Event::SessionSnapshot { .. }
                     | Event::Entry { .. }
+                    | Event::ConfigOptionsChanged { .. }
                     | Event::SessionRemoved { .. } => "session",
                 };
                 if let Err(error) = app.emit(name, &event) {

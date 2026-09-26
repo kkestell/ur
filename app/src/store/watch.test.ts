@@ -40,6 +40,7 @@ const connected = reduceWatch(initialWatch, {
 test("sessions_order_by_last_activity", () => {
   const state = reduceWatch(connected, {
     type: "watch_snapshot",
+    capabilities: null,
     workspaces: [{ name: "ws", path: "/ws" }],
     sessions: [
       summary("old", "ws", "2026-01-01T00:00:00Z"),
@@ -58,6 +59,7 @@ test("sessions_order_by_last_activity", () => {
 test("sessions_needing_attention_come_first", () => {
   const state = reduceWatch(connected, {
     type: "watch_snapshot",
+    capabilities: null,
     workspaces: [{ name: "ws", path: "/ws" }],
     sessions: [
       summary("unread", "ws", "2026-01-01T00:00:00Z", { unread: true }),
@@ -81,6 +83,7 @@ test("sessions_needing_attention_come_first", () => {
 test("workspaces_needing_attention_come_first", () => {
   const state = reduceWatch(connected, {
     type: "watch_snapshot",
+    capabilities: null,
     workspaces: [
       { name: "a", path: "/a" },
       { name: "b", path: "/b" },
@@ -100,6 +103,7 @@ test("workspaces_needing_attention_come_first", () => {
 test("a_removed_workspace_drops_its_sessions", () => {
   let state = reduceWatch(connected, {
     type: "watch_snapshot",
+    capabilities: null,
     workspaces: [
       { name: "a", path: "/a" },
       { name: "b", path: "/b" },
@@ -114,9 +118,36 @@ test("a_removed_workspace_drops_its_sessions", () => {
 test("a_disconnect_clears_the_watch_state", () => {
   let state = reduceWatch(connected, {
     type: "watch_snapshot",
+    capabilities: null,
     workspaces: [{ name: "a", path: "/a" }],
     sessions: [summary("s1", "a", null)],
   });
   state = reduceWatch(state, { type: "connection", connected: false, socket: "/tmp/ur.sock" });
   expect(state).toEqual({ ...initialWatch, socket: "/tmp/ur.sock" });
+});
+
+test("a_deleted_session_leaves_the_sidebar", () => {
+  let state = reduceWatch(connected, {
+    type: "watch_snapshot",
+    capabilities: null,
+    workspaces: [{ name: "a", path: "/a" }],
+    sessions: [summary("s1", "a", null), summary("s2", "a", null)],
+  });
+  state = reduceWatch(state, { type: "session_deleted", session: "s1" });
+  expect(state.sessions.map((session) => session.session)).toEqual(["s2"]);
+});
+
+test("the_capabilities_come_from_the_snapshot_and_later_changes", () => {
+  let state = reduceWatch(connected, {
+    type: "watch_snapshot",
+    capabilities: { loadSession: true },
+    workspaces: [],
+    sessions: [],
+  });
+  expect(state.capabilities).toEqual({ loadSession: true });
+  state = reduceWatch(state, {
+    type: "capabilities_changed",
+    capabilities: { promptCapabilities: { image: true } },
+  });
+  expect(state.capabilities).toEqual({ promptCapabilities: { image: true } });
 });

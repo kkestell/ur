@@ -282,10 +282,7 @@ export class Gui {
   /** Types `text` into the editor and presses Enter. */
   async sendPrompt(text: string): Promise<void> {
     await this.typePrompt(text);
-    await this.#session().execute(() => {
-      const textarea = document.querySelector(".editor textarea")!;
-      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    });
+    await this.pressKey(".editor textarea", "Enter");
   }
 
   /** Replaces the editor's text with `text`, as typing it would. */
@@ -297,6 +294,18 @@ export class Gui {
       setter.call(textarea, text);
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     }, text);
+  }
+
+  /** Presses `key` in the first element matching `selector`, as a keydown event. */
+  async pressKey(selector: string, key: string): Promise<void> {
+    await this.#session().execute(
+      (selector, key) => {
+        const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+        document.querySelector(selector)!.dispatchEvent(event);
+      },
+      selector,
+      key,
+    );
   }
 
   /** The editor's text. */
@@ -341,6 +350,43 @@ export class Gui {
           document.querySelector<HTMLElement>(selector)!.click();
         }),
       selector,
+    );
+  }
+
+  /**
+   * Moves the pointer onto the first element matching `selector`, as a
+   * `mouseover` from outside it, which React reports as `onMouseEnter`.
+   */
+  async hover(selector: string): Promise<void> {
+    await waitFor(`${selector} to hover`, () =>
+      this.#session().execute((selector) => {
+        const element = document.querySelector(selector);
+        const init = { bubbles: true, relatedTarget: document.body };
+        element?.dispatchEvent(new MouseEvent("mouseover", init));
+        return element !== null;
+      }, selector),
+    );
+  }
+
+  /**
+   * Drops a file named `name` with type `type` and base64 `data` on the first
+   * element matching `selector`, as dragging it from Finder would.
+   */
+  async dropFile(selector: string, name: string, type: string, data: string): Promise<void> {
+    await this.#session().execute(
+      (selector, name, type, data) => {
+        const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([bytes], name, { type }));
+        const target = document.querySelector(selector)!;
+        const init = { bubbles: true, cancelable: true, dataTransfer: transfer };
+        target.dispatchEvent(new DragEvent("dragover", init));
+        target.dispatchEvent(new DragEvent("drop", init));
+      },
+      selector,
+      name,
+      type,
+      data,
     );
   }
 

@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use agent_client_protocol::schema::v1::{
-    AgentCapabilities, ContentBlock, LoadSessionRequest, PermissionOptionId, PromptRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionId, SessionInfo, SessionNotification, SessionUpdate,
-    StopReason,
+    AgentCapabilities, ContentBlock, DeleteSessionRequest, LoadSessionRequest, PermissionOptionId,
+    PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionConfigOption, SessionId, SessionInfo, SessionNotification,
+    SessionUpdate, StopReason,
 };
 use agent_client_protocol::{Agent, ConnectionTo, Responder};
 use anyhow::{anyhow, bail};
@@ -49,6 +49,10 @@ impl Server {
     fn can_load(&self) -> bool {
         self.capabilities.load_session
     }
+
+    fn can_delete(&self) -> bool {
+        self.capabilities.session_capabilities.delete.is_some()
+    }
 }
 
 struct Session {
@@ -61,6 +65,7 @@ struct Session {
     title: Option<String>,
     /// The last activity.
     updated_at: Option<String>,
+    config_options: Vec<SessionConfigOption>,
     /// The operation guard.
     op: Option<Op>,
     subscribers: Vec<Outbox>,
@@ -78,7 +83,11 @@ struct Session {
 /// The session operation that holds the operation guard.
 enum Op {
     /// A turn is running.
-    Prompt,
+    Prompt {
+        /// The waiting delete: the request ID and outbox of a `delete_session`
+        /// that cancelled the turn and sends `session/delete` when it ends.
+        delete: Option<(u64, Outbox)>,
+    },
     /// `session/load` is in flight.
     Load {
         /// The replayed entries, which become the transcript if the load
@@ -88,6 +97,8 @@ enum Op {
         /// load ends.
         waiting: Vec<(u64, Outbox)>,
     },
+    /// `session/delete` is in flight.
+    Delete,
 }
 
 impl State {
@@ -102,11 +113,17 @@ impl State {
         }
     }
 
-    /// Sets the ACP connection, which starts a new generation, or why there
-    /// is none.
+    /// Sets the ACP connection, which starts a new generation and sends its
+    /// capabilities to every watcher, or why there is none.
     pub fn set_server(&mut self, server: Result<Server, String>) {
-        if server.is_ok() {
+        if let Ok(server) = &server {
             self.generation += 1;
+            broadcast(
+                &mut self.watchers,
+                Event::CapabilitiesChanged {
+                    capabilities: Box::new(server.capabilities.clone()),
+                },
+            );
         }
         self.server = server;
     }
@@ -126,13 +143,26 @@ impl State {
     /// Records that the ACP connection ended. The new server process has
     /// loaded no sessions, so every session becomes unloaded. Every running
     /// turn fails with `reason` and its pending permission requests are
-    /// dropped. A running load ends with the unchanged transcript. Every
-    /// operation guard is released.
+    /// dropped. A running load ends with the unchanged transcript, and a
+    /// waiting delete answers an error. Every operation guard is released.
     pub fn server_exited(&mut self, reason: String) {
         for session in &mut self.sessions {
             session.loaded = false;
-            if let Some(Op::Load { waiting, .. }) = session.op.take() {
-                session.end_load(waiting);
+            match session.op.take() {
+                Some(Op::Load { waiting, .. }) => session.end_load(waiting),
+                Some(Op::Prompt {
+                    delete: Some((id, outbox)),
+                }) => {
+                    respond(
+                        &outbox,
+                        id,
+                        Response::Error {
+                            message: "the server exited before the session was deleted".to_string(),
+                        },
+                    );
+                }
+                // A `session/delete` in flight answers from its callback.
+                Some(Op::Prompt { delete: None } | Op::Delete) | None => {}
             }
             // A prompt that starts with a load is `Working` during the load.
             if matches!(
@@ -153,6 +183,11 @@ impl State {
         outbox.send(event(Event::WatchSnapshot {
             workspaces: self.workspaces.clone(),
             sessions: self.sessions.iter().map(Session::summary).collect(),
+            capabilities: self
+                .server
+                .as_ref()
+                .ok()
+                .map(|server| Box::new(server.capabilities.clone())),
         }));
         self.watchers
             .retain(|other| !other.same_connection(&outbox));
@@ -195,7 +230,8 @@ impl State {
     /// Calls `save` with the list of workspaces without this one. If it
     /// succeeds, cancels the workspace's running prompts, removes its sessions,
     /// and removes it. The cancelled prompts are not waited for; their results
-    /// and later updates find no session.
+    /// and later updates find no session. A waiting delete answers `Done`,
+    /// since its session is gone.
     pub fn remove_workspace(
         &mut self,
         name: &str,
@@ -218,7 +254,10 @@ impl State {
         save(&workspaces)?;
         self.workspaces = workspaces;
         for session in self.sessions.iter_mut().filter(|s| s.workspace == name) {
-            if matches!(session.op, Some(Op::Prompt)) {
+            if let Some(Op::Prompt { delete }) = &mut session.op {
+                if let Some((id, outbox)) = delete.take() {
+                    respond(&outbox, id, Response::Done);
+                }
                 // The removal is saved, so it goes ahead. Without an ACP
                 // connection, there is no prompt left to cancel.
                 if let Err(error) = connection(&self.server)
@@ -245,14 +284,21 @@ impl State {
         Ok(())
     }
 
-    /// Adds a session created in `workspace`, unless the workspace was removed
-    /// while `session/new` was in flight.
-    pub fn add_session(&mut self, id: SessionId, workspace: String) -> anyhow::Result<()> {
+    /// Adds a session created in `workspace` with the config options from
+    /// `session/new`, unless the workspace was removed while `session/new` was
+    /// in flight.
+    pub fn add_session(
+        &mut self,
+        id: SessionId,
+        workspace: String,
+        config_options: Vec<SessionConfigOption>,
+    ) -> anyhow::Result<()> {
         if !self.workspaces.iter().any(|other| other.name == workspace) {
             bail!("workspace {workspace} was removed");
         }
         let mut session = Session::new(id, workspace);
         session.loaded = true;
+        session.config_options = config_options;
         publish(&mut self.watchers, &session);
         self.sessions.push(session);
         Ok(())
@@ -287,7 +333,8 @@ impl State {
 
     /// Appends an ACP update entry, or adds it to the replay while a load
     /// runs. A `session_info_update` also changes the session title and last
-    /// activity. An update for an unknown session is dropped.
+    /// activity, and a `config_option_update` the config options. An update
+    /// for an unknown session is dropped.
     pub fn apply_update(&mut self, notification: SessionNotification) {
         let id = notification.session_id;
         let Ok(session) = find(&mut self.sessions, &id) else {
@@ -306,6 +353,9 @@ impl State {
             if changed {
                 publish(&mut self.watchers, session);
             }
+        }
+        if let SessionUpdate::ConfigOptionUpdate(update) = &notification.update {
+            session.set_config_options(update.config_options.clone());
         }
         let entry = Entry::Update {
             update: Box::new(notification.update),
@@ -342,7 +392,7 @@ impl State {
                 waiting.push((request_id, outbox.clone()));
                 true
             }
-            Some(Op::Prompt) => false,
+            Some(Op::Prompt { .. } | Op::Delete) => false,
             None => {
                 if !session.loaded && can_load && !matches!(session.status, Status::Failed { .. }) {
                     let connection = connection(&self.server)?;
@@ -405,7 +455,9 @@ impl State {
 
     /// Ends a load. On success, the replay becomes the transcript, followed by
     /// the old transcript's trailing turn error entry if it had one, which
-    /// keeps the error of a turn the server exit interrupted. On failure, the
+    /// keeps the error of a turn the server exit interrupted, and the config
+    /// options from `session/load` replace the old ones when it has any. On
+    /// failure, the
     /// transcript is unchanged, the session stays unloaded, and it becomes
     /// `Failed`. Either way, every subscriber gets a session snapshot and each
     /// waiting `subscribe` is answered. Returns whether the session is loaded.
@@ -415,7 +467,7 @@ impl State {
         &mut self,
         id: &SessionId,
         generation: u64,
-        result: Result<(), String>,
+        result: Result<Option<Vec<SessionConfigOption>>, String>,
     ) -> bool {
         if generation != self.generation {
             return false;
@@ -431,7 +483,7 @@ impl State {
             }
         };
         match result {
-            Ok(()) => {
+            Ok(config_options) => {
                 let error = match session.transcript.last() {
                     Some(error @ Entry::TurnError { .. }) => Some(error.clone()),
                     _ => None,
@@ -439,6 +491,9 @@ impl State {
                 session.transcript = replay;
                 session.transcript.extend(error);
                 session.loaded = true;
+                if let Some(config_options) = config_options {
+                    session.config_options = config_options;
+                }
             }
             Err(message) => {
                 session.status = Status::Failed {
@@ -543,7 +598,7 @@ impl State {
             generation,
             PromptRequest::new(id.clone(), content.clone()),
         )?;
-        session.op = Some(Op::Prompt);
+        session.op = Some(Op::Prompt { delete: None });
         session.append(Entry::UserPrompt { content });
         session.status = Status::Working;
         session.unread = false;
@@ -552,23 +607,138 @@ impl State {
     }
 
     /// Ends the prompt with its stop reason, or with the message of the error
-    /// it returned. A result from an earlier generation, or for a session
-    /// removed with its workspace, is ignored.
+    /// it returned, and returns the waiting delete, if any. A result from an
+    /// earlier generation, or for a session removed with its workspace, is
+    /// ignored.
     pub fn finish_prompt(
         &mut self,
         id: &SessionId,
         generation: u64,
         result: Result<StopReason, String>,
-    ) {
+    ) -> Option<(u64, Outbox)> {
+        if generation != self.generation {
+            return None;
+        }
+        let Ok(session) = find(&mut self.sessions, id) else {
+            return None;
+        };
+        let delete = match session.op.take() {
+            Some(Op::Prompt { delete }) => delete,
+            _ => None,
+        };
+        session.end_turn(result);
+        publish(&mut self.watchers, session);
+        delete
+    }
+
+    /// Answers an error when the server does not advertise `session/delete`,
+    /// and busy while a load or delete holds the operation guard. An idle
+    /// session calls `send_delete` to send `session/delete` and holds the
+    /// guard. A running turn is cancelled as `cancel` does, and the request
+    /// becomes the waiting delete, sent when the turn ends. Returns `None`
+    /// when the request answers later.
+    pub fn delete_session(
+        &mut self,
+        id: &SessionId,
+        request_id: u64,
+        outbox: Outbox,
+        send_cancel: impl FnOnce(&ConnectionTo<Agent>, &SessionId) -> agent_client_protocol::Result<()>,
+        send_delete: impl FnOnce(
+            &ConnectionTo<Agent>,
+            u64,
+            DeleteSessionRequest,
+        ) -> agent_client_protocol::Result<()>,
+    ) -> anyhow::Result<Option<Response>> {
+        let generation = self.generation;
+        let server = server(&self.server)?;
+        if !server.can_delete() {
+            bail!("the server cannot delete sessions");
+        }
+        let session = find(&mut self.sessions, id)?;
+        match &mut session.op {
+            None => {
+                send_delete(
+                    &server.connection,
+                    generation,
+                    DeleteSessionRequest::new(id.clone()),
+                )?;
+                session.op = Some(Op::Delete);
+            }
+            Some(Op::Prompt { delete: None }) => {
+                cancel_turn(&mut self.watchers, session, &server.connection, send_cancel)?;
+                session.op = Some(Op::Prompt {
+                    delete: Some((request_id, outbox)),
+                });
+            }
+            Some(Op::Load { .. } | Op::Delete | Op::Prompt { delete: Some(_) }) => {
+                return Ok(Some(Response::Busy));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Sends the waiting delete's `session/delete` through `send_delete` once
+    /// its turn has ended, and holds the operation guard.
+    pub fn start_delete(
+        &mut self,
+        id: &SessionId,
+        send_delete: impl FnOnce(
+            &ConnectionTo<Agent>,
+            u64,
+            DeleteSessionRequest,
+        ) -> agent_client_protocol::Result<()>,
+    ) -> anyhow::Result<()> {
+        let generation = self.generation;
+        let connection = self.connection()?;
+        let session = find(&mut self.sessions, id)?;
+        send_delete(
+            &connection,
+            generation,
+            DeleteSessionRequest::new(id.clone()),
+        )?;
+        session.op = Some(Op::Delete);
+        Ok(())
+    }
+
+    /// Ends a delete. On success, removes the session, sends
+    /// `session_removed` to its subscribers, and `session_deleted` to every
+    /// watcher. On failure, releases the operation guard and the session
+    /// stays. A result from an earlier generation, or for a session that is
+    /// gone, is ignored.
+    pub fn finish_delete(&mut self, id: &SessionId, generation: u64, result: Result<(), String>) {
         if generation != self.generation {
             return;
         }
-        let Ok(session) = find(&mut self.sessions, id) else {
+        let Some(position) = self.sessions.iter().position(|session| session.id == *id) else {
             return;
         };
-        session.op = None;
-        session.end_turn(result);
-        publish(&mut self.watchers, session);
+        if result.is_err() {
+            self.sessions[position].op = None;
+            return;
+        }
+        let session = self.sessions.remove(position);
+        let removed = event(Event::SessionRemoved {
+            session: session.id.clone(),
+        });
+        for outbox in &session.subscribers {
+            outbox.send(removed.clone());
+        }
+        broadcast(
+            &mut self.watchers,
+            Event::SessionDeleted {
+                session: session.id,
+            },
+        );
+    }
+
+    /// Sets the config options from a `session/set_config_option` response.
+    pub fn set_config_options(
+        &mut self,
+        id: &SessionId,
+        config_options: Vec<SessionConfigOption>,
+    ) -> anyhow::Result<()> {
+        find(&mut self.sessions, id)?.set_config_options(config_options);
+        Ok(())
     }
 
     /// Adds a pending permission request and sets `NeedsPermission`. During
@@ -657,17 +827,15 @@ impl State {
     ) -> anyhow::Result<()> {
         let session = find(&mut self.sessions, id)?;
         // A load has no turn to cancel yet.
-        if !matches!(session.op, Some(Op::Prompt)) {
+        if !matches!(session.op, Some(Op::Prompt { .. })) {
             return Ok(());
         }
-        send_cancel(&connection(&self.server)?, id)?;
-        session.answer_cancelled();
-        session.cancelling = true;
-        if session.status != Status::Working {
-            session.status = Status::Working;
-            publish(&mut self.watchers, session);
-        }
-        Ok(())
+        cancel_turn(
+            &mut self.watchers,
+            session,
+            &connection(&self.server)?,
+            send_cancel,
+        )
     }
 }
 
@@ -681,6 +849,7 @@ impl Session {
             loaded: false,
             title: None,
             updated_at: None,
+            config_options: Vec::new(),
             op: None,
             subscribers: Vec::new(),
             status: Status::Idle { last_stop: None },
@@ -723,10 +892,7 @@ impl Session {
         self.subscribers
             .retain(|outbox| outbox.send(snapshot.clone()));
         for (id, outbox) in waiting {
-            outbox.send(Frame::json(&DaemonMessage::Response {
-                id,
-                response: Response::Done,
-            }));
+            respond(&outbox, id, Response::Done);
         }
     }
 
@@ -734,7 +900,22 @@ impl Session {
         event(Event::SessionSnapshot {
             session: self.id.clone(),
             transcript: self.transcript.clone(),
+            config_options: self.config_options.clone(),
         })
+    }
+
+    /// Sets the config options and sends them to every subscriber. During a
+    /// load nothing is sent, since the snapshot at its end carries them.
+    fn set_config_options(&mut self, config_options: Vec<SessionConfigOption>) {
+        self.config_options = config_options;
+        if matches!(self.op, Some(Op::Load { .. })) {
+            return;
+        }
+        let frame = event(Event::ConfigOptionsChanged {
+            session: self.id.clone(),
+            config_options: self.config_options.clone(),
+        });
+        self.subscribers.retain(|outbox| outbox.send(frame.clone()));
     }
 
     fn append(&mut self, entry: Entry) {
@@ -767,6 +948,25 @@ impl Session {
             updated_at: self.updated_at.clone(),
         }
     }
+}
+
+/// Calls `send_cancel`, answers every pending permission request with
+/// `Cancelled`, and sets `Working`. The operation guard stays held until the
+/// prompt returns.
+fn cancel_turn(
+    watchers: &mut Vec<Outbox>,
+    session: &mut Session,
+    connection: &ConnectionTo<Agent>,
+    send_cancel: impl FnOnce(&ConnectionTo<Agent>, &SessionId) -> agent_client_protocol::Result<()>,
+) -> anyhow::Result<()> {
+    send_cancel(connection, &session.id)?;
+    session.answer_cancelled();
+    session.cancelling = true;
+    if session.status != Status::Working {
+        session.status = Status::Working;
+        publish(watchers, session);
+    }
+    Ok(())
 }
 
 fn server(server: &Result<Server, String>) -> anyhow::Result<&Server> {
@@ -819,4 +1019,9 @@ fn broadcast(watchers: &mut Vec<Outbox>, event: Event) {
 
 fn event(event: Event) -> Frame {
     Frame::json(&DaemonMessage::Event { event })
+}
+
+/// Queues the response to request `id`.
+pub fn respond(outbox: &Outbox, id: u64, response: Response) {
+    outbox.send(Frame::json(&DaemonMessage::Response { id, response }));
 }

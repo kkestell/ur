@@ -2,8 +2,8 @@ use std::io;
 use std::path::PathBuf;
 
 use agent_client_protocol_schema::v1::{
-    ContentBlock, PermissionOptionId, RequestPermissionRequest, SessionId, SessionUpdate,
-    StopReason,
+    AgentCapabilities, ContentBlock, PermissionOptionId, RequestPermissionRequest, SessionConfigId,
+    SessionConfigOption, SessionConfigOptionValue, SessionId, SessionUpdate, StopReason,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -46,6 +46,13 @@ pub enum Request {
     NewSession {
         workspace: String,
     },
+    /// Deletes a session from the server, when it advertises `session/delete`.
+    /// A running turn is cancelled first, and the response waits for
+    /// `session/delete` to return.
+    DeleteSession {
+        #[ts(type = "string")]
+        session: SessionId,
+    },
     /// Sends the session snapshot, then every later transcript entry.
     /// Subscribing to a saved session loads it first, and the snapshot and the
     /// response wait for the load. Subscribing again from the same socket
@@ -83,6 +90,15 @@ pub enum Request {
         #[ts(type = "string")]
         option_id: PermissionOptionId,
     },
+    /// Sends `session/set_config_option` and answers when the server responds.
+    SetConfigOption {
+        #[ts(type = "string")]
+        session: SessionId,
+        #[ts(type = "string")]
+        config_id: SessionConfigId,
+        #[ts(type = "{ type: \"boolean\"; value: boolean } | { value: string }")]
+        value: SessionConfigOptionValue,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -118,6 +134,15 @@ pub enum Event {
     WatchSnapshot {
         workspaces: Vec<Workspace>,
         sessions: Vec<SessionSummary>,
+        /// The current ACP connection's capabilities, or `None` without one.
+        #[ts(type = "import(\"@agentclientprotocol/sdk\").AgentCapabilities | null")]
+        capabilities: Option<Box<AgentCapabilities>>,
+    },
+    /// A successful `initialize` started a new ACP connection with these
+    /// capabilities.
+    CapabilitiesChanged {
+        #[ts(type = "import(\"@agentclientprotocol/sdk\").AgentCapabilities")]
+        capabilities: Box<AgentCapabilities>,
     },
     WorkspaceAdded {
         workspace: Workspace,
@@ -131,12 +156,20 @@ pub enum Event {
     SessionChanged {
         summary: SessionSummary,
     },
-    /// A subscribed session's transcript, sent before its later entries. A load
-    /// sends a fresh one, which replaces the earlier transcript.
+    /// The session was deleted and is gone from the sidebar.
+    SessionDeleted {
+        #[ts(type = "string")]
+        session: SessionId,
+    },
+    /// A subscribed session's transcript and config options, sent before its
+    /// later entries. A load sends a fresh one, which replaces the earlier
+    /// transcript.
     SessionSnapshot {
         #[ts(type = "string")]
         session: SessionId,
         transcript: Vec<Entry>,
+        #[ts(type = "Array<import(\"@agentclientprotocol/sdk\").SessionConfigOption>")]
+        config_options: Vec<SessionConfigOption>,
     },
     /// One transcript entry of a subscribed session, after its snapshot.
     Entry {
@@ -144,7 +177,14 @@ pub enum Event {
         session: SessionId,
         entry: Entry,
     },
-    /// A subscribed session was removed with its workspace.
+    /// A subscribed session's config options changed, after its snapshot.
+    ConfigOptionsChanged {
+        #[ts(type = "string")]
+        session: SessionId,
+        #[ts(type = "Array<import(\"@agentclientprotocol/sdk\").SessionConfigOption>")]
+        config_options: Vec<SessionConfigOption>,
+    },
+    /// A subscribed session was removed with its workspace, or deleted.
     SessionRemoved {
         #[ts(type = "string")]
         session: SessionId,

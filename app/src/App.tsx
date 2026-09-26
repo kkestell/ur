@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { addWorkspace, newSession } from "./actions";
 import { Editor } from "./components/Editor";
 import { Sidebar } from "./components/Sidebar";
 import { TerminalPane } from "./components/TerminalPane";
@@ -80,14 +81,14 @@ export default function App() {
     );
   } else if (selected?.type === "session") {
     // Keyed so the editor's draft and message stay with their session.
-    main = <Session key={selected.session} id={selected.session} />;
+    main = <Session key={selected.session} id={selected.session} onSelect={onSelect} />;
   } else if (watch.workspaces.length === 0) {
     main = (
       <div className="empty">
         <div>No workspaces</div>
-        <div className="hint">
-          <code>ur workspace add &lt;name&gt; &lt;path&gt;</code>
-        </div>
+        <button className="button" onClick={() => void addWorkspace()}>
+          Add Workspace
+        </button>
       </div>
     );
   } else {
@@ -102,10 +103,11 @@ export default function App() {
   );
 }
 
-function Session({ id }: { id: string }) {
+function Session({ id, onSelect }: { id: string; onSelect: (selection: Selection) => void }) {
   const watch = useWatch();
   const thread = useSession(id);
-  const status = watch.sessions.find((session) => session.session === id)?.status;
+  const summary = watch.sessions.find((session) => session.session === id);
+  const status = summary?.status;
   const requests = status?.type === "needs_permission" ? status.requests : noRequests;
   // Memoized: `Session` renders on every watch event, and a fresh array each
   // time would scroll the thread to the bottom.
@@ -137,8 +139,25 @@ function Session({ id }: { id: string }) {
 
   return (
     <div className="session">
+      <div className="session-header">
+        <span className="label">{summary?.title ?? "New session"}</span>
+        {summary !== undefined && (
+          <button
+            className="icon-button"
+            title="New Session"
+            onClick={() => void newSession(summary.workspace, onSelect)}
+          >
+            +
+          </button>
+        )}
+      </div>
       <Thread items={items} onAnswer={(request, option) => answer(request, option.optionId)} />
-      <Editor session={id} status={status} />
+      <Editor
+        session={id}
+        status={status}
+        thread={thread}
+        capabilities={watch.capabilities}
+      />
     </div>
   );
 }

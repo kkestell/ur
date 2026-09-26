@@ -67,6 +67,9 @@ documentation, give agent session tests replies, permission requests, and errors
 - An editor draft does not follow the selection to another session.
 - A session that comes back with its workspace shows its thread.
 - Another session's activity leaves the thread's scroll position alone.
+- The session header shows the session title.
+- The session header's + creates a session in its workspace and selects it.
+- Deleting a session removes it from the sidebar.
 - A working session shows the spinner.
 - A session waiting for permission shows its mark and its workspace's count.
 - Clicking a permission option answers the request.
@@ -81,6 +84,12 @@ documentation, give agent session tests replies, permission requests, and errors
 - A Run Command block shows its output when clicked.
 - A tool call row shows its content when clicked.
 - Clicking a link in an agent message leaves the app in place.
+- Typing / lists the server's slash commands, and Enter inserts one.
+- Choosing a config option value sets it on the server.
+- A config option the server changes updates its picker.
+- Usage the server reports shows in the usage indicator.
+- An image dropped on the editor is sent with the prompt.
+- A dropped file that is not an image is refused.
 
 ### Admission
 

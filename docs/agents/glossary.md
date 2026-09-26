@@ -58,8 +58,8 @@
   launches in end-to-end tests, and its library is the test agent in the daemon's tests. The
   prompt's text chooses its script: `hold`, `tool`, `tools` (two permission requests at once),
   `reject` (a rejected prompt), `fail` (a turn error), `title` (a session title), `unloadable` (a
-  session whose loads fail), or a reply. Its saved history is a `SavedHistory`, which the daemon's
-  tests share between fake servers.
+  session whose loads fail), `pace` (a `config_option_update`), `usage` (a `usage_update`), or a
+  reply. Its saved history is a `SavedHistory`, which the daemon's tests share between fake servers.
 - **Daemon**: The long-running `ur daemon` process. It owns the ACP connection, session statuses,
   in-memory transcripts, pending permission requests, and terminals, and serves daemon clients on
   the socket.
@@ -135,6 +135,8 @@
   `session.op` in `State`. Delete holds it through cancel, wait, and `session/delete`.
 - **Busy**: The rejection a request gets when the session's operation guard is already held. It
   changes neither the transcript nor the status.
+- **Waiting delete**: A `delete_session` request that cancelled a running turn, recorded in the
+  prompt's operation guard until the turn ends and `session/delete` is sent.
 
 ### Transcripts
 
@@ -210,8 +212,9 @@
 - **Slash command**: A command from `available_commands_update`, offered when the user types `/`.
 - **Usage indicator**: The GUI display of the server's `usage_update`, with available tokens and
   cost on hover.
-- **Image attachment**: An image file dropped on the window, read by the core, and sent as image
-  content in the next prompt. It requires the server's image prompt capability.
+- **Image attachment**: An image file dropped on the editor, read by the webview, and sent as image
+  content in the next prompt. It requires the server's image prompt capability. It is
+  `ImageAttachment` in code.
 
 ### Wire protocol
 
@@ -224,8 +227,8 @@
 - **Event**: A JSON message the daemon pushes to a daemon client. Events carry ACP schema types
   unchanged.
 - **Watch**: The request that registers a daemon client for sidebar events: workspaces, their
-  sessions and terminals, each session's title, status, and unread flag, and each terminal's title.
-  Pending permission requests arrive in the session status.
+  sessions and terminals, each session's title, status, and unread flag, each terminal's title, and
+  the server's capabilities. Pending permission requests arrive in the session status.
 - **Session summary**: One session as watch shows it: its session ID, workspace, session status,
   unread flag, session title, and last activity. It is `SessionSummary` in code.
 - **Subscribe**: The request that registers a daemon client for one session's content: its
@@ -253,7 +256,16 @@
 
 - **Sidebar**: The left side of the window, listing workspaces with their sessions and terminals.
 - **Thread**: The GUI view of one session's transcript, with the editor below it.
-- **Editor**: The borderless prompt input under a thread, with Send and Stop.
+- **Editor**: The borderless prompt input under a thread, with the command list, image attachment
+  chips, the usage indicator, config pickers, and Send or Stop.
+- **Workspace menu**: The native context menu of a workspace row: New Session and Remove Workspace….
+- **Session menu**: The native context menu of a session row: Delete…, shown when the server
+  advertises `session/delete`.
+- **Session header**: The row above the thread with the session title and `+`, which creates a
+  session in the same workspace.
+- **Command list**: The list of matching slash commands above the editor while typing `/`.
+- **Config picker**: The editor control for one config option: a list of a select option's values,
+  or a toggle for a boolean option. It is `ConfigPicker` in code.
 - **Pane**: A dockview group holding tabs. The active pane receives sidebar selections.
 - **Tab**: A dockview panel for one agent session or terminal. Closing it changes only the layout.
 - **Layout**: The dockview arrangement of panes and tabs, saved in the GUI state file.

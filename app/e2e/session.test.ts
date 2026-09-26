@@ -109,3 +109,34 @@ e2eTest("another session's activity leaves the thread's scroll position alone", 
   await environment.ur("wait", other);
   assert.equal(await gui.threadScrollTop(), 0);
 });
+
+e2eTest("the session header shows the session title", async (environment) => {
+  const session = await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.click(".sidebar .row", "New session");
+  await gui.waitForText(".session-header .label", "New session");
+  await environment.ur("prompt", session, "title");
+  await gui.waitForText(".session-header .label", "tallies");
+  await gui.waitForText(".sidebar .row", "tallies");
+});
+
+e2eTest("the session header's + creates a session in its workspace and selects it", async (environment) => {
+  const session = await environment.newSession();
+  await environment.ur("prompt", session, "title");
+  const gui = await environment.openGui();
+  await gui.click(".sidebar .row", "tallies");
+  await gui.click(".session-header .icon-button", "+");
+  await gui.waitForText(".sidebar .row.selected", "New session");
+  await gui.waitForText(".session-header .label", "New session");
+  assert.equal((await gui.texts(".workspace .row")).length, 2);
+});
+
+e2eTest("deleting a session removes it from the sidebar", async (environment) => {
+  const session = await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.click(".sidebar .row", "New session");
+  // Delete… is a native menu and confirmation, which WebDriver cannot drive.
+  await gui.request({ type: "delete_session", session });
+  await gui.waitForNone(".workspace .row");
+  await gui.waitForText(".empty", "Select a session");
+});

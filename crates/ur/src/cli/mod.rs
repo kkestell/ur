@@ -46,6 +46,7 @@ async fn watch(
         Some(Event::WatchSnapshot {
             workspaces,
             sessions,
+            ..
         }) => Ok((workspaces, sessions, events)),
         other => bail!("expected the watch snapshot, got {other:?}"),
     }

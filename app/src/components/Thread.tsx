@@ -38,7 +38,18 @@ function ItemView({
 }) {
   switch (item.kind) {
     case "user":
-      return <div className="block user">{item.text}</div>;
+      return (
+        <div className="block user">
+          {item.text}
+          {item.images.length > 0 && (
+            <div className="thumbnails">
+              {item.images.map((image, index) => (
+                <img key={index} src={`data:${image.mimeType};base64,${image.data}`} />
+              ))}
+            </div>
+          )}
+        </div>
+      );
     case "agent":
       return <AgentMessage text={item.text} />;
     case "thought":

@@ -184,11 +184,11 @@ unchanged. The GUI groups them for display as described below. JSON client reque
 ```text
 watch
 add_workspace | remove_workspace
-new_session(workspace) | delete_session
+new_session(workspace) | delete_session(session)
 subscribe(session) | focus(sessions)
 prompt(session, content) | cancel(session)
 answer_permission(session, request_id, option_id)
-set_config_option(session, option_id, value)
+set_config_option(session, config_id, value)
 open_terminal(workspace) | attach_terminal(terminal, rows, cols) | detach_terminal
 terminal_resize | close_terminal
 ```
@@ -197,18 +197,21 @@ terminal_resize | close_terminal
 removed the terminal. It follows all of that terminal's output on the same socket connection.
 
 There are three levels of events. `watch` covers the sidebar: workspaces, their sessions and
-terminals, each session's title, status, and unread flag, and each terminal's title. Pending
-permission requests travel in the session status, so every watching client receives them. After the
-watch snapshot, the daemon sends `workspace_added`, `workspace_removed` (which also removes the
-workspace's sessions), and `session_changed` with the session's whole summary when a session is
-added or its status or unread flag changes. `subscribe` covers one session's content: its transcript
-and config options. A subscribed session removed with its workspace gets `session_removed`.
-`attach_terminal` covers one terminal's initial screen restoration and live output, using the
-terminal attachment format established in milestone 0. For `watch` and `subscribe`, under one lock
-the daemon queues a snapshot and registers the client for live events. Socket writes happen outside
-the lock. Each connection gets the snapshot followed by live changes in order. A client that cannot
-keep up is dropped. Transcript replacement after a load sends a fresh session snapshot, which
-clients use to replace their local state.
+terminals, each session's title, status, and unread flag, each terminal's title, and the server's
+capabilities. Pending permission requests travel in the session status, so every watching client
+receives them. After the watch snapshot, the daemon sends `capabilities_changed` after each
+successful `initialize`, `workspace_added`, `workspace_removed` (which also removes the workspace's
+sessions), `session_changed` with the session's whole summary when a session is added or its status
+or unread flag changes, and `session_deleted` when a session is deleted. `subscribe` covers one
+session's content: its transcript and config options. After the session snapshot, the daemon sends
+each transcript entry and `config_options_changed` when the config options change outside a load. A
+subscribed session removed with its workspace, or deleted, gets `session_removed`. `attach_terminal`
+covers one terminal's initial screen restoration and live output, using the terminal attachment
+format established in milestone 0. For `watch` and `subscribe`, under one lock the daemon queues a
+snapshot and registers the client for live events. Socket writes happen outside the lock. Each
+connection gets the snapshot followed by live changes in order. A client that cannot keep up is
+dropped. Transcript replacement after a load sends a fresh session snapshot, which clients use to
+replace their local state.
 
 ### Project layout
 
@@ -261,10 +264,9 @@ app/src-tauri/src/
                   subscribed, attached, focus }; forwards events to app.emit
                   and PTY bytes to the terminal Channel
   commands.rs     request(req: Request) -> Response, attach_terminal,
-                  terminal_input, set_visible, read_attachment
+                  terminal_input, set_visible
   terminal.rs     terminal ID to Channel<tauri::ipc::Response>
   gui_state.rs    gui.json
-  menu.rs         context menus and the folder picker
 
 app/src/
   ipc/            request(), onWatch(), onSession(id), attachTerminal(id),
@@ -273,9 +275,12 @@ app/src/
                   useSession(id), terminals.ts
   transcript/     reduce.ts: (ThreadState, Event) -> ThreadState, pure and
                   unit tested; blocks.ts display types
-  components/     Sidebar, Thread, Editor, Permission, TerminalPane, Layout,
-                  Tab
+  components/     Sidebar, Thread, Editor, ConfigPicker, UsageIndicator,
+                  Permission, TerminalPane, Layout, Tab
   hooks/          useTerminal(id)
+  actions.ts      folder picker, confirmations, native menus
+  slash.ts        command list matching
+  usage.ts        usage indicator text
   keys.ts
 ```
 
@@ -306,21 +311,24 @@ come from `ts-rs`, with ACP payload fields overridden to the types exported by
   every prompt and load result; `State` ignores anything from an earlier generation. On exit the
   supervisor fails `Working` and `NeedsPermission` sessions, clears pending requests, marks every
   session unloaded, releases every operation guard, and starts the server again with backoff.
-- The guard lives in `State` as `session.op`, an `Op`: `Prompt` while a turn runs, or `Load` while
-  `session/load` is in flight. `Load` holds the replayed entries, which become the transcript only
-  on success, and the `subscribe` requests waiting for the load. During a load, `apply_update` adds
-  to the replay and sends nothing to subscribers. Under the lock: if `op` is set, return busy;
-  otherwise send the request through the connection clone, set `op`, and, for a prompt, append the
-  user prompt entry and set `Working`. Sending under the lock means a failed send leaves nothing to
-  undo, and the server's first update waits for the lock, so it follows the user prompt entry. The
-  op handles the response in an `on_receiving_result` callback, never `block_task()`: the SDK runs
-  that callback before it dispatches the server's next message. So the `session/new` callback adds
-  the session before the server's first update for it is handled, and the `session/prompt` callback
-  clears `op` only after the turn's last update is in the transcript. The callbacks always return
-  `Ok`, because an error from one shuts down the ACP connection. A prompt or load callback ignores
-  the error a request gets when the ACP connection closes, which can arrive before or after the
-  supervisor sees the close; the supervisor records that server exit, so each interrupted turn gets
-  one turn error entry. Delete holds `op` through cancel, wait, and delete.
+- The guard lives in `State` as `session.op`, an `Op`: `Prompt` while a turn runs, `Load` while
+  `session/load` is in flight, or `Delete` while `session/delete` is in flight. `Prompt` can hold
+  the waiting delete: a `delete_session` that cancelled the turn. The `session/prompt` callback
+  sends its `session/delete` under the same lock, so no other request takes the guard in between.
+  `Load` holds the replayed entries, which become the transcript only on success, and the
+  `subscribe` requests waiting for the load. During a load, `apply_update` adds to the replay and
+  sends nothing to subscribers. Under the lock: if `op` is set, return busy; otherwise send the
+  request through the connection clone, set `op`, and, for a prompt, append the user prompt entry
+  and set `Working`. Sending under the lock means a failed send leaves nothing to undo, and the
+  server's first update waits for the lock, so it follows the user prompt entry. The op handles the
+  response in an `on_receiving_result` callback, never `block_task()`: the SDK runs that callback
+  before it dispatches the server's next message. So the `session/new` callback adds the session
+  before the server's first update for it is handled, and the `session/prompt` callback clears `op`
+  only after the turn's last update is in the transcript. The callbacks always return `Ok`, because
+  an error from one shuts down the ACP connection. A prompt or load callback ignores the error a
+  request gets when the ACP connection closes, which can arrive before or after the supervisor sees
+  the close; the supervisor records that server exit, so each interrupted turn gets one turn error
+  entry. Delete holds `op` through cancel, wait, and delete.
 - Pending permission requests hold their SDK `Responder` in `Session.responders`, keyed by request
   ID; `answer_permission` and cancellation respond through it.
 - `Entry`, `Status`, and the snapshot structs are defined in `ur-client` and used as-is inside
@@ -335,10 +343,10 @@ webview never touches the socket.
 - One Tauri command, `request`, takes a wire-protocol `Request` and returns the daemon's `Response`.
   The tagged `Request` enum carries the name and arguments, so adding a request touches
   `protocol.rs` and the daemon only. The other commands are `attach_terminal`, `terminal_input`,
-  `selection`, `select`, `connection`, `set_visible`, and `read_attachment`. `attach_terminal` is
-  separate because it takes the terminal's `Channel`, which `request` cannot carry. `connection`
-  gives the webview the current connection when it starts, since a `connection` event emitted before
-  its listener is installed is lost.
+  `selection`, `select`, `connection`, and `set_visible`. `attach_terminal` is separate because it
+  takes the terminal's `Channel`, which `request` cannot carry. `connection` gives the webview the
+  current connection when it starts, since a `connection` event emitted before its listener is
+  installed is lost.
 - Daemon events reach the webview as Tauri events: `watch` events under one name, and every
   subscribed session's events under the one name `session`, with the webview dispatching on the
   payload's session ID. Tauri event names allow only alphanumerics, `-`, `/`, `:`, and `_`, and
@@ -362,10 +370,11 @@ webview never touches the socket.
 - Pending permission requests render from the watch store, where they arrive in the session status,
   not from the thread state. `transcript/permissions.ts` places them among the blocks: each takes
   the place of the tool call block with its tool call ID, or follows the last block.
-- Native pieces come from Tauri: the dialog plugin for the folder picker, the opener plugin, which
-  opens links in agent messages in the default browser, `Menu::popup` for context menus, and the
-  window's drag-drop event, which gives the core file paths to read and attach to the next prompt.
-  Keyboard shortcuts are handled in the webview.
+- Native pieces come from Tauri and are used from the webview: the dialog plugin for the folder
+  picker, confirmations, and error messages, the opener plugin, which opens links in agent messages
+  in the default browser, and the menu API's `Menu.popup()` for the workspace and session menus.
+  Image files are dropped on the editor as HTML drop events, since the window's `dragDropEnabled` is
+  off, and the webview reads them into image content. Keyboard shortcuts are handled in the webview.
 - The core writes the GUI state file described below.
 
 The `useSession` hook sends `subscribe` the first time a session is used and never unsubscribes: the

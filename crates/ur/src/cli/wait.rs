@@ -28,6 +28,9 @@ pub async fn start(session: String, until: Until) -> anyhow::Result<()> {
             Some(Event::WorkspaceRemoved { name }) if name == summary.workspace => {
                 bail!("session {session} was removed with workspace {name}");
             }
+            Some(Event::SessionDeleted { session: deleted }) if deleted == session => {
+                bail!("session {session} was deleted");
+            }
             Some(_) => {}
             None => bail!("the daemon closed the connection"),
         }

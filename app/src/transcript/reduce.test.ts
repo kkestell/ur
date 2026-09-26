@@ -1,7 +1,7 @@
-import type { SessionUpdate, ToolCallContent } from "@agentclientprotocol/sdk";
+import type { SessionConfigOption, SessionUpdate, ToolCallContent } from "@agentclientprotocol/sdk";
 import { expect, test } from "vitest";
 import type { Entry } from "../ipc/bindings/Entry";
-import type { Block, ThreadState } from "./blocks";
+import { type Block, type ThreadState, emptyThread } from "./blocks";
 import { reduce } from "./reduce";
 
 const SESSION = "s1";
@@ -17,12 +17,25 @@ function chunk(
   return update({ sessionUpdate, content: { type: "text", text } });
 }
 
-function reduceAll(entries: Entry[], state: ThreadState = { blocks: [] }): Block[] {
+function reduceThread(entries: Entry[], state: ThreadState = emptyThread): ThreadState {
   let current: ThreadState | undefined = state;
   for (const entry of entries) {
     current = reduce(current!, { type: "entry", session: SESSION, entry });
   }
-  return current!.blocks;
+  return current!;
+}
+
+function reduceAll(entries: Entry[]): Block[] {
+  return reduceThread(entries).blocks;
+}
+
+function snapshot(transcript: Entry[], config_options: SessionConfigOption[] = []): ThreadState {
+  return reduce(emptyThread, {
+    type: "session_snapshot",
+    session: SESSION,
+    transcript,
+    config_options,
+  })!;
 }
 
 test("a_snapshot_replaces_the_thread", () => {
@@ -30,10 +43,15 @@ test("a_snapshot_replaces_the_thread", () => {
     { type: "user_prompt", content: [{ type: "text", text: "hi" }] },
     chunk("agent_message_chunk", "hello"),
   ];
-  const once = reduce({ blocks: [] }, { type: "session_snapshot", session: SESSION, transcript });
-  const again = reduce(once!, { type: "session_snapshot", session: SESSION, transcript });
+  const once = snapshot(transcript);
+  const again = reduce(once, {
+    type: "session_snapshot",
+    session: SESSION,
+    transcript,
+    config_options: [],
+  });
   expect(again!.blocks).toEqual([
-    { kind: "user", text: "hi" },
+    { kind: "user", text: "hi", images: [] },
     { kind: "agent", text: "hello" },
   ]);
 });
@@ -52,7 +70,7 @@ test.each([
   {
     name: "replayed user message",
     entries: [chunk("user_message_chunk", "do "), chunk("user_message_chunk", "it")],
-    blocks: [{ kind: "user", text: "do it" }],
+    blocks: [{ kind: "user", text: "do it", images: [] }],
   },
   {
     name: "a kind change starts a new block",
@@ -71,11 +89,36 @@ test("a_user_prompt_joins_its_text_parts", () => {
     type: "user_prompt",
     content: [
       { type: "text", text: "first" },
-      { type: "image", data: "", mimeType: "image/png" },
       { type: "text", text: "second" },
     ],
   };
-  expect(reduceAll([entry])).toEqual([{ kind: "user", text: "first\nsecond" }]);
+  expect(reduceAll([entry])).toEqual([{ kind: "user", text: "first\nsecond", images: [] }]);
+});
+
+const png = { mimeType: "image/png", data: "iVBOR" };
+
+test.each([
+  {
+    name: "a user prompt entry",
+    entries: [
+      {
+        type: "user_prompt",
+        content: [
+          { type: "text", text: "look" },
+          { type: "image", ...png },
+        ],
+      } satisfies Entry,
+    ],
+  },
+  {
+    name: "replayed user_message_chunk updates",
+    entries: [
+      chunk("user_message_chunk", "look"),
+      update({ sessionUpdate: "user_message_chunk", content: { type: "image", ...png } }),
+    ],
+  },
+])("a_user_message_keeps_its_images: $name", ({ entries }) => {
+  expect(reduceAll(entries)).toEqual([{ kind: "user", text: "look", images: [png] }]);
 });
 
 const call: Entry = update({
@@ -236,11 +279,67 @@ test.each([
     entry: update({ sessionUpdate: "session_info_update", title: "Renamed" }),
   },
   {
-    name: "available_commands_update",
-    entry: update({ sessionUpdate: "available_commands_update", availableCommands: [] }),
+    name: "config_option_update",
+    entry: update({ sessionUpdate: "config_option_update", configOptions: [] }),
   },
 ])("other_updates_are_ignored: $name", ({ entry }) => {
   expect(reduceAll([chunk("agent_message_chunk", "hi"), entry])).toEqual([
     { kind: "agent", text: "hi" },
   ]);
+});
+
+function commands(...names: string[]): Entry {
+  return update({
+    sessionUpdate: "available_commands_update",
+    availableCommands: names.map((name) => ({ name, description: `run ${name}` })),
+  });
+}
+
+function usage(used: number): Entry {
+  return update({ sessionUpdate: "usage_update", used, size: 8000 });
+}
+
+test.each([
+  {
+    name: "from entries",
+    thread: () => reduceThread([commands("one"), usage(10), commands("two"), usage(20)]),
+  },
+  {
+    name: "from the snapshot",
+    thread: () => snapshot([commands("one"), usage(10), commands("two"), usage(20)]),
+  },
+])("the_latest_commands_and_usage_are_kept: $name", ({ thread }) => {
+  const state = thread();
+  expect(state.commands.map((command) => command.name)).toEqual(["two"]);
+  expect(state.usage).toMatchObject({ used: 20, size: 8000 });
+});
+
+function pace(currentValue: string): SessionConfigOption[] {
+  return [
+    {
+      type: "select",
+      id: "pace",
+      name: "Pace",
+      currentValue,
+      options: [
+        { value: "steady", name: "Steady" },
+        { value: "brisk", name: "Brisk" },
+      ],
+    },
+  ];
+}
+
+test.each([
+  { name: "the snapshot", thread: () => snapshot([], pace("brisk")) },
+  {
+    name: "config_options_changed",
+    thread: () =>
+      reduce(snapshot([], pace("steady")), {
+        type: "config_options_changed",
+        session: SESSION,
+        config_options: pace("brisk"),
+      })!,
+  },
+])("config_options_come_from: $name", ({ thread }) => {
+  expect(thread().configOptions).toEqual(pace("brisk"));
 });

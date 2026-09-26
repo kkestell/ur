@@ -207,8 +207,8 @@ rejects. Each renders as in the wireframes, and the thinking and tool rows expan
 - Pass through `available_commands_update`, config options, and usage data. Show slash commands when
   the user types `/`, add one picker for each supplied config option with `set_config_option`, and
   show usage indicators when reported, with available tokens and cost on hover.
-- When image prompts are supported, accept image content through the prompt path. Use the window's
-  drag-drop event to attach an image file to the next prompt; the core reads the file. Route server
+- When image prompts are supported, accept image content through the prompt path. Dropping an image
+  file on the editor attaches it to the next prompt; the webview reads the file. Route server
   rejection through the ordinary prompt-error path without hard-coding Ox's image limits.
 
 ![Menus](wireframes/menus.png)

@@ -161,6 +161,13 @@ fn handle(
                 Err(error) => Err(error),
             }
         }
+        Request::DeleteSession { session } => {
+            match ops::delete_session(state, &session, id, outbox.clone()) {
+                Ok(Some(response)) => Ok(response),
+                Ok(None) => return None,
+                Err(error) => Err(error),
+            }
+        }
         Request::Subscribe { session } => match ops::subscribe(state, &session, id, outbox.clone())
         {
             Ok(Some(response)) => Ok(response),
@@ -183,6 +190,14 @@ fn handle(
             .unwrap()
             .answer_permission(&session, request_id, option_id)
             .map(|()| Response::Done),
+        Request::SetConfigOption {
+            session,
+            config_id,
+            value,
+        } => match ops::set_config_option(state, session, config_id, value, id, outbox.clone()) {
+            Ok(()) => return None,
+            Err(error) => Err(error),
+        },
     };
     Some(result.unwrap_or_else(|error| Response::Error {
         message: format!("{error:#}"),

@@ -11,13 +11,21 @@ export type { Connection, Selection };
 /** The events the core forwards under the `watch` event name. */
 export type WatchEvent = Extract<
   Event,
-  { type: "watch_snapshot" | "workspace_added" | "workspace_removed" | "session_changed" }
+  {
+    type:
+      | "watch_snapshot"
+      | "capabilities_changed"
+      | "workspace_added"
+      | "workspace_removed"
+      | "session_changed"
+      | "session_deleted";
+  }
 >;
 
 /** The events the core forwards under the `session` event name. */
 export type SessionEvent = Extract<
   Event,
-  { type: "session_snapshot" | "entry" | "session_removed" }
+  { type: "session_snapshot" | "entry" | "config_options_changed" | "session_removed" }
 >;
 
 export function request(request: Request): Promise<Response> {
