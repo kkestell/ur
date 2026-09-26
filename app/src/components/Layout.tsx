@@ -10,14 +10,24 @@ import {
 import "dockview-react/dist/styles/dockview.css";
 import { Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { addWorkspace, showNewMenu } from "../actions";
+import { showNewMenu } from "../actions";
+import { workspaceColorStyle } from "../colors";
 import { request, saveLayout, setVisible } from "../ipc";
 import type { PendingPermission } from "../ipc/bindings/PendingPermission";
 import { isMacPlatform, shortcutKind } from "../keys";
-import { type TabItem, goneTabs, openTab, tabId, tabWorkspace, visibleSessions } from "../layout";
+import {
+  type TabItem,
+  goneTabs,
+  openTab,
+  tabColor,
+  tabId,
+  tabWorkspace,
+  visibleSessions,
+} from "../layout";
 import { useSession } from "../store/sessions";
 import { sessionServer, useWatch } from "../store/watch";
 import { withPermissions } from "../transcript/permissions";
+import { AddWorkspaceButton } from "./AddWorkspaceButton";
 import { Editor } from "./Editor";
 import { Tab } from "./Tab";
 import { TerminalPane } from "./TerminalPane";
@@ -213,9 +223,9 @@ function Watermark() {
     return (
       <div className="empty flex h-full flex-col items-center justify-center gap-2 text-sm">
         <div>No workspaces</div>
-        <button className="button rounded border border-control-edge bg-control px-3 py-1 hover:bg-control-hover" onClick={() => void addWorkspace()}>
+        <AddWorkspaceButton className="button rounded border border-control-edge bg-control px-3 py-1 hover:bg-control-hover">
           Add Workspace
-        </button>
+        </AddWorkspaceButton>
       </div>
     );
   }
@@ -269,7 +279,10 @@ function SessionPanel({ api, params }: IDockviewPanelProps<TabItem>) {
   }, [id, requests, active]);
 
   return (
-    <div className="session flex h-full min-h-0 flex-col">
+    <div
+      className="session workspace-content flex h-full min-h-0 flex-col"
+      style={workspaceColorStyle(tabColor(watch, params))}
+    >
       <Thread items={items} onAnswer={(request, option) => answer(request, option.optionId)} />
       <Editor
         session={id}
@@ -288,7 +301,11 @@ function TerminalPanel({ params }: IDockviewPanelProps<TabItem>) {
   if (!watch.terminals.some((terminal) => terminal.terminal === id)) {
     return null;
   }
-  return <TerminalPane terminal={id} />;
+  return (
+    <div className="workspace-content h-full" style={workspaceColorStyle(tabColor(watch, params))}>
+      <TerminalPane terminal={id} />
+    </div>
+  );
 }
 
 /**

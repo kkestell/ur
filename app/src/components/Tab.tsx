@@ -1,6 +1,7 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
 import { MessageSquare, Terminal, X } from "lucide-react";
-import type { TabItem } from "../layout";
+import { workspaceColorStyle } from "../colors";
+import { type TabItem, tabColor } from "../layout";
 import { sessionServer, useWatch } from "../store/watch";
 import { StatusMark } from "./StatusMark";
 
@@ -26,7 +27,10 @@ export function Tab({ api, params }: IDockviewPanelHeaderProps<TabItem>) {
     tooltip = title;
   }
   return (
-    <div className="tab flex h-full max-w-96 items-center gap-2 px-1">
+    <div
+      className="tab workspace-tab flex h-full max-w-96 items-center gap-2 px-2"
+      style={workspaceColorStyle(tabColor(watch, params))}
+    >
       {params.type === "session"
         ? <MessageSquare className="tab-kind shrink-0 text-fg-muted" size={12} strokeWidth={1.75} />
         : <Terminal className="tab-kind terminal-icon shrink-0 text-fg-muted" size={12} strokeWidth={1.75} />}

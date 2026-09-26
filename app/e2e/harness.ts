@@ -24,7 +24,7 @@ type ShownWindow = {
   shown(selector: string): HTMLElement[];
   pendingFileReads?: Array<(() => Promise<void>) | undefined>;
   __UR_E2E_MENU__?: { items: Array<{ text?: string; enabled?: boolean }>; pick?: string };
-  __UR_E2E_DIALOG__?: { confirm?: boolean; lastQuestion?: string };
+  __UR_E2E_DIALOG__?: { confirm?: boolean; lastQuestion?: string; folder?: string };
 };
 
 type SessionSummary = {
@@ -187,8 +187,8 @@ export class TestEnvironment {
     });
   }
 
-  async addWorkspace(name: string, path: string): Promise<void> {
-    await this.request({ type: "add_workspace", name, path });
+  async addWorkspace(name: string, path: string, color = "blue"): Promise<void> {
+    await this.request({ type: "add_workspace", name, path, color });
   }
 
   async removeWorkspace(name: string): Promise<void> {
@@ -415,6 +415,13 @@ export class Gui {
     await this.#session().execute(() => {
       ((window as unknown as ShownWindow).__UR_E2E_DIALOG__ ??= {}).confirm = true;
     });
+  }
+
+  /** Answers the next folder picker with `path`. */
+  async chooseFolder(path: string): Promise<void> {
+    await this.#session().execute((path) => {
+      ((window as unknown as ShownWindow).__UR_E2E_DIALOG__ ??= {}).folder = path;
+    }, path);
   }
 
   async lastDialogQuestion(): Promise<string | undefined> {

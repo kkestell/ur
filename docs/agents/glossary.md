@@ -87,7 +87,7 @@
   It holds the ordered `servers` array, with each server's ID, name, command, and arguments. The
   daemon and one-shot client share it.
 - **State file**: `$XDG_STATE_HOME/ur/state.json`, under `~/.local/state` when the variable is
-  unset. It holds workspace names and paths, and nothing about sessions.
+  unset. It holds workspace names, paths, and workspace colors, and nothing about sessions.
 - **GUI state file**: `$XDG_STATE_HOME/ur/gui.json`, written by the core and keyed by socket path.
   It holds the layout.
 - **Capabilities**: What the server advertised during `initialize`. ur calls an optional method only
@@ -111,11 +111,15 @@
 
 ### Workspaces and sessions
 
-- **Workspace**: A name and a workspace path, stored in the state file. Its sessions and terminals
-  appear under it in the sidebar.
+- **Workspace**: A name, a workspace path, and a workspace color, stored in the state file. Its
+  sessions and terminals appear under it in the sidebar.
 - **Workspace path**: The absolute path of a workspace, made absolute when the workspace is added
   and stored as is. Every `session/new`, `session/load`, and `session/list` call for the workspace
   passes that exact string as `cwd`.
+- **Workspace color**: The Catppuccin Mocha accent color chosen for a workspace when it is added. It
+  is `WorkspaceColor` in Rust and TypeScript, `Workspace.color` on the wire and in the state file,
+  and `--color-workspace-<name>` in `styles.css`. A tab's background and the borders of the tab and
+  its content use it.
 - **Session**: One ACP session on exactly one configured server.
 - **ACP session ID**: The opaque server-assigned `SessionId`, used only at the ACP boundary.
 - **Session key**: The stable daemon-client reference to a session on one server. It contains the
@@ -273,6 +277,9 @@
   advertises `session/delete`.
 - **Terminal menu**: The native context menu of a terminal row: Close Terminal. It is
   `showTerminalMenu()` in code.
+- **Workspace color picker**: The dialog of swatches shown after the folder picker when adding a
+  workspace. It is `WorkspaceColorPicker` in code.
+- **Swatch**: One button in the workspace color picker showing one workspace color.
 - **Command list**: The list of matching slash commands above the editor while typing `/`.
 - **Config picker**: The editor control for one config option: a list of a select option's values,
   or a toggle for a boolean option. It is `ConfigPicker` in code.

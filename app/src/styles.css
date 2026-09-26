@@ -31,15 +31,32 @@
   --color-warning: #e5c07b;
   --color-danger: #e06c75;
 
+  /* Workspace colors: the Catppuccin Mocha accent colors, in swatch order. */
+  --color-workspace-rosewater: #f5e0dc;
+  --color-workspace-flamingo: #f2cdcd;
+  --color-workspace-pink: #f5c2e7;
+  --color-workspace-mauve: #cba6f7;
+  --color-workspace-red: #f38ba8;
+  --color-workspace-maroon: #eba0ac;
+  --color-workspace-peach: #fab387;
+  --color-workspace-yellow: #f9e2af;
+  --color-workspace-green: #a6e3a1;
+  --color-workspace-teal: #94e2d5;
+  --color-workspace-sky: #89dceb;
+  --color-workspace-sapphire: #74c7ec;
+  --color-workspace-blue: #89b4fa;
+  --color-workspace-lavender: #b4befe;
+
   --text-ui: 13px;
   --text-label: 11px;
 }
 
 /*
  * Dockview's panes and tabs. Dockview puts its theme class on an element
- * around `.panes`, so the colors are set on `.panes`. Each tab has a divider
- * on its right. The line along the bottom of the tab bar runs under the
- * inactive tabs and stops at the active tab, which has the pane's background.
+ * around `.panes`, so the colors are set on `.panes`. Each tab is painted by
+ * its `Tab` component, which fills it, with its workspace's colors. The tab
+ * bar has no line of its own: the border of the active tab's content runs
+ * under the tabs. Hidden tabs have dimmer text than the active tab.
  * Tabs shrink to fit the tab bar down to their minimum width, and past that
  * the tab bar scrolls.
  * The window's top border and the pane separators are the line above the tabs.
@@ -69,12 +86,7 @@
 .panes .dv-tab {
   flex-shrink: 1;
   min-width: 8rem;
-  border-right: 1px solid var(--color-divider);
-  border-bottom: 1px solid var(--color-divider);
-}
-
-.panes .dv-tab.dv-active-tab {
-  border-bottom-color: transparent;
+  padding: 0;
 }
 
 /* Dockview's divider before each tab. */
@@ -82,9 +94,21 @@
   display: none;
 }
 
-.panes .dv-void-container,
-.panes .dv-right-actions-container {
-  border-bottom: 1px solid var(--color-divider);
+/*
+ * A tab and its content, in the color `--workspace-color` sets inline. A
+ * terminal tab opened before its `terminal_changed` arrives has no workspace
+ * yet, and uses the divider color.
+ */
+.workspace-tab {
+  --workspace-color: var(--color-divider);
+  background: color-mix(in srgb, var(--workspace-color) 25%, black);
+  border: 1px solid var(--workspace-color);
+  border-bottom: none;
+}
+
+.workspace-content {
+  --workspace-color: var(--color-divider);
+  border: 1px solid var(--workspace-color);
 }
 
 /* The dividers between panes are 2px wide, as is the sidebar's border. */

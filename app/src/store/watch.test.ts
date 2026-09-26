@@ -51,7 +51,7 @@ test("sessions_stay_in_creation_order_newest_first", () => {
     terminals: [],
     servers: [],
     config_error: null,
-    workspaces: [{ name: "ws", path: "/ws" }],
+    workspaces: [{ name: "ws", path: "/ws", color: "blue" }],
     sessions: [
       summary("old", "ws", "2026-03-01T00:00:00Z"),
       summary("new", "ws", "2026-02-01T00:00:00Z"),
@@ -72,7 +72,7 @@ test("session_activity_and_attention_do_not_change_order", () => {
     terminals: [],
     servers: [],
     config_error: null,
-    workspaces: [{ name: "ws", path: "/ws" }],
+    workspaces: [{ name: "ws", path: "/ws", color: "blue" }],
     sessions: [
       summary("unread", "ws", "2026-01-01T00:00:00Z", { unread: true }),
       summary("read", "ws", "2026-04-01T00:00:00Z"),
@@ -100,9 +100,9 @@ test("workspaces_are_alphabetical_even_with_attention", () => {
     servers: [],
     config_error: null,
     workspaces: [
-      { name: "c", path: "/c" },
-      { name: "b", path: "/b" },
-      { name: "a", path: "/a" },
+      { name: "c", path: "/c", color: "blue" },
+      { name: "b", path: "/b", color: "blue" },
+      { name: "a", path: "/a", color: "blue" },
     ],
     sessions: [
       summary("s1", "a", null),
@@ -122,8 +122,8 @@ test("a_removed_workspace_drops_its_sessions", () => {
     servers: [],
     config_error: null,
     workspaces: [
-      { name: "a", path: "/a" },
-      { name: "b", path: "/b" },
+      { name: "a", path: "/a", color: "blue" },
+      { name: "b", path: "/b", color: "blue" },
     ],
     sessions: [summary("s1", "a", null), summary("s2", "b", null)],
   });
@@ -138,7 +138,7 @@ test("a_disconnect_clears_the_watch_state", () => {
     terminals: [terminal(1, "a")],
     servers: [],
     config_error: null,
-    workspaces: [{ name: "a", path: "/a" }],
+    workspaces: [{ name: "a", path: "/a", color: "blue" }],
     sessions: [summary("s1", "a", null)],
   });
   state = reduceWatch(state, { type: "connection", connected: false, socket: "/tmp/ur.sock", error: null });
@@ -151,7 +151,7 @@ test("a_deleted_session_leaves_the_sidebar", () => {
     terminals: [],
     servers: [],
     config_error: null,
-    workspaces: [{ name: "a", path: "/a" }],
+    workspaces: [{ name: "a", path: "/a", color: "blue" }],
     sessions: [summary("s1", "a", null), summary("s2", "a", null)],
   });
   state = reduceWatch(state, { type: "session_deleted", session: "s1" });
@@ -183,8 +183,8 @@ test("terminals_follow_watch_events", () => {
     servers: [],
     config_error: null,
     workspaces: [
-      { name: "a", path: "/a" },
-      { name: "b", path: "/b" },
+      { name: "a", path: "/a", color: "blue" },
+      { name: "b", path: "/b", color: "blue" },
     ],
     sessions: [],
   });
@@ -214,8 +214,8 @@ test("workspace_terminals_show_newest_first", () => {
     servers: [],
     config_error: null,
     workspaces: [
-      { name: "a", path: "/a" },
-      { name: "b", path: "/b" },
+      { name: "a", path: "/a", color: "blue" },
+      { name: "b", path: "/b", color: "blue" },
     ],
     sessions: [],
   });

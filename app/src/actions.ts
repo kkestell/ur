@@ -6,20 +6,26 @@ import type { Response } from "./ipc/bindings/Response";
 import type { SessionSummary } from "./ipc/bindings/SessionSummary";
 import type { Status } from "./ipc/bindings/Status";
 import type { TerminalSummary } from "./ipc/bindings/TerminalSummary";
+import type { WorkspaceColor } from "./ipc/bindings/WorkspaceColor";
 import type { TabItem } from "./layout";
 import type { WatchState } from "./store/watch";
 
 /**
- * Picks a folder and adds it as a workspace named after its last path
- * component. Cancelling the picker does nothing.
+ * Opens the folder picker and returns the chosen folder's path and the
+ * workspace name, its last path component, or `null` when cancelled.
  */
-export async function addWorkspace(): Promise<void> {
+export async function pickWorkspaceFolder(): Promise<{ name: string; path: string } | null> {
   const path = await open({ directory: true });
   if (path === null) {
-    return;
+    return null;
   }
   const name = path.split("/").filter((part) => part !== "").pop() ?? path;
-  await send({ type: "add_workspace", name, path });
+  return { name, path };
+}
+
+/** Adds the workspace. */
+export async function addWorkspace(name: string, path: string, color: WorkspaceColor): Promise<void> {
+  await send({ type: "add_workspace", name, path, color });
 }
 
 /** Creates a session in the workspace, then opens its tab. */

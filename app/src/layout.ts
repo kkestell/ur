@@ -1,4 +1,5 @@
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
+import type { WorkspaceColor } from "./ipc/bindings/WorkspaceColor";
 import type { WatchState } from "./store/watch";
 
 /** The session or terminal one tab shows. It is the tab's panel params. */
@@ -32,6 +33,12 @@ export function tabWorkspace(watch: WatchState, item: TabItem): string | undefin
   return item.type === "session"
     ? watch.sessions.find((session) => session.session === item.session)?.workspace
     : watch.terminals.find((terminal) => terminal.terminal === item.terminal)?.workspace;
+}
+
+/** The workspace color of the item's workspace. */
+export function tabColor(watch: WatchState, item: TabItem): WorkspaceColor | undefined {
+  const workspace = tabWorkspace(watch, item);
+  return watch.workspaces.find((candidate) => candidate.name === workspace)?.color;
 }
 
 /**

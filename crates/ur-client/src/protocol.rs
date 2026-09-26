@@ -105,10 +105,11 @@ pub enum Request {
         server: String,
     },
     /// Adds a workspace. `path` must be an absolute path to a directory, and is
-    /// stored as is.
+    /// stored as is. `color` is the workspace color the tabs show.
     AddWorkspace {
         name: String,
         path: PathBuf,
+        color: WorkspaceColor,
     },
     /// Cancels the workspace's running prompts, then removes the workspace and
     /// its sessions, and stops its terminals.
@@ -292,6 +293,29 @@ pub struct ServerState {
 pub struct Workspace {
     pub name: String,
     pub path: PathBuf,
+    pub color: WorkspaceColor,
+}
+
+/// A workspace color: one of the Catppuccin Mocha accent colors, in swatch
+/// order.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum WorkspaceColor {
+    Rosewater,
+    Flamingo,
+    Pink,
+    Mauve,
+    Red,
+    Maroon,
+    Peach,
+    Yellow,
+    Green,
+    Teal,
+    Sky,
+    Sapphire,
+    Blue,
+    Lavender,
 }
 
 /// One session as watch shows it.

@@ -1,4 +1,4 @@
-import { addWorkspace, showSessionMenu, showTerminalMenu, showWorkspaceMenu } from "../actions";
+import { showSessionMenu, showTerminalMenu, showWorkspaceMenu } from "../actions";
 import type { TabItem } from "../layout";
 import {
   type WatchState,
@@ -9,6 +9,7 @@ import {
   workspaceTerminals,
 } from "../store/watch";
 import { MessageSquare, Plus, Terminal } from "lucide-react";
+import { AddWorkspaceButton } from "./AddWorkspaceButton";
 import { StatusMark } from "./StatusMark";
 
 export function Sidebar({
@@ -27,9 +28,9 @@ export function Sidebar({
       <div className="sidebar-header flex h-10 items-center gap-2 px-4 text-xs font-medium tracking-wide text-fg-dim uppercase">
         <span className="label min-w-0 flex-1">Workspaces</span>
         <button className="rounded px-1 hover:bg-control" title="Server settings" onClick={onConfigureServer}>Server</button>
-        <button className="icon-button flex size-7 items-center justify-center rounded text-fg-muted hover:bg-control hover:text-fg" title="Add Workspace" onClick={() => void addWorkspace()}>
+        <AddWorkspaceButton className="icon-button flex size-7 items-center justify-center rounded text-fg-muted hover:bg-control hover:text-fg" title="Add Workspace">
           <Plus size={16} strokeWidth={1.75} />
-        </button>
+        </AddWorkspaceButton>
       </div>
       {orderedWorkspaces(watch).map((workspace) => {
         const count = attentionCount(watch, workspace.name);

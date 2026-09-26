@@ -26,9 +26,9 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `crates/ur-client/src/protocol.rs` — `TerminalId`, `SessionKey`, `Request` (with server
   management, `open_terminal(workspace)`, `detach_terminal`, `close_terminal`, `delete_session`, and
   `set_config_option`), `Response`, `Event` (with `servers_changed`, `session_deleted`,
-  `terminal_changed`, and `config_options_changed`), `Workspace`, `SessionSummary`,
-  `TerminalSummary`, `Status`, `PendingPermission`, `ServerState`, `Entry`, `ClientMessage`,
-  `DaemonMessage`, `socket_path()`, and `state_dir()`.
+  `terminal_changed`, and `config_options_changed`), `Workspace`, `WorkspaceColor`,
+  `SessionSummary`, `TerminalSummary`, `Status`, `PendingPermission`, `ServerState`, `Entry`,
+  `ClientMessage`, `DaemonMessage`, `socket_path()`, and `state_dir()`.
 - `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the core, with `request()`,
   `events()`, `pty()`, and `pty_input()`.
 - `crates/ur-fake-server/` — the fake server: `lib.rs` exports `fake_server()`, `Hold`, and
@@ -111,17 +111,21 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `app/src/keys.ts` — `isMacPlatform()` and platform-specific Command or Ctrl shortcuts:
   `shortcutKind()` and `shortcutLabel()` for permission options, `newShortcut()` for new sessions
   and terminals, and `tabShortcut()` for close and reopen.
-- `app/src/actions.ts` — `addWorkspace()`, `newSession()` and `newTerminal()`, which open the new
-  tab through `onOpen`, `closeTerminal()`, `removeWorkspace()`, `deleteSession()`,
-  `showWorkspaceMenu()`, `showNewMenu()`, `showSessionMenu()`, and `showTerminalMenu()`: the folder
-  picker, confirmations, error messages, and native menus.
-- `app/src/layout.ts` — `TabItem`, `tabId()`, `openTab()`, `tabWorkspace()`, `goneTabs()`, and
-  `visibleSessions()`.
+- `app/src/colors.ts` — `workspaceColors`, each workspace color's label in swatch order, and
+  `workspaceColorStyle()`, the inline style that sets `--workspace-color`.
+- `app/src/actions.ts` — `pickWorkspaceFolder()`, `addWorkspace()`, `newSession()` and
+  `newTerminal()`, which open the new tab through `onOpen`, `closeTerminal()`, `removeWorkspace()`,
+  `deleteSession()`, `showWorkspaceMenu()`, `showNewMenu()`, `showSessionMenu()`, and
+  `showTerminalMenu()`: the folder picker, confirmations, error messages, and native menus.
+- `app/src/layout.ts` — `TabItem`, `tabId()`, `openTab()`, `tabWorkspace()`, `tabColor()`,
+  `goneTabs()`, and `visibleSessions()`.
 - `app/src/slash.ts` — `slashQuery()` and `matchingCommands()`, the command list's matching.
 - `app/src/usage.ts` — `usageText()`, the usage indicator's popover lines.
-- `app/src/components/Sidebar.tsx` — the header's `+`, the workspaces, their sessions and terminal
-  rows, with each session's status mark and the selection highlighted, attention counts, and the
-  workspace, session, and terminal menus.
+- `app/src/components/AddWorkspaceButton.tsx` — `AddWorkspaceButton`, which opens the folder picker
+  and then `WorkspaceColorPicker`, the dialog of swatches whose choice adds the workspace.
+- `app/src/components/Sidebar.tsx` — the header's `+`, an `AddWorkspaceButton`, the workspaces,
+  their sessions and terminal rows, with each session's status mark and the selection highlighted,
+  attention counts, and the workspace, session, and terminal menus.
 - `app/src/components/SidebarHandle.tsx` — `SidebarHandle`, the drag handle on the sidebar's border,
   and the sidebar's default, minimum, and maximum widths.
 - `app/src/components/StatusMark.tsx` — `StatusMark`, a session's status mark, shared by the sidebar
@@ -130,12 +134,13 @@ Map each file here as it is added, following the project layout in `docs/agents/
   picker, separate arguments, connection errors, and removal confirmation.
 - `app/src/components/Layout.tsx` — `Layout`: `DockviewReact` with `SessionPanel` (the thread, the
   editor, and the permission shortcuts for the selection), `TerminalPanel`, `PaneActions` (the
-  pane's `+`), and the watermark with the empty states; tab moves with pointer events, and divider
-  and tab presses that start no text selection; reporting user-closed tabs, restoring and saving the
-  layout, scrolling each pane's active tab into view, closing tabs whose session or terminal is
-  gone, and `setVisible()` for the visible sessions.
-- `app/src/components/Tab.tsx` — `Tab`: the tab's session or terminal icon, title, status mark, and
-  Close Tab.
+  pane's `+`), and the watermark with the empty states and its `AddWorkspaceButton`; the workspace
+  color borders of each tab's content; tab moves with pointer events, and divider and tab presses
+  that start no text selection; reporting user-closed tabs, restoring and saving the layout,
+  scrolling each pane's active tab into view, closing tabs whose session or terminal is gone, and
+  `setVisible()` for the visible sessions.
+- `app/src/components/Tab.tsx` — `Tab`: the tab's workspace color background and border, its session
+  or terminal icon, title, status mark, and Close Tab.
 - `app/src/components/Thread.tsx` — the items of the selected session, with user message thumbnails,
   and `Thought`, the Thinking row.
 - `app/src/components/AgentMessage.tsx` — `AgentMessage`: an agent message rendered as Markdown,
@@ -160,8 +165,9 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `app/src/main.tsx` — renders `App`, and stops files dropped outside the editor from navigating the
   webview.
 - `app/src/styles.css` — imports Tailwind CSS and its Typography plugin; the `@theme` block, which
-  defines the app's colors and type sizes; dockview's pane and tab styling, which uses them; and the
-  highlight on a divider that drags.
+  defines the app's colors and type sizes; dockview's pane and tab styling, which uses them;
+  `.workspace-tab` and `.workspace-content`, which paint tabs and their content in their workspace
+  color; and the highlight on a divider that drags.
 - `app/vite.config.ts` — configures Vite with React and Tailwind CSS, and uses menu and dialog shims
   only in end-to-end builds.
 - `app/index.html` — the webview document and root element.
@@ -174,13 +180,15 @@ Map each file here as it is added, following the project layout in `docs/agents/
   history file and sends setup requests to the daemon socket, including adding the `home` workspace;
   `Gui.showTerminal()` opens a terminal in it and opens its tab by clicking its terminal row, or
   finds the tab restored from the layout. `Gui.setPlatform()` simulates a different platform for
-  shortcut tests. It can add another fake server and select native menu actions in end-to-end
-  builds.
+  shortcut tests, and `Gui.chooseFolder()` answers the next folder picker. It can add another fake
+  server and select native menu actions in end-to-end builds.
 - `app/e2e/menu-shim.ts` — constructs native menus in the end-to-end build and exposes their
   registered handlers to WebDriver in place of opening a native popup.
-- `app/e2e/dialog-shim.ts` — lets WebDriver answer confirmation dialogs in the end-to-end build.
+- `app/e2e/dialog-shim.ts` — lets WebDriver answer confirmation dialogs and the folder picker in the
+  end-to-end build.
 - `app/e2e/tsconfig.json` — limits the end-to-end TypeScript build to the checked-in harness and
   tests, excluding ad-hoc files in `artifacts/`.
+- `app/e2e/workspace.test.ts` — the end-to-end test for adding a workspace with its workspace color.
 - `app/e2e/terminal.test.ts` — the end-to-end tests for terminals.
 - `app/e2e/session.test.ts` — the end-to-end tests for agent sessions against the fake server.
 - `app/e2e/server-setup.test.ts` — starts the app without a daemon or config, corrects a bad server

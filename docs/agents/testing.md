@@ -91,6 +91,8 @@ through `Gui.type`, not WebDriver key actions. The fake server's prompt scripts,
 - A terminal whose shell exits leaves the sidebar and closes its tab.
 - Removing a workspace stops its terminals.
 - The empty states follow the workspaces and the selection.
+- Adding a workspace asks for its workspace color; choosing a swatch adds the workspace, and
+  dismissing the workspace color picker adds nothing.
 - A session created before the GUI opens answers a prompt sent from the editor.
 - Workspaces stay alphabetical when one needs attention.
 - Sessions stay newest first when an older session needs attention.

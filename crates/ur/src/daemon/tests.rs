@@ -15,7 +15,7 @@ use tokio::task::AbortHandle;
 use tokio::time::{sleep, timeout};
 use ur_client::{
     Client, Entry, Event, PendingPermission, Request, Response, SessionKey, SessionSummary, Status,
-    Workspace,
+    Workspace, WorkspaceColor,
 };
 use ur_fake_server::{Hold, SavedHistory, fake_server};
 
@@ -364,6 +364,7 @@ fn workspace(name: &str) -> Workspace {
     Workspace {
         name: name.to_string(),
         path: workspace_path(name),
+        color: WorkspaceColor::Blue,
     }
 }
 
@@ -371,6 +372,7 @@ async fn add_workspace(client: &Client, name: &str) -> Response {
     let request = Request::AddWorkspace {
         name: name.to_string(),
         path: workspace_path(name),
+        color: WorkspaceColor::Blue,
     };
     client.request(request).await.unwrap()
 }
@@ -695,6 +697,7 @@ async fn workspace_requests_reject_bad_input() {
     let add = |name: &str, path: PathBuf| Request::AddWorkspace {
         name: name.to_string(),
         path,
+        color: WorkspaceColor::Blue,
     };
     let cases = [
         (

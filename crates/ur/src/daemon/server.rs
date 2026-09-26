@@ -185,8 +185,9 @@ fn handle(
             .ok_or_else(|| anyhow::anyhow!("server setup is unavailable"))
             .and_then(|control| control.remove(&server))
             .map(|()| Response::Done),
-        Request::AddWorkspace { name, path } => {
-            ops::add_workspace(state, state_file, Workspace { name, path }).map(|()| Response::Done)
+        Request::AddWorkspace { name, path, color } => {
+            ops::add_workspace(state, state_file, Workspace { name, path, color })
+                .map(|()| Response::Done)
         }
         Request::RemoveWorkspace { name } => {
             ops::remove_workspace(state, terminals, state_file, &name).map(|()| Response::Done)

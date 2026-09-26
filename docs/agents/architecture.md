@@ -86,9 +86,9 @@ error of a turn the server exit interrupted survives the reload. Without `loadSe
 from an earlier ACP connection keep their transcripts in memory but cannot be prompted.
 
 The daemon's own state file (`$XDG_STATE_HOME/ur/state.json`, under `~/.local/state` when the
-variable is unset) holds workspace names and absolute paths. The daemon reads it at startup and
-stops with an error naming the file when it cannot. Saved session discovery comes from the server.
-The GUI stores which threads are visible as part of its layout.
+variable is unset) holds workspace names, absolute paths, and workspace colors. The daemon reads it
+at startup and stops with an error naming the file when it cannot. Saved session discovery comes
+from the server. The GUI stores which threads are visible as part of its layout.
 
 A workspace path is made absolute when the workspace is added and stored as is. Every `session/new`,
 `session/load`, and `session/list` call for that workspace passes that exact string.
@@ -159,6 +159,12 @@ sidebar when no tab is open. Command+W on macOS or Ctrl+W on other platforms clo
 Command+Shift+T or Ctrl+Shift+T reopens the most recently closed tab in the active pane. The GUI
 keeps closed tabs only in memory for its current run; it skips tabs whose session or terminal is
 gone or whose tab was opened again from the sidebar.
+
+Adding a workspace opens the folder picker, then the workspace color picker, a dialog of fourteen
+swatches, one for each Catppuccin Mocha accent color. Choosing a swatch adds the workspace; Escape
+or a press outside the dialog adds nothing. Each tab's background is a darker version of its
+workspace's color, and the tab and its content have a 1px border in that color. The content's top
+border is the line under the tabs.
 
 Remove Workspace cancels its running turns and stops its terminals after confirmation, then removes
 the workspace from the sidebar. Saved history and the lifecycle of agent tools and background jobs
@@ -300,9 +306,12 @@ app/src/
   transcript/     reduce.ts: (ThreadState, Event) -> ThreadState, pure and
                   unit tested; blocks.ts display types
   components/     Sidebar, Thread, Editor, ConfigPicker, UsageIndicator,
-                  Permission, TerminalPane, Layout, Tab, StatusMark
+                  Permission, TerminalPane, Layout, Tab, StatusMark,
+                  AddWorkspaceButton
   hooks/          useTerminal(id)
-  layout.ts       TabItem, openTab(), goneTabs(), visibleSessions()
+  layout.ts       TabItem, openTab(), tabColor(), goneTabs(),
+                  visibleSessions()
+  colors.ts       workspace color labels and inline style
   actions.ts      folder picker, confirmations, native menus
   slash.ts        command list matching
   usage.ts        usage indicator text

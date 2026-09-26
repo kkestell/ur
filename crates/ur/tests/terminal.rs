@@ -25,7 +25,7 @@ impl Daemon {
         let dir = tempfile::tempdir().unwrap();
         let socket = dir.path().join("ur.sock");
         let state = serde_json::json!({
-            "workspaces": [{ "name": "home", "path": dir.path() }],
+            "workspaces": [{ "name": "home", "path": dir.path(), "color": "blue" }],
         });
         std::fs::create_dir(dir.path().join("ur")).unwrap();
         std::fs::write(dir.path().join("ur/state.json"), state.to_string()).unwrap();

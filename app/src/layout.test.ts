@@ -13,7 +13,7 @@ function watch(sessions: string[], terminals: number[]): WatchState {
     ...initialWatch,
     connected: true,
     hasSnapshot: true,
-    workspaces: [{ name: "ws", path: "/ws" }],
+    workspaces: [{ name: "ws", path: "/ws", color: "blue" }],
     sessions: sessions.map((session) => ({
       session,
       server: "one",
