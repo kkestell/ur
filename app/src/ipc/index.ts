@@ -69,6 +69,15 @@ export function saveLayout(layout: SerializedDockview): Promise<void> {
   return invoke("save_layout", { layout });
 }
 
+/** The saved sidebar width in pixels, or `null` when none is saved. */
+export function sidebarWidth(): Promise<number | null> {
+  return invoke("sidebar_width");
+}
+
+export function saveSidebarWidth(width: number): Promise<void> {
+  return invoke("save_sidebar_width", { width });
+}
+
 /** Reports the sessions shown in the window; the core sends `focus` from them. */
 export function setVisible(sessions: string[]): Promise<void> {
   return invoke("set_visible", { sessions });

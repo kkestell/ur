@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// The GUI state file, keyed by socket path.
+/// The GUI state file: the sidebar width, and a record for each socket path.
 #[derive(Default, Serialize, Deserialize)]
 pub struct GuiState {
+    pub sidebar_width: Option<f64>,
     saved: HashMap<String, Saved>,
 }
 

@@ -69,3 +69,18 @@ pub fn save_layout(link: State<'_, Link>, layout: serde_json::Value) -> Result<(
     gui_state.saved_mut(link.socket()).layout = Some(layout);
     gui_state.save().map_err(|error| error.to_string())
 }
+
+/// The saved sidebar width, in pixels.
+#[tauri::command]
+pub fn sidebar_width() -> Result<Option<f64>, String> {
+    let gui_state = GuiState::load().map_err(|error| error.to_string())?;
+    Ok(gui_state.sidebar_width)
+}
+
+/// Saves the sidebar width, in pixels.
+#[tauri::command]
+pub fn save_sidebar_width(width: f64) -> Result<(), String> {
+    let mut gui_state = GuiState::load().map_err(|error| error.to_string())?;
+    gui_state.sidebar_width = Some(width);
+    gui_state.save().map_err(|error| error.to_string())
+}

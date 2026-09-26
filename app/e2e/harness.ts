@@ -341,6 +341,21 @@ export class Gui {
     );
   }
 
+  /**
+   * Whether the webview canceled a `mousedown` on the first element matching
+   * `selector`. Script-dispatched events never start a text selection, so the
+   * canceled press stands in for the one a real press would start.
+   */
+  async mouseDownCanceled(selector: string): Promise<boolean> {
+    return this.#session().execute(
+      (selector) =>
+        !(window as unknown as ShownWindow)
+          .shown(selector)[0]
+          .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 })),
+      selector,
+    );
+  }
+
   /** The text of each element matching `selector`. */
   async texts(selector: string): Promise<string[]> {
     return this.#session().execute(
@@ -424,6 +439,14 @@ export class Gui {
         ((window as unknown as ShownWindow).shown(".editor textarea")[0] as HTMLTextAreaElement)
           .value,
     );
+  }
+
+  /** How many lines of text the editor's textarea is high. */
+  async promptLines(): Promise<number> {
+    return this.#session().execute(() => {
+      const textarea = (window as unknown as ShownWindow).shown(".editor textarea")[0];
+      return Math.round(textarea.clientHeight / parseFloat(getComputedStyle(textarea).lineHeight));
+    });
   }
 
   /**
@@ -555,8 +578,7 @@ export class Gui {
   /**
    * Drags the tab whose label contains `label` onto pane `pane`, counted from
    * zero: its right edge, which makes a new pane, or its center, which moves
-   * the tab there. WebDriver cannot drive native drag and drop, so this sends
-   * the drag events dockview listens for.
+   * the tab there, with the pointer events dockview listens for.
    */
   async dragTab(label: string, pane: number, where: "right" | "center"): Promise<void> {
     await this.#session().execute(
@@ -564,26 +586,23 @@ export class Gui {
         const tab = Array.from(document.querySelectorAll(".dv-tab")).find((tab) =>
           tab.querySelector(".tab .label")!.textContent!.includes(label),
         )!;
-        const transfer = new DataTransfer();
-        tab.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        const start = tab.getBoundingClientRect();
         const content = document.querySelectorAll(".dv-groupview .dv-content-container")[pane];
         const box = content.getBoundingClientRect();
         const x = where === "right" ? box.right - 5 : box.left + box.width / 2;
         const y = box.top + box.height / 2;
-        const init = {
-          bubbles: true,
-          cancelable: true,
-          clientX: x,
-          clientY: y,
-          dataTransfer: transfer,
-        };
-        for (const type of ["dragenter", "dragover"]) {
-          document.elementFromPoint(x, y)!.dispatchEvent(new DragEvent(type, init));
+        const init = { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", isPrimary: true };
+        const startX = start.left + start.width / 2;
+        const startY = start.top + start.height / 2;
+        tab.dispatchEvent(
+          new PointerEvent("pointerdown", { ...init, clientX: startX, clientY: startY, button: 0, buttons: 1 }),
+        );
+        for (const [moveX, moveY] of [[startX + 20, startY + 20], [x, y]]) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          window.dispatchEvent(new PointerEvent("pointermove", { ...init, clientX: moveX, clientY: moveY, buttons: 1 }));
         }
         await new Promise((resolve) => setTimeout(resolve, 50));
-        document.elementFromPoint(x, y)!.dispatchEvent(new DragEvent("drop", init));
-        tab.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: transfer }));
+        window.dispatchEvent(new PointerEvent("pointerup", { ...init, clientX: x, clientY: y, button: 0 }));
       },
       label,
       pane,
@@ -600,17 +619,22 @@ export class Gui {
     );
   }
 
+  /** The sidebar's width. */
+  async sidebarWidth(): Promise<number> {
+    return this.#session().execute(() => document.querySelector(".sidebar")!.getBoundingClientRect().width);
+  }
+
   /**
-   * Drags the divider between two side-by-side panes `dx` pixels, with the
-   * pointer events dockview listens for, and answers whether the webview
-   * canceled the press. Script-dispatched events never start a text
+   * Drags the first shown divider matching `selector` `dx` pixels, with the
+   * pointer events the app and dockview listen for, and answers whether the
+   * webview canceled the press. Script-dispatched events never start a text
    * selection, so the canceled press stands in for the one a real press would
    * start.
    */
-  async dragPaneDivider(dx: number): Promise<boolean> {
-    return this.#session().execute(async (dx) => {
-      const divider = Array.from(document.querySelectorAll(".panes .dv-sash")).find(
-        (sash) => sash.getBoundingClientRect().height > 0,
+  async dragDivider(selector: string, dx: number): Promise<boolean> {
+    return this.#session().execute(async (selector, dx) => {
+      const divider = Array.from(document.querySelectorAll(selector)).find(
+        (element) => element.getBoundingClientRect().height > 0,
       )!;
       const box = divider.getBoundingClientRect();
       const x = box.left + box.width / 2;
@@ -625,7 +649,7 @@ export class Gui {
       }
       document.dispatchEvent(new PointerEvent("pointerup", { ...init, clientX: x + dx, button: 0 }));
       return !pressed;
-    }, dx);
+    }, selector, dx);
   }
 
   /** The webview's URL. */

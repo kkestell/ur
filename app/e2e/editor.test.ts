@@ -24,6 +24,17 @@ e2eTest("typing / lists the server's slash commands, and Enter inserts one", asy
   assert.equal(await gui.promptText(), "/tally");
 });
 
+e2eTest("the editor grows one line per line of text up to eight lines", async (environment) => {
+  const gui = await openSession(environment);
+  assert.equal(await gui.promptLines(), 1);
+  await gui.typePrompt("one\ntwo\nthree");
+  await waitFor("three lines", async () => (await gui.promptLines()) === 3);
+  await gui.typePrompt(Array.from({ length: 12 }, (_, line) => `line ${line}`).join("\n"));
+  await waitFor("eight lines", async () => (await gui.promptLines()) === 8);
+  await gui.typePrompt("");
+  await waitFor("one line", async () => (await gui.promptLines()) === 1);
+});
+
 e2eTest("choosing a config option value sets it on the server", async (environment) => {
   const gui = await openSession(environment);
   await gui.click(".picker", "Steady");

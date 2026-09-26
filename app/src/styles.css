@@ -18,6 +18,7 @@
 
   /* Lines. */
   --color-divider: #2b2b2b; /* between the window's regions */
+  --color-divider-hover: #5a5a5a; /* a divider under the pointer that drags */
   --color-outline: #3a3a3a; /* around popovers and blocks */
   --color-control-edge: #444; /* around buttons */
 
@@ -84,4 +85,30 @@
 .panes .dv-void-container,
 .panes .dv-right-actions-container {
   border-bottom: 1px solid var(--color-divider);
+}
+
+/* The dividers between panes are 2px wide, as is the sidebar's border. */
+.panes .dv-split-view-container.dv-horizontal > .dv-view-container > .dv-view:not(:first-child)::before {
+  width: 2px;
+}
+
+.panes .dv-split-view-container.dv-vertical > .dv-view-container > .dv-view:not(:first-child)::before {
+  height: 2px;
+}
+
+/*
+ * A divider that drags, the sidebar's or one between panes, brightens under
+ * the pointer and while dragged. Each handle is 4px wide, and its divider is
+ * its last 2px.
+ */
+.sidebar-handle:hover,
+.sidebar-handle:active,
+.panes .dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash.dv-enabled:hover,
+.panes .dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash.dv-enabled:active {
+  background: linear-gradient(to right, transparent 2px, var(--color-divider-hover) 2px);
+}
+
+.panes .dv-split-view-container.dv-vertical > .dv-sash-container > .dv-sash.dv-enabled:hover,
+.panes .dv-split-view-container.dv-vertical > .dv-sash-container > .dv-sash.dv-enabled:active {
+  background: linear-gradient(to bottom, transparent 2px, var(--color-divider-hover) 2px);
 }

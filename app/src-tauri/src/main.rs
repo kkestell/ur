@@ -30,6 +30,8 @@ fn main() {
             commands::connection,
             commands::layout,
             commands::save_layout,
+            commands::sidebar_width,
+            commands::save_sidebar_width,
             commands::set_visible,
         ])
         .run(tauri::generate_context!())

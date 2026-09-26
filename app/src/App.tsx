@@ -2,7 +2,8 @@ import type { DockviewApi, SerializedDockview } from "dockview-react";
 import { useEffect, useState } from "react";
 import { Layout } from "./components/Layout";
 import { Sidebar } from "./components/Sidebar";
-import { connection, layout as loadLayout, request } from "./ipc";
+import { SidebarHandle, defaultSidebarWidth } from "./components/SidebarHandle";
+import { connection, layout as loadLayout, request, saveSidebarWidth, sidebarWidth } from "./ipc";
 import { type TabItem, openTab } from "./layout";
 import { apply as applyWatch, useWatch } from "./store/watch";
 
@@ -14,8 +15,16 @@ export default function App() {
   const [saved, setSaved] = useState<SerializedDockview | null>();
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [selection, setSelection] = useState<TabItem | null>(null);
+  // `undefined` until the saved sidebar width is read.
+  const [width, setWidth] = useState<number>();
 
   useEffect(() => {
+    sidebarWidth()
+      .then((width) => setWidth(width ?? defaultSidebarWidth))
+      .catch((error) => {
+        console.error(error);
+        setWidth(defaultSidebarWidth);
+      });
     connection()
       .then((connection) => applyWatch({ type: "connection", ...connection }))
       .catch(console.error);
@@ -41,7 +50,7 @@ export default function App() {
       </div>
     );
   }
-  if (saved === undefined) {
+  if (saved === undefined || width === undefined) {
     return null;
   }
 
@@ -55,7 +64,17 @@ export default function App() {
   // disconnect unmounts it, so reconnecting restores it against the new one.
   return (
     <div className="layout flex h-full min-w-0 overflow-hidden border-t border-divider">
-      <Sidebar watch={watch} selection={selection} onOpen={onOpen} />
+      <div className="relative flex shrink-0" style={{ width }}>
+        <Sidebar watch={watch} selection={selection} onOpen={onOpen} />
+        <SidebarHandle
+          width={width}
+          onResize={setWidth}
+          onResizeEnd={(width) => {
+            setWidth(width);
+            saveSidebarWidth(width).catch(console.error);
+          }}
+        />
+      </div>
       <div className="main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {watch.hasSnapshot && (
           <Layout saved={saved} onReady={setApi} onSelection={setSelection} />

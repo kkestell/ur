@@ -34,6 +34,12 @@ e2eTest("dragging a tab to a pane's edge makes a new pane", async (environment) 
   await twoPanes(environment);
 });
 
+e2eTest("tabs move with pointer events, not native drag and drop, and without starting a text selection", async (environment) => {
+  const { gui } = await twoPanes(environment);
+  assert.deepEqual(await gui.attributes(".dv-tab", "draggable"), ["false", "false"]);
+  assert.ok(await gui.mouseDownCanceled(".dv-tab .label"), "the tab press can start a text selection");
+});
+
 e2eTest("tabs do not show a hidden-tab counter", async (environment) => {
   for (let index = 0; index < 5; index++) {
     await environment.newSession();
@@ -72,7 +78,7 @@ e2eTest("every tab shows Close Tab without hovering", async (environment) => {
 e2eTest("dragging the divider between panes resizes them without starting a text selection", async (environment) => {
   const { gui } = await twoPanes(environment);
   const [left] = await gui.paneWidths();
-  assert.ok(await gui.dragPaneDivider(150), "the divider press can start a text selection");
+  assert.ok(await gui.dragDivider(".panes .dv-sash", 150), "the divider press can start a text selection");
   await waitFor("the left pane to widen", async () => (await gui.paneWidths())[0] > left + 100);
 });
 
@@ -111,6 +117,17 @@ e2eTest("the layout and each pane's active tab survive closing and reopening the
   const reopened = await environment.openGui();
   await waitForPanes(reopened, ["*[sh, *New session]", "[*tallies]"]);
   assert.ok(await reopened.activeTabsVisible(), "a restored active tab is clipped");
+});
+
+e2eTest("dragging the sidebar's border resizes it, and the width survives reopening the GUI", async (environment) => {
+  const gui = await environment.openGui();
+  const width = await gui.sidebarWidth();
+  assert.ok(await gui.dragDivider(".sidebar-handle", 100), "the handle press can start a text selection");
+  await waitFor("the sidebar to widen", async () => (await gui.sidebarWidth()) === width + 100);
+  await gui.close();
+
+  const reopened = await environment.openGui();
+  await waitFor("the sidebar to keep its width", async () => (await reopened.sidebarWidth()) === width + 100);
 });
 
 e2eTest("Close Tab leaves its terminal running", async (environment) => {

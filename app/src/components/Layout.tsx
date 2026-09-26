@@ -100,16 +100,27 @@ export function Layout({
     };
   }, [api]);
 
-  // Dockview resizes panes on a sash press without stopping the press's
-  // default action, which starts a text selection.
+  // Dockview resizes panes on a sash press and moves tabs on a tab press
+  // without stopping the press's default action, which starts a text
+  // selection. A tab's `mousedown` is canceled rather than its `pointerdown`,
+  // which dockview ignores once canceled.
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
       if ((event.target as Element).closest(".dv-sash") !== null) {
         event.preventDefault();
       }
     };
+    const onMouseDown = (event: MouseEvent) => {
+      if ((event.target as Element).closest(".dv-tab") !== null) {
+        event.preventDefault();
+      }
+    };
     document.addEventListener("pointerdown", onPointerDown, true);
-    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("mousedown", onMouseDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("mousedown", onMouseDown, true);
+    };
   }, []);
 
   useEffect(() => {
@@ -129,10 +140,14 @@ export function Layout({
     setVisible(JSON.parse(shown)).catch(console.error);
   }, [shown]);
 
+  // Tabs move with pointer events. After a native HTML5 drag, WebKit sends no
+  // `pointerdown` for the next press, and dockview activates tabs on
+  // `pointerdown`.
   return (
     <DockviewReact
       className="panes min-h-0 min-w-0 flex-1 overflow-hidden"
       theme={themeDark}
+      dndStrategy="pointer"
       components={components}
       defaultTabComponent={Tab}
       rightHeaderActionsComponent={PaneActions}

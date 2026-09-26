@@ -25,7 +25,7 @@ e2eTest("Stop cancels a running turn", async (environment) => {
   // `tool` waits for a permission answer, which Stop cancels.
   await gui.sendPrompt("tool");
   await gui.click(".editor-actions button", "Stop");
-  await gui.waitForText(".editor-actions button", "Send");
+  await gui.waitForText(".editor-actions .send", "");
 });
 
 e2eTest("the selected session and its transcript survive closing and reopening the GUI", async (environment) => {

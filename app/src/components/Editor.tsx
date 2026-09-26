@@ -4,7 +4,7 @@ import type {
   ContentBlock,
   SessionConfigOption,
 } from "@agentclientprotocol/sdk";
-import { Ellipsis } from "lucide-react";
+import { Ellipsis, SendHorizontal } from "lucide-react";
 import {
   type DragEvent,
   type KeyboardEvent,
@@ -48,11 +48,12 @@ export function Editor({
   const running = status?.type === "working" || status?.type === "needs_permission";
   const commands = thread?.commands ?? [];
   const options = thread?.configOptions ?? [];
-  // How many config pickers fit in the bottom row; the rest are in the More
-  // menu. `natural` holds a hidden copy of every picker and the More button
-  // at their natural widths.
+  // How many config pickers fit in the bottom row beside the usage indicator;
+  // the rest are in the More menu. `natural` holds a hidden copy of every
+  // picker and the More button at their natural widths.
   const [inline, setInline] = useState(options.length);
   const optionsRow = useRef<HTMLDivElement>(null);
+  const usage = useRef<HTMLDivElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const natural = useRef<HTMLDivElement>(null);
   const query = slashQuery(text);
@@ -190,14 +191,29 @@ export function Editor({
     const fit = () => {
       const widths = [...copies.children].map((copy) => copy.getBoundingClientRect().width);
       const more = widths.pop()!;
-      setInline(fittingCount(widths, more, available.getBoundingClientRect().width));
+      const reserved = usage.current ? usage.current.getBoundingClientRect().width + PICKER_GAP : 0;
+      setInline(fittingCount(widths, more, available.getBoundingClientRect().width - reserved));
     };
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(available);
     observer.observe(copies);
     return () => observer.disconnect();
-  }, [thread?.configOptions]);
+  }, [thread?.configOptions, thread?.usage != null]);
+
+  // The textarea starts one line high and grows with its text, including
+  // wrapped lines, until its maximum height of eight lines.
+  useLayoutEffect(() => {
+    const element = textarea.current!;
+    const fit = () => {
+      element.style.height = "auto";
+      element.style.height = `${element.scrollHeight}px`;
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [text]);
 
   const row = Math.min(highlight, matches.length - 1);
   return (
@@ -245,16 +261,21 @@ export function Editor({
       )}
       <textarea
         ref={textarea}
-        className="min-h-20 w-full resize-none bg-transparent font-mono text-ui text-fg outline-none placeholder:text-fg-dim"
+        className="max-h-[8lh] w-full resize-none bg-transparent font-mono text-ui text-fg outline-none placeholder:text-fg-dim"
         placeholder={commands.length > 0 ? "Message agent — / for commands" : "Message agent"}
+        rows={1}
         value={text}
         onChange={(event) => changeText(event.target.value)}
         onKeyDown={onKeyDown}
       />
       {message !== undefined && <div className="editor-message py-1 text-danger">{message}</div>}
-      <div className="editor-actions relative flex min-w-0 items-center gap-2">
-        {thread?.usage != null && <UsageIndicator usage={thread.usage} />}
+      <div className="editor-actions relative mt-2 flex min-w-0 items-center gap-2">
         <div ref={optionsRow} className="editor-options flex min-w-0 flex-1 items-center justify-end gap-1">
+          {thread?.usage != null && (
+            <div ref={usage} className="shrink-0">
+              <UsageIndicator usage={thread.usage} />
+            </div>
+          )}
           {options.slice(0, inline).map((option) => (
             <div key={option.id} className="shrink-0">
               <ConfigPicker option={option} onChange={(value) => setConfigOption(option.id, value)} />
@@ -277,7 +298,15 @@ export function Editor({
         {running ? (
           <button className="shrink-0 whitespace-nowrap rounded border border-control-edge bg-control px-3 py-1 hover:bg-control-hover" onClick={stop}>Stop</button>
         ) : (
-          <button className="shrink-0 whitespace-nowrap rounded border border-control-edge bg-control px-3 py-1 hover:bg-control-hover disabled:opacity-50" disabled={attachments.some((image) => image.data === null)} onClick={send}>Send</button>
+          <button
+            className="send flex size-7 shrink-0 items-center justify-center rounded border border-control-edge bg-control hover:bg-control-hover disabled:opacity-50"
+            title="Send"
+            aria-label="Send"
+            disabled={attachments.some((image) => image.data === null)}
+            onClick={send}
+          >
+            <SendHorizontal size={16} strokeWidth={1.75} />
+          </button>
         )}
       </div>
     </div>
