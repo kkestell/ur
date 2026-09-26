@@ -20,6 +20,8 @@ jobs:
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -32,6 +34,8 @@ jobs:
       - name: Install app dependencies
         run: pnpm -C app install --frozen-lockfile
       - name: Check code
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/e2e
         run: make check
       - name: Run GUI tests on the runner
         run: make e2e
