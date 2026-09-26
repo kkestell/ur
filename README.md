@@ -16,8 +16,8 @@ ur, then go to System Settings → Privacy & Security and choose **Open Anyway**
 Install an ACP-compatible agent separately. Open ur, choose **Server**, and add a named server with
 its executable and launch arguments. Add more servers in the same settings screen. Then add a
 workspace with the **+** beside Workspaces. The workspace and pane creation menus offer one session
-choice per connected server, plus New Terminal. Sessions and terminals stay available when you close
-and reopen ur.
+choice per configured server, disabled while that server is not connected, plus New Terminal.
+Sessions and terminals stay available when you close and reopen ur.
 
 The config file at `$XDG_CONFIG_HOME/ur/config.json` (or `~/.config/ur/config.json`) stores servers
 in menu order. Server IDs stay the same when a server is renamed:

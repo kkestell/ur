@@ -91,6 +91,7 @@ e2eTest("settings add rename and remove a server without changing another", asyn
   await gui.setInput(".server-command", environment.fakeServer);
   await gui.click(".server-save");
   await waitFor("Beta to connect", async () => (await environment.watch()).servers.some((server) => server.name === "Beta" && server.connected));
+  await gui.waitForNone(".server-setup");
   const beta = (await environment.watch()).servers.find((server) => server.name === "Beta")!.id;
   const session = await environment.newSession(beta);
   await gui.click(".workspace-sessions .row", "Beta");

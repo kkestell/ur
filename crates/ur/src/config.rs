@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// The config file, `$XDG_CONFIG_HOME/ur/config.json`, else
 /// `~/.config/ur/config.json`.
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub servers: Vec<ServerConfig>,

@@ -24,6 +24,7 @@ test("the app starts its daemon and saves a working server after a failed choice
     await gui.setInput(".server-argument", environment.historyFile);
     await gui.click(".server-save");
     await waitFor("the server to connect", async () => (await environment.watch()).servers[0]?.connected);
+    await gui.waitForNone(".server-setup");
     const saved = JSON.parse(readFileSync(environment.configFile, "utf8"));
     assert.deepEqual(saved, { servers: [{ id: saved.servers[0].id, name: "Test", command: environment.fakeServer, args: [environment.historyFile] }] });
     await environment.addWorkspace("home", environment.home);

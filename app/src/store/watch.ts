@@ -120,6 +120,11 @@ export function needsAttention(summary: SessionSummary): boolean {
   );
 }
 
+/** The server that owns the session. */
+export function sessionServer(state: WatchState, summary: SessionSummary | undefined): ServerState | undefined {
+  return state.servers.find((server) => server.id === summary?.server);
+}
+
 /** The workspace's sessions in reverse discovery order. */
 export function workspaceSessions(state: WatchState, workspace: string): SessionSummary[] {
   return state.sessions

@@ -4,6 +4,7 @@ import {
   type WatchState,
   attentionCount,
   orderedWorkspaces,
+  sessionServer,
   workspaceSessions,
   workspaceTerminals,
 } from "../store/watch";
@@ -46,8 +47,9 @@ export function Sidebar({
               {count > 0 && <span className="count ml-auto min-w-5 rounded-full bg-control-hover px-1.5 text-center text-label leading-5">{count}</span>}
             </div>
             <div className="workspace-sessions px-2">
-              {workspaceSessions(watch, workspace.name).map((session) => (
-                <div
+              {workspaceSessions(watch, workspace.name).map((session) => {
+                const server = sessionServer(watch, session);
+                return <div
                   key={session.session}
                   className={
                     "row flex min-h-8 cursor-default items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-row-hover" +
@@ -56,10 +58,10 @@ export function Sidebar({
                       : "") +
                     (session.unread ? " unread font-semibold" : "")
                   }
-                  title={`${session.title ?? "New session"} · ${watch.servers.find((server) => server.id === session.server)?.name ?? "Unknown server"}`}
+                  title={`${session.title ?? "New session"} · ${server?.name ?? "Unknown server"}`}
                   onClick={() => onOpen({ type: "session", session: session.session })}
                   onContextMenu={(event) => {
-                    if (watch.servers.find((server) => server.id === session.server)?.capabilities?.sessionCapabilities?.delete != null) {
+                    if (server?.capabilities?.sessionCapabilities?.delete != null) {
                       event.preventDefault();
                       void showSessionMenu(session);
                     }
@@ -68,11 +70,11 @@ export function Sidebar({
                   <MessageSquare className="shrink-0 text-fg-dim" size={12} strokeWidth={1.75} />
                   <span className="label min-w-0 flex-1 truncate">
                     <span className="block truncate">{session.title ?? "New session"}</span>
-                    <span className="block truncate text-xs font-normal text-fg-dim">{watch.servers.find((server) => server.id === session.server)?.name ?? "Unknown server"}</span>
+                    <span className="block truncate text-xs font-normal text-fg-dim">{server?.name ?? "Unknown server"}</span>
                   </span>
                   <StatusMark status={session.status} />
-                </div>
-              ))}
+                </div>;
+              })}
               {workspaceTerminals(watch, workspace.name).map((terminal) => (
                 <div
                   key={terminal.terminal}

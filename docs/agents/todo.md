@@ -19,6 +19,7 @@
 - [x] Pane grid: agent sessions and terminals side by side in tabs and panes.
 - [x] [Multiple ACP servers](plans/2026-09-26-004-multiple-acp-servers.md): named servers share
       workspaces while their sessions and connections remain separate.
+  - [ ] [OX-0014](issues.csv:15): Server removal and launch edits have no daemon tests
 - [ ] Notifications and hooks: macOS notifications and an `on_event` command.
 - [x] [OX-0010](issues.csv:11): Dropped images can be omitted or reordered in a prompt
 - [x] [OX-0011](issues.csv:12): Followed CLI transcript misses replayed entries after a server

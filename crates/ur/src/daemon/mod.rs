@@ -50,20 +50,13 @@ pub async fn start(path: &Path) -> anyhow::Result<()> {
     });
     match Config::read() {
         Ok(Some(config)) => {
-            *control.configuration.lock().unwrap() = Config {
-                servers: config.servers.clone(),
-            };
+            *control.configuration.lock().unwrap() = config.clone();
             let ready: Vec<_> = config
                 .servers
                 .into_iter()
                 .map(|server| control.start(server))
                 .collect();
-            futures::future::join_all(
-                ready
-                    .into_iter()
-                    .map(|signal| async move { signal.notified().await }),
-            )
-            .await;
+            futures::future::join_all(ready.iter().map(|signal| signal.notified())).await;
         }
         Ok(None) => {}
         Err(error) => state
@@ -99,9 +92,7 @@ impl ServerControl {
             command,
             args,
         };
-        let mut next = Config {
-            servers: configuration.servers.clone(),
-        };
+        let mut next = configuration.clone();
         next.servers.push(server.clone());
         next.validate()?;
         next.write()?;
@@ -120,9 +111,7 @@ impl ServerControl {
     ) -> anyhow::Result<()> {
         Self::validate_command(&command)?;
         let mut configuration = self.configuration.lock().unwrap();
-        let mut next = Config {
-            servers: configuration.servers.clone(),
-        };
+        let mut next = configuration.clone();
         let server = next
             .servers
             .iter_mut()

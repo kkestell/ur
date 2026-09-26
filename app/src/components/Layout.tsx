@@ -16,7 +16,7 @@ import type { PendingPermission } from "../ipc/bindings/PendingPermission";
 import { isMacPlatform, shortcutKind } from "../keys";
 import { type TabItem, goneTabs, openTab, tabId, tabWorkspace, visibleSessions } from "../layout";
 import { useSession } from "../store/sessions";
-import { useWatch } from "../store/watch";
+import { sessionServer, useWatch } from "../store/watch";
 import { withPermissions } from "../transcript/permissions";
 import { Editor } from "./Editor";
 import { Tab } from "./Tab";
@@ -226,7 +226,8 @@ function SessionPanel({ api, params }: IDockviewPanelProps<TabItem>) {
   const id = (params as Extract<TabItem, { type: "session" }>).session;
   const watch = useWatch();
   const thread = useSession(id);
-  const status = watch.sessions.find((session) => session.session === id)?.status;
+  const summary = watch.sessions.find((session) => session.session === id);
+  const status = summary?.status;
   const requests = status?.type === "needs_permission" ? status.requests : noRequests;
   // Memoized: `SessionPanel` renders on every watch event, and a fresh array
   // each time would scroll the thread to the bottom.
@@ -274,7 +275,7 @@ function SessionPanel({ api, params }: IDockviewPanelProps<TabItem>) {
         session={id}
         status={status}
         thread={thread}
-        capabilities={watch.servers.find((server) => server.id === watch.sessions.find((session) => session.session === id)?.server)?.capabilities ?? null}
+        capabilities={sessionServer(watch, summary)?.capabilities ?? null}
       />
     </div>
   );

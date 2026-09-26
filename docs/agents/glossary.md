@@ -63,7 +63,7 @@
   `reject` (a rejected prompt), `fail` (a turn error), `title` (a session title), `unloadable` (a
   session whose loads fail), `pace` (a `config_option_update`), `usage` (a `usage_update`), or a
   reply. Its saved history is a `SavedHistory`, which the daemon's tests share between fake servers.
-- **Daemon**: The long-running `ur daemon` process. It owns the ACP connection, session statuses,
+- **Daemon**: The long-running `ur daemon` process. It owns the ACP connections, session statuses,
   in-memory transcripts, pending permission requests, and terminals, and serves daemon clients on
   the socket. The GUI starts its bundled daemon sidecar when no daemon is listening.
 - **Server state**: One configured server's ID, name, executable, arguments, connection status,

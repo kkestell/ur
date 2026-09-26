@@ -1,7 +1,7 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
 import { MessageSquare, Terminal, X } from "lucide-react";
 import type { TabItem } from "../layout";
-import { useWatch } from "../store/watch";
+import { sessionServer, useWatch } from "../store/watch";
 import { StatusMark } from "./StatusMark";
 
 /**
@@ -17,7 +17,7 @@ export function Tab({ api, params }: IDockviewPanelHeaderProps<TabItem>) {
   if (params.type === "session") {
     const summary = watch.sessions.find((session) => session.session === params.session);
     title = summary?.title ?? "New session";
-    tooltip = `${title} · ${watch.servers.find((server) => server.id === summary?.server)?.name ?? "Unknown server"}`;
+    tooltip = `${title} · ${sessionServer(watch, summary)?.name ?? "Unknown server"}`;
     if (summary !== undefined && summary.status.type !== "idle") {
       mark = <StatusMark status={summary.status} />;
     }

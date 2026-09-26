@@ -253,12 +253,13 @@ One Cargo workspace:
 ```text
 crates/ur/src/
   main.rs         clap: daemon | agent-run
-  config.rs       config.json: server command and args, on_event
+  config.rs       config.json: named servers with their commands and args,
+                  on_event
   one_shot.rs     agent-run; speaks ACP directly, no daemon
   daemon/
-    mod.rs        start(): read state.json and the config file, start the
-                  supervisor and wait for initialize when the config names a
-                  server, then serve the listener
+    mod.rs        start(): read state.json and the config file, start one
+                  supervisor per server and wait for their first attempts,
+                  then serve the listener; ServerControl for server changes
     state.rs      State: workspaces, sessions, terminals, subscriber lists.
                   Pure: no IO, no await.
     acp.rs        supervisor loop around connect_with, restart with backoff,

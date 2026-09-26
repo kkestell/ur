@@ -12,3 +12,5 @@ OX-0010,2026-09-26 06:33,Dropped images can be omitted or reordered in a prompt,
 OX-0011,2026-09-26 06:33,Followed CLI transcript misses replayed entries after a server restart,medium,correctness,wontfix,reviews/2026-09-26-001-full-codebase.md
 OX-0012,2026-09-26 06:33,The model picker interprets an Ox description as structured metadata,low,architecture,unscheduled,reviews/2026-09-26-001-full-codebase.md
 OX-0013,2026-09-26 07:30,A config picker reopens with its previous filter,low,correctness,unscheduled,reviews/2026-09-26-003-react-webview.md
+OX-0014,2026-09-26 17:12,Server removal and launch edits have no daemon tests,medium,testing,scheduled,reviews/2026-09-26-005-multiple-acp-servers.md
+OX-0015,2026-09-26 17:12,The fake server saves its capability flags in its history file,low,simplicity,unscheduled,reviews/2026-09-26-005-multiple-acp-servers.md

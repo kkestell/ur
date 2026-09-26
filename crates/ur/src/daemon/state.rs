@@ -16,7 +16,7 @@ use ur_client::{
 
 use super::server::Outbox;
 
-/// The daemon's ACP connection, workspaces, sessions, and terminal summaries,
+/// The daemon's servers, workspaces, sessions, and terminal summaries,
 /// behind one std mutex. `Terminals` holds the PTYs and reports to it.
 /// Methods queue their events on outboxes while the lock is held, which keeps
 /// each daemon client's events in order. They never wait and never await.
@@ -121,8 +121,8 @@ impl State {
         }
     }
 
-    /// Sets the ACP connection, which starts a new generation and sends its
-    /// capabilities to every watcher, or why there is none.
+    /// Sets why the config file could not be used, or clears it, and sends
+    /// the server states to every watcher.
     pub fn set_config_error(&mut self, error: Option<String>) {
         self.config_error = error;
         self.publish_servers();
@@ -134,6 +134,10 @@ impl State {
             .iter_mut()
             .find(|slot| slot.state.id == config.id)
         {
+            // A new launch configuration has neither connected nor failed yet.
+            if slot.state.command != config.command || slot.state.args != config.args {
+                slot.state.error = None;
+            }
             slot.state.name = config.name.clone();
             slot.state.command = config.command.clone();
             slot.state.args = config.args.clone();

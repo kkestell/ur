@@ -175,12 +175,11 @@ pub fn prompt(
 pub fn load(
     state: &Arc<Mutex<State>>,
     prompt: Option<Vec<ContentBlock>>,
-    server: String,
+    owner: String,
 ) -> impl FnOnce(&ConnectionTo<Agent>, u64, LoadSessionRequest) -> agent_client_protocol::Result<()>
 {
     let state = state.clone();
     move |connection, generation, request| {
-        let owner = server;
         let session = SessionKey::new(&owner, &request.session_id);
         connection
             .send_request(request)
