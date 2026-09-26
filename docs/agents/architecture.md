@@ -250,7 +250,8 @@ crates/ur/src/
   one_shot.rs     agent-run; speaks ACP directly, no daemon
   daemon/
     mod.rs        start(): read state.json and the config file, start the
-                  supervisor, wait for initialize, then serve the listener
+                  supervisor and wait for initialize when the config names a
+                  server, then serve the listener
     state.rs      State: workspaces, sessions, terminals, subscriber lists.
                   Pure: no IO, no await.
     acp.rs        supervisor loop around connect_with, restart with backoff,

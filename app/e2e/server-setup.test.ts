@@ -11,6 +11,8 @@ test("the app starts its daemon and saves a working server after a failed choice
     await waitFor("the bundled daemon to listen", async () => {
       try { await environment.watch(); return true; } catch { return false; }
     });
+    assert.equal((await environment.watch()).server_state.error, null);
+    assert.equal(await gui.hasElement(".server-error"), false);
 
     await gui.setInput(".server-command", "/no/such/server");
     await gui.click(".server-save");

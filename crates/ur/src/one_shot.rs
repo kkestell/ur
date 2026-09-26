@@ -14,13 +14,16 @@ use agent_client_protocol::{
 use serde::Serialize;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::daemon::acp;
 
 /// Runs `agent-run` against the server in the config file, answering
 /// permission requests from stdin.
 pub async fn start(workspace: &Path, prompt: String) -> anyhow::Result<()> {
-    let server = Config::read()?.server;
+    let Some(config) = Config::read()? else {
+        anyhow::bail!("{} does not exist", config::path()?.display());
+    };
+    let server = config.server;
     let server = AcpAgent::new(AcpAgentConfig::new(server.command).args(server.args));
     let output = Arc::new(Mutex::new(std::io::stdout()));
     let answers = BufReader::new(tokio::io::stdin());

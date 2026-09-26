@@ -15,8 +15,8 @@ Map each file here as it is added, following the project layout in `docs/agents/
   GitHub macOS runner, then publishes that runner-built artifact for a version tag.
 - `scripts/check-macos-package` — checks that an unsigned macOS app and DMG contain the app and
   daemon sidecar and that the DMG is readable.
-- `scripts/run` — `make run`: writes the development config file when it is missing, builds and
-  starts the daemon on the default socket, runs `pnpm tauri dev`, and stops the daemon when the GUI
+- `scripts/run` — `make run`: builds and starts the daemon on the default socket, stopping when
+  another daemon already listens there, runs `pnpm tauri dev`, and stops the daemon when the GUI
   exits.
 - `dprint.json` — the dprint config for the Markdown files, which wraps prose at 100 columns.
 - `Cargo.toml` — the Cargo workspace and shared dependency versions.

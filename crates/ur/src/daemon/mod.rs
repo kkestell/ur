@@ -24,7 +24,8 @@ mod terminal;
 mod tests;
 
 /// Binds the socket, removing a stale one, then runs the daemon with the
-/// state file and the server from the config file.
+/// state file and the server from the config file. Without a config file, the
+/// daemon waits for a server choice.
 pub async fn start(path: &Path) -> anyhow::Result<()> {
     if path.exists() {
         if UnixStream::connect(path).await.is_ok() {
@@ -46,10 +47,11 @@ pub async fn start(path: &Path) -> anyhow::Result<()> {
         configuration: Mutex::new(()),
     });
     match Config::read() {
-        Ok(config) => {
+        Ok(Some(config)) => {
             let ready = control.start(config.server);
             ready.notified().await;
         }
+        Ok(None) => {}
         Err(error) => state.lock().unwrap().set_server(Err(format!("{error:#}"))),
     }
     let terminals = Arc::new(terminal::Terminals::new(state.clone()));

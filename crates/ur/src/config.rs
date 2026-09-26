@@ -1,3 +1,4 @@
+use std::io::ErrorKind;
 use std::path::PathBuf;
 
 use anyhow::{Context, anyhow};
@@ -21,11 +22,19 @@ pub struct ServerConfig {
 }
 
 impl Config {
-    pub fn read() -> anyhow::Result<Config> {
+    /// Reads the config file, or `None` when there is none yet.
+    pub fn read() -> anyhow::Result<Option<Config>> {
         let path = path()?;
-        let text = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading {}", path.display()))?;
-        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(error).with_context(|| format!("reading {}", path.display()));
+            }
+        };
+        serde_json::from_str(&text)
+            .map(Some)
+            .with_context(|| format!("parsing {}", path.display()))
     }
 
     pub fn write(&self) -> anyhow::Result<()> {
@@ -38,7 +47,7 @@ impl Config {
     }
 }
 
-fn path() -> anyhow::Result<PathBuf> {
+pub fn path() -> anyhow::Result<PathBuf> {
     let config = match std::env::var_os("XDG_CONFIG_HOME") {
         Some(config) => PathBuf::from(config),
         None => std::env::home_dir()
