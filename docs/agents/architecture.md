@@ -19,14 +19,12 @@ The [ACP spec](https://agentclientprotocol.com/protocol/v1/initialization) is th
 SDK's protocol types and capability negotiation. Server names, tool names, tool argument schemas,
 model names, modes, permission labels, and session or tool IDs have no special meaning to ur.
 
-- One configured server per daemon. Its executable and argument list live in the `[server]` table of
-  `$XDG_CONFIG_HOME/ur/config.toml` (under `~/.config` when unset). The one-shot client and daemon
+- One configured server per daemon. Its executable and argument list live in the `server` object of
+  `$XDG_CONFIG_HOME/ur/config.json` (under `~/.config` when unset). The one-shot client and daemon
   use this same configuration. Development uses:
 
-  ```toml
-  [server]
-  command = "ox"
-  args = []
+  ```json
+  {"server": {"command": "ox", "args": []}}
   ```
 
 - Call optional methods only when supported. List and load enable saved history; without them, ur
@@ -68,10 +66,13 @@ For each workspace, the sidebar combines newly created sessions with those retur
 `session/list` when supported, following its pagination and using their titles and last activity.
 The daemon calls `session/list` for every workspace after each `initialize`, and for a workspace
 when it is added. A workspace whose list fails shows only the sessions the daemon already has.
-`session_info_update`, when sent, live or replayed, keeps those details current. A session with no
-title yet shows as "New session". Selecting a session shows its thread; the daemon loads its saved
-transcript automatically the first time it is needed for viewing or prompting, when loading is
-supported. Newly created sessions are already loaded.
+`session_info_update`, when sent, live or replayed, keeps those details current. Workspaces appear
+alphabetically. Sessions and terminals appear newest first under each workspace. The daemon retains
+creation order for sessions created during its run. Saved sessions appear in reverse `session/list`
+order because that protocol response does not provide creation times. A session with no title yet
+shows as "New session". Selecting a session shows its thread; the daemon loads its saved transcript
+automatically the first time it is needed for viewing or prompting, when loading is supported. Newly
+created sessions are already loaded.
 
 A load starts when a daemon client subscribes to an unloaded session that is not `Failed`, when a
 daemon client prompts an unloaded session, and, after the server restarts, for every unloaded
@@ -111,13 +112,12 @@ the load fails again, the session returns to `Failed`.
 
 Each session also has an `unread` flag. It turns on when a turn ends or fails while no client has
 the session focused, and turns off when a client focuses it or sends it a prompt. A session **needs
-attention** when it is `NeedsPermission`, `Failed`, or unread. The sidebar sorts workspaces and
-sessions by this.
+attention** when it is `NeedsPermission`, `Failed`, or unread. The sidebar shows a count beside its
+workspace without moving the workspace or session.
 
 A client focuses the set of sessions it is showing. The GUI focuses every session shown as the
-active tab of a pane while its window has focus, and focuses nothing when the window loses focus.
-`ur read` focuses the session it reads, so reading a session clears its unread flag, and a session
-followed with `--follow` does not become unread. A client's focus clears when it disconnects.
+active tab of a pane while its window has focus, and focuses nothing when the window loses focus. A
+client's focus clears when it disconnects.
 
 ### Permissions
 
@@ -131,11 +131,10 @@ prompt returns, the session stays busy and shows `Working`; any further permissi
 answered `Cancelled`. When the prompt ends or the server disconnects, the daemon clears any
 remaining pending requests and tells clients they are resolved.
 
-The GUI draws one button per option, using the label and kind in the request. The CLI's `approve`
-and `deny` answer the session's oldest pending request with its first `allow_*` or `reject_*`
-option. The GUI's shortcuts do the same by option kind: Command+Y for `allow_once`, Command+Shift+Y
-for `allow_always`, Command+Option+Z for `reject_once`, and Command+Shift+Option+Z for
-`reject_always` on macOS. Other platforms use Ctrl in place of Command and Alt in place of Option.
+The GUI draws one button per option, using the label and kind in the request. Its shortcuts answer
+the oldest pending request by option kind: Command+Y for `allow_once`, Command+Shift+Y for
+`allow_always`, Command+Option+Z for `reject_once`, and Command+Shift+Option+Z for `reject_always`
+on macOS. Other platforms use Ctrl in place of Command and Alt in place of Option.
 
 ### Sessions, tabs, and workspaces
 
@@ -229,9 +228,9 @@ after a load sends a fresh session snapshot, which clients use to replace their 
 
 One Cargo workspace:
 
-- `crates/ur`: the `ur` binary, which is the daemon and the CLI.
+- `crates/ur`: the `ur` binary, which runs the daemon and the development one-shot client.
 - `crates/ur-client`: the frame format, the request and event types, and an async client for the
-  socket. The CLI and the GUI both use it.
+  socket. The GUI uses it.
 - `crates/ur-fake-server`: the fake server, a scripted server built with the SDK's
   `Agent.builder()`. The daemon's tests run its library in process, and the end-to-end suite's
   daemon launches its binary from the config file.
@@ -241,11 +240,9 @@ One Cargo workspace:
 
 ```text
 crates/ur/src/
-  main.rs         clap: daemon | agent-run | new | prompt | read | ls | wait |
-                  approve | deny | cancel | workspace
-  config.rs       config.toml: server command and args, on_event
+  main.rs         clap: daemon | agent-run
+  config.rs       config.json: server command and args, on_event
   one_shot.rs     agent-run; speaks ACP directly, no daemon
-  cli/            one file per subcommand; each uses ur_client::Client only
   daemon/
     mod.rs        start(): read state.json and the config file, start the
                   supervisor, wait for initialize, then serve the listener
@@ -299,9 +296,9 @@ app/src/
 ```
 
 `ur-client`'s `Client` is a cloneable handle over one writer task and a pending map keyed by request
-ID. Every CLI subcommand and the Tauri core use it unchanged. TypeScript bindings for `protocol.rs`
-come from `ts-rs`, with ACP payload fields overridden to the types exported by
-`@agentclientprotocol/sdk`, so the webview writes no protocol types by hand.
+ID. The Tauri core uses it unchanged. TypeScript bindings for `protocol.rs` come from `ts-rs`, with
+ACP payload fields overridden to the types exported by `@agentclientprotocol/sdk`, so the webview
+writes no protocol types by hand.
 
 ### Daemon architecture
 

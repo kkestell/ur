@@ -22,20 +22,16 @@ Map each file here as it is added, following the project layout in `docs/agents/
   `config_options_changed`), `Workspace`, `SessionSummary`, `TerminalSummary`, `Status`,
   `PendingPermission`, `Entry`, `ClientMessage`, `DaemonMessage`, `socket_path()`, and
   `state_dir()`.
-- `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the core and the CLI, with
-  `request()`, `events()`, `pty()`, and `pty_input()`.
+- `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the core, with `request()`,
+  `events()`, `pty()`, and `pty_input()`.
 - `crates/ur-fake-server/` — the fake server: `lib.rs` exports `fake_server()`, `Hold`, and
   `SavedHistory`, and `main.rs` serves it over stdin and stdout, keeping its saved history in the
   file its argument names, if any. It advertises image prompts and, with saved history,
   `session/delete`, gives every session the `pace` config option, and answers
   `session/set_config_option` and `session/delete`. The `options` script sends several config
   options, with a model that accepts images, to check the editor layout.
-- `crates/ur/src/main.rs` — the `ur` command line: `daemon`, `agent-run`, `workspace add|rm`, `ls`,
-  `new`, `prompt`, `read`, `cancel`, `approve`, `deny`, and `wait`.
-- `crates/ur/src/cli/` — `connect()`, `watch()`, and one file per CLI subcommand: `workspace.rs`,
-  `ls.rs`, `new.rs`, `prompt.rs`, `read.rs`, `cancel.rs`, `answer.rs` (`approve` and `deny`), and
-  `wait.rs`.
-- `crates/ur/src/config.rs` — `Config` and `ServerConfig`, the config file.
+- `crates/ur/src/main.rs` — the `ur` command line: `daemon` and the development tool `agent-run`.
+- `crates/ur/src/config.rs` — `Config` and `ServerConfig`, the JSON config file.
 - `crates/ur/src/one_shot.rs` — `ur agent-run`, the one-shot client, and its tests against a test
   agent.
 - `crates/ur/src/daemon/mod.rs` — `start()`: binds the socket, removing a stale one, and reads the
@@ -89,7 +85,7 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `app/src/store/watch.ts` — `WatchState`, with `hasSnapshot`, `reduceWatch()`, `needsAttention()`,
   `workspaceSessions()`, `workspaceTerminals()`, `orderedWorkspaces()`, `attentionCount()`, and
   `useWatch()`: the connection, workspaces, sessions, terminals, and the server's capabilities
-  outside React, with sessions ordered by attention and terminals in opening order.
+  outside React, with alphabetical workspaces and newest sessions and terminals first.
 - `app/src/store/sessions.ts` — every subscribed session's `ThreadState`, `useSession()`, which
   subscribes once, and `useThread()`.
 - `app/src/transcript/blocks.ts` — `Block` and `ThreadState`, the thread's display types. The user
@@ -159,9 +155,12 @@ Map each file here as it is added, following the project layout in `docs/agents/
   snapshot arrives.
 - `app/e2e/harness.ts` — `TestEnvironment`, `Gui`, and `e2eTest`, used by the end-to-end suite and
   ad-hoc checks. `TestEnvironment` writes a config file that launches the fake server with its saved
-  history file and adds the `home` workspace; `Gui.showTerminal()` opens a terminal in it and opens
-  its tab by clicking its terminal row, or finds the tab restored from the layout.
-  `Gui.setPlatform()` simulates a different platform for shortcut tests.
+  history file and sends setup requests to the daemon socket, including adding the `home` workspace;
+  `Gui.showTerminal()` opens a terminal in it and opens its tab by clicking its terminal row, or
+  finds the tab restored from the layout. `Gui.setPlatform()` simulates a different platform for
+  shortcut tests.
+- `app/e2e/tsconfig.json` — limits the end-to-end TypeScript build to the checked-in harness and
+  tests, excluding ad-hoc files in `artifacts/`.
 - `app/e2e/terminal.test.ts` — the end-to-end tests for terminals.
 - `app/e2e/session.test.ts` — the end-to-end tests for agent sessions against the fake server.
 - `app/e2e/attention.test.ts` — the end-to-end tests for session status, unread sessions, and

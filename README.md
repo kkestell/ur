@@ -1,7 +1,7 @@
 # ur
 
-ur is a desktop and command-line client for ACP agents. It keeps sessions and terminals available
-across GUI restarts.
+ur is a desktop client for ACP agents. It keeps sessions and terminals available across app restarts
+while its daemon is running.
 
 ## Keyboard shortcuts
 

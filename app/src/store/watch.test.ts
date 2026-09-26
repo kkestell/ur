@@ -43,14 +43,14 @@ const connected = reduceWatch(initialWatch, {
   socket: "/tmp/ur.sock",
 });
 
-test("sessions_order_by_last_activity", () => {
+test("sessions_stay_in_creation_order_newest_first", () => {
   const state = reduceWatch(connected, {
     type: "watch_snapshot",
     terminals: [],
     capabilities: null,
     workspaces: [{ name: "ws", path: "/ws" }],
     sessions: [
-      summary("old", "ws", "2026-01-01T00:00:00Z"),
+      summary("old", "ws", "2026-03-01T00:00:00Z"),
       summary("new", "ws", "2026-02-01T00:00:00Z"),
       summary("fresh", "ws", null),
       summary("other", "other", "2026-03-01T00:00:00Z"),
@@ -63,8 +63,8 @@ test("sessions_order_by_last_activity", () => {
   ]);
 });
 
-test("sessions_needing_attention_come_first", () => {
-  const state = reduceWatch(connected, {
+test("session_activity_and_attention_do_not_change_order", () => {
+  let state = reduceWatch(connected, {
     type: "watch_snapshot",
     terminals: [],
     capabilities: null,
@@ -80,23 +80,24 @@ test("sessions_needing_attention_come_first", () => {
       }),
     ],
   });
-  expect(workspaceSessions(state, "ws").map((session) => session.session)).toEqual([
-    "permission",
-    "failed",
-    "unread",
-    "read",
-  ]);
+  const ids = () => workspaceSessions(state, "ws").map((session) => session.session);
+  expect(ids()).toEqual(["permission", "failed", "read", "unread"]);
+  state = reduceWatch(state, {
+    type: "session_changed",
+    summary: summary("unread", "ws", "2026-05-01T00:00:00Z", { unread: true }),
+  });
+  expect(ids()).toEqual(["permission", "failed", "read", "unread"]);
 });
 
-test("workspaces_needing_attention_come_first", () => {
+test("workspaces_are_alphabetical_even_with_attention", () => {
   const state = reduceWatch(connected, {
     type: "watch_snapshot",
     terminals: [],
     capabilities: null,
     workspaces: [
-      { name: "a", path: "/a" },
-      { name: "b", path: "/b" },
       { name: "c", path: "/c" },
+      { name: "b", path: "/b" },
+      { name: "a", path: "/a" },
     ],
     sessions: [
       summary("s1", "a", null),
@@ -105,7 +106,7 @@ test("workspaces_needing_attention_come_first", () => {
       summary("s4", "c", null),
     ],
   });
-  expect(orderedWorkspaces(state).map((workspace) => workspace.name)).toEqual(["c", "a", "b"]);
+  expect(orderedWorkspaces(state).map((workspace) => workspace.name)).toEqual(["a", "b", "c"]);
   expect(["a", "b", "c"].map((name) => attentionCount(state, name))).toEqual([0, 0, 1]);
 });
 
@@ -195,7 +196,7 @@ test("terminals_follow_watch_events", () => {
   expect(state.terminals).toEqual([terminal(2, "b", "npm run dev")]);
 });
 
-test("workspace_terminals_keep_their_opening_order", () => {
+test("workspace_terminals_show_newest_first", () => {
   const state = reduceWatch(connected, {
     type: "watch_snapshot",
     terminals: [terminal(1, "a"), terminal(2, "b"), terminal(3, "a")],
@@ -206,7 +207,7 @@ test("workspace_terminals_keep_their_opening_order", () => {
     ],
     sessions: [],
   });
-  expect(workspaceTerminals(state, "a").map((summary) => summary.terminal)).toEqual([1, 3]);
+  expect(workspaceTerminals(state, "a").map((summary) => summary.terminal)).toEqual([3, 1]);
 });
 
 test("has_snapshot_follows_the_connection", () => {

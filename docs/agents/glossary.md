@@ -19,7 +19,7 @@
 - Say sidebar, not workspace panel.
 - Qualify attachment as terminal attachment or image attachment.
 - Attach refers only to terminals. Sessions are watched or subscribed.
-- Say config option only for an ACP session config option. `config.toml` is the config file.
+- Say config option only for an ACP session config option. `config.json` is the config file.
 
 ## Names across boundaries
 
@@ -44,7 +44,7 @@
 
 ### Processes and configuration
 
-- **ur**: The ACP client this project builds: a daemon, a CLI, and a GUI.
+- **ur**: The ACP client this project builds: a daemon and a GUI.
 - **ACP**: Agent Client Protocol, the JSON-RPC interface between ur and a server. It is the
   contract; server-specific names have no special meaning to ur.
 - **Server**: The ACP agent process the daemon launches from the config file. There is one per
@@ -65,10 +65,8 @@
   the socket.
 - **One-shot client**: `ur agent-run`, which launches the server and speaks ACP directly for one
   prompt without a daemon.
-- **Daemon client**: A CLI subcommand or the GUI connected to the daemon socket. Every daemon client
+- **Daemon client**: The GUI or a test client connected to the daemon socket. Every daemon client
   reads the same session status.
-- **CLI**: The `ur` subcommands other than `daemon` and `agent-run`. Each is a daemon client that
-  uses `ur_client::Client` only.
 - **GUI**: The single-window Tauri app. It consists of the core and the webview.
 - **Core**: The GUI's Rust side in `app/src-tauri`. It is the GUI's only daemon client and the only
   part of the GUI that speaks the wire protocol.
@@ -79,7 +77,7 @@
 - **Desired set**: What the Link restores after reconnecting: watch, subscribed sessions, terminal
   attachments with their sizes, and focus, which is the visible sessions while the window has focus.
   It is `Desired` in code.
-- **Config file**: `$XDG_CONFIG_HOME/ur/config.toml`, under `~/.config` when the variable is unset.
+- **Config file**: `$XDG_CONFIG_HOME/ur/config.json`, under `~/.config` when the variable is unset.
   It holds the server command and arguments and, from milestone 11, `on_event`. The daemon and
   one-shot client share it.
 - **State file**: `$XDG_STATE_HOME/ur/state.json`, under `~/.local/state` when the variable is
@@ -126,7 +124,7 @@
 - **Session title**: The label of a session from `session/list` or `session_info_update`. A session
   without one shows as "New session".
 - **Last activity**: The session's most recent activity time from `session/list` or
-  `session_info_update`, used to order sessions in the sidebar.
+  `session_info_update`.
 - **Turn**: One `session/prompt` call, from sending it until it returns a stop reason or an error.
 - **Stop reason**: The ACP reason a turn ended normally, kept as `last_stop` in `Idle`.
 - **Session operation**: One prompt, load, or delete running for a session. At most one runs per
@@ -181,7 +179,7 @@
 - **Unread**: A per-session flag set when a turn ends or fails while no daemon client has the
   session focused, and cleared when one focuses it or sends it a prompt.
 - **Needs attention**: True of a session that is `NeedsPermission`, `Failed`, or unread. The sidebar
-  sorts workspaces and sessions by it.
+  shows a count beside a workspace with sessions needing attention.
 - **Focus**: The set of sessions a daemon client is showing, sent with `focus(sessions)`. The GUI
   focuses every visible session while its window has focus and nothing otherwise. A daemon client's
   focus clears when it disconnects.

@@ -1,15 +1,49 @@
 import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { e2eTest } from "./harness.ts";
+import { e2eTest, waitFor } from "./harness.ts";
+
+e2eTest("workspaces stay alphabetical when one needs attention", async (environment) => {
+  for (const name of ["zeta", "alpha"]) {
+    const path = join(environment.home, name);
+    mkdirSync(path);
+    await environment.addWorkspace(name, path);
+  }
+  const gui = await environment.openGui();
+  const names = () => gui.texts(".workspace-name .label");
+  assert.deepEqual(await names(), ["alpha", "home", "zeta"]);
+
+  const session = await environment.newSession();
+  await environment.prompt(session, "tool");
+  await gui.waitForText(".workspace-name .count", "1");
+  assert.deepEqual(await names(), ["alpha", "home", "zeta"]);
+});
+
+e2eTest("sessions stay newest first when an older session needs attention", async (environment) => {
+  const older = await environment.newSession();
+  await environment.prompt(older, "title");
+  await environment.waitForIdle(older);
+  const gui = await environment.openGui();
+  await environment.newSession();
+  const labels = () => gui.texts(".workspace-sessions .row:not(:has(.terminal-icon)) .label");
+  await waitFor("newest session first", async () =>
+    JSON.stringify(await labels()) === JSON.stringify(["New session", "tallies"]),
+  );
+
+  await environment.prompt(older, "tool");
+  await gui.waitForText(".sidebar .row:has(.status.dot)", "tallies");
+  assert.deepEqual(await labels(), ["New session", "tallies"]);
+});
 
 e2eTest("the empty states follow the workspaces and the selection", async (environment) => {
   const gui = await environment.openGui();
   await gui.waitForText(".empty", "Select a session");
-  await environment.ur("workspace", "rm", "home");
+  await environment.removeWorkspace("home");
   await gui.waitForText(".empty", "No workspaces");
 });
 
-e2eTest("a session created from the CLI answers a prompt sent from the editor", async (environment) => {
+e2eTest("a session created before the GUI opens answers an editor prompt", async (environment) => {
   await environment.newSession();
   const gui = await environment.openGui();
   await gui.click(".sidebar .row", "New session");
@@ -72,7 +106,7 @@ e2eTest("a prompt the daemon answers busy comes back to the editor", async (envi
 
 e2eTest("each session's tab keeps its own editor draft", async (environment) => {
   await environment.newSession();
-  await environment.ur("new", "home");
+  await environment.newSession();
   const gui = await environment.openGui();
   await gui.click(".sidebar .row:nth-child(1)");
   await gui.typePrompt("first draft");
@@ -91,26 +125,26 @@ e2eTest("a session that comes back with its workspace shows its thread", async (
   await gui.sendPrompt("hello");
   await gui.waitForText(".block.agent", "you said: hello");
 
-  await environment.ur("workspace", "rm", "home");
+  await environment.removeWorkspace("home");
   await gui.waitForNone(".workspace .row");
-  await environment.ur("workspace", "add", "home", environment.home);
+  await environment.addWorkspace("home", environment.home);
   await gui.click(".sidebar .row", "New session");
   await gui.waitForText(".block.agent", "you said: hello");
 });
 
 e2eTest("another session's activity leaves the thread's scroll position alone", async (environment) => {
   await environment.newSession();
-  const other = await environment.ur("new", "home");
+  const other = await environment.newSession();
   const gui = await environment.openGui();
   await gui.setWindowSize(700, 400);
-  await gui.click(".sidebar .row:nth-child(1)");
+  await gui.click(".sidebar .row:nth-child(2)");
   for (let prompt = 1; prompt <= 8; prompt++) {
     await gui.sendPrompt(`prompt ${prompt}`);
     await gui.waitForText(".block.agent", `you said: prompt ${prompt}`);
   }
   await gui.scrollThread(0);
-  await environment.ur("prompt", other, "hello");
-  await environment.ur("wait", other);
+  await environment.prompt(other, "hello");
+  await environment.waitForIdle(other);
   assert.equal(await gui.threadScrollTop(), 0);
 });
 
@@ -119,7 +153,7 @@ e2eTest("a session's tab shows the session title", async (environment) => {
   const gui = await environment.openGui();
   await gui.click(".sidebar .row", "New session");
   await gui.waitForText(".tab .label", "New session");
-  await environment.ur("prompt", session, "title");
+  await environment.prompt(session, "title");
   await gui.waitForText(".tab .label", "tallies");
   await gui.waitForText(".sidebar .row", "tallies");
 });

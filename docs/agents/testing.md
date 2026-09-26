@@ -7,8 +7,7 @@ build. `pnpm -C app test` runs the webview's unit tests under vitest.
 Test ACP behavior against a test agent built with the SDK's `Agent.builder()` in the test process,
 without a model provider or Ox. The daemon's tests run the fake server in process over
 `Channel::duplex()`. Use Ox for live end-to-end checks, including each milestone's check in
-`docs/agents/todo.md`. `make run` starts the daemon and the GUI for them; the CLI is
-`target/debug/ur`.
+`docs/agents/todo.md`. `make run` starts the daemon and the GUI for them.
 
 ## Test discipline
 
@@ -41,17 +40,18 @@ started in it with one workspace, `home`, at the test's `HOME`. The saved histor
 outlive a daemon restart. A failing test saves a screenshot to `app/e2e/artifacts/` for diagnosis.
 
 Tests drive the GUI the way the user does, through clicks, the editor, and the terminal, and assert
-on what the window shows. `TestEnvironment.ur()` runs the command line for setup the GUI does
-through native dialogs or menus, which WebDriver cannot drive, and `Gui.request()` sends a request
-through the core's `request` command for the same reason. `openGui()` makes `ur-app` the frontmost
-application with `Gui.focusWindow()`, since the GUI focuses its visible sessions only while its
-window has focus and WebDriver cannot focus the window; a test that depends on focus calls it again
-before that step. A tab that is not active stays mounted but hidden, so the helpers look only at
-shown elements. `Gui.showTerminal()` opens a terminal in `home` and opens its tab by clicking its
-terminal row, so its view is the only xterm.js on the page; a reopened GUI restores the tab from the
-layout. Terminal tests assert on terminal text, read from the xterm.js rows, and type through
-`Gui.type`, not WebDriver key actions. The fake server's prompt scripts, named in `fake_server()`'s
-documentation, give agent session tests replies, permission requests, and errors.
+on what the window shows. `TestEnvironment.request()` sends setup requests to the daemon socket for
+actions the GUI does through native dialogs or menus, which WebDriver cannot drive, and
+`Gui.request()` sends a request through the core's `request` command for the same reason.
+`openGui()` makes `ur-app` the frontmost application with `Gui.focusWindow()`, since the GUI focuses
+its visible sessions only while its window has focus and WebDriver cannot focus the window; a test
+that depends on focus calls it again before that step. A tab that is not active stays mounted but
+hidden, so the helpers look only at shown elements. `Gui.showTerminal()` opens a terminal in `home`
+and opens its tab by clicking its terminal row, so its view is the only xterm.js on the page; a
+reopened GUI restores the tab from the layout. Terminal tests assert on terminal text, read from the
+xterm.js rows, and type through `Gui.type`, not WebDriver key actions. The fake server's prompt
+scripts, named in `fake_server()`'s documentation, give agent session tests replies, permission
+requests, and errors.
 
 ### End-to-end guarantee list
 
@@ -61,12 +61,15 @@ documentation, give agent session tests replies, permission requests, and errors
 - Quitting a restored full-screen application returns to the shell, and none of its last screen is
   left behind.
 - A terminal's row and tab show the shell's name until a program sets a title.
+- Terminals appear newest first under their workspace, even after a title change.
 - A terminal starts in its workspace's directory.
 - Close Terminal removes the terminal's row.
 - A terminal whose shell exits leaves the sidebar and closes its tab.
 - Removing a workspace stops its terminals.
 - The empty states follow the workspaces and the selection.
-- A session created from the command line answers a prompt sent from the editor.
+- A session created before the GUI opens answers a prompt sent from the editor.
+- Workspaces stay alphabetical when one needs attention.
+- Sessions stay newest first when an older session needs attention.
 - Stop cancels a running turn.
 - The selected session and its transcript survive closing and reopening the GUI.
 - The GUI reconnects after a daemon restart without duplicating the thread, and a new prompt works.

@@ -130,9 +130,9 @@ pub enum Event {
     TerminalExited {
         terminal: TerminalId,
     },
-    /// Every workspace in the order it was added, every session in the order
-    /// it was created, and every terminal in the order it was opened, sent
-    /// before later changes.
+    /// Every workspace in the order it was added, every session in discovery
+    /// order, and every terminal in the order it was opened, sent before later
+    /// changes.
     WatchSnapshot {
         workspaces: Vec<Workspace>,
         sessions: Vec<SessionSummary>,

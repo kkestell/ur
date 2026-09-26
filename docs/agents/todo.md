@@ -139,9 +139,9 @@ Basic agent GUI:
 - Connect the Tauri core to the daemon socket, retrying until it is up. Bridge `watch`, `subscribe`,
   `prompt`, and `cancel` through the `request` command and events. Install webview listeners before
   requesting snapshots.
-- Build the sidebar from `watch`, in workspace creation order and session last-activity order.
-  Selecting a session subscribes to it and displays its thread. Show the no-connection,
-  no-workspace, and no-selection empty states.
+- Build the sidebar from `watch`, with alphabetical workspaces and newest sessions first. Selecting
+  a session subscribes to it and displays its thread. Show the no-connection, no-workspace, and
+  no-selection empty states.
 - Add the transcript reducer and thread view: user messages in a box with the buffer font, plain
   agent messages and thoughts, and one titled line per tool call. Add the borderless editor with
   Send and Stop.
@@ -269,7 +269,7 @@ are restored in the same layout.
 
 - The daemon posts a macOS notification when a session starts to need attention and no client has it
   focused, so notifications arrive while the GUI is closed.
-- `on_event` in `$XDG_CONFIG_HOME/ur/config.toml` (under `~/.config` when the variable is unset): a
+- `on_event` in `$XDG_CONFIG_HOME/ur/config.json` (under `~/.config` when the variable is unset): a
   command the daemon runs for each status change, with the event as JSON on stdin.
 
 Check: start a long prompt, switch to another app, and get a notification when it finishes.

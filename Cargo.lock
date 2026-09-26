@@ -4836,7 +4836,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
- "toml 1.1.6+spec-1.1.0",
  "ur-client",
  "ur-fake-server",
  "vt100",

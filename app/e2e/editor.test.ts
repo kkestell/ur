@@ -69,7 +69,7 @@ e2eTest("config pickers that do not fit the editor's row move to the More menu",
   await gui.showTerminal();
   await gui.click(".sidebar .row", "New session");
   await gui.dragTab("New session", 0, "right");
-  await environment.ur("prompt", session, "options");
+  await environment.prompt(session, "options");
   await waitFor("the More button", async () => (await gui.displayedCount(".more-options")) === 1);
   assert.ok(await gui.editorControlsFit(), "the editor controls wrap or overflow");
 

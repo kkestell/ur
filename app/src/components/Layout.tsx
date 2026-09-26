@@ -246,8 +246,7 @@ function SessionPanel({ api, params }: IDockviewPanelProps<TabItem>) {
   };
 
   // On `window`, so the shortcuts work with the editor focused. A shortcut
-  // answers the oldest request with its first option of that kind, like
-  // `ur approve` and `ur deny`.
+  // answers the oldest request with its first option of that kind.
   useEffect(() => {
     if (!active) {
       return;

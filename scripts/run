@@ -5,10 +5,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-config="${XDG_CONFIG_HOME:-$HOME/.config}/ur/config.toml"
+config="${XDG_CONFIG_HOME:-$HOME/.config}/ur/config.json"
 if [ ! -e "$config" ]; then
   mkdir -p "$(dirname "$config")"
-  printf '[server]\ncommand = "ox"\nargs = []\n' > "$config"
+  printf '{"server":{"command":"ox","args":[]}}\n' > "$config"
   echo "wrote the development config file $config"
 fi
 
@@ -24,7 +24,7 @@ until [ -S "$socket" ]; do
   fi
   sleep 0.1
 done
-echo "the daemon is running on $socket; the CLI is target/debug/ur"
+echo "the daemon is running on $socket"
 
 # Closing the window or pressing Ctrl-C ends `tauri dev` with a nonzero status,
 # which is not an error here.

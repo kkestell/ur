@@ -25,6 +25,17 @@ type ShownWindow = {
   pendingFileReads?: Array<(() => Promise<void>) | undefined>;
 };
 
+type SessionSummary = {
+  session: string;
+  status: { type: string };
+  unread: boolean;
+};
+
+type WatchSnapshot = {
+  type: "watch_snapshot";
+  sessions: SessionSummary[];
+};
+
 /**
  * One test's temporary directory and daemon, and the GUI launches made in it.
  * The daemon's config file launches the fake server, which keeps its saved
@@ -50,11 +61,14 @@ export class TestEnvironment {
     mkdirSync(this.home);
     mkdirSync(this.#state);
     mkdirSync(join(this.#config, "ur"), { recursive: true });
-    const server = JSON.stringify(join(BIN, "ur-fake-server"));
-    const history = JSON.stringify(join(dir, "history.json"));
     writeFileSync(
-      join(this.#config, "ur/config.toml"),
-      `[server]\ncommand = ${server}\nargs = [${history}]\n`,
+      join(this.#config, "ur/config.json"),
+      JSON.stringify({
+        server: {
+          command: join(BIN, "ur-fake-server"),
+          args: [join(dir, "history.json")],
+        },
+      }),
     );
     this.#spawnDaemon();
   }
@@ -64,7 +78,7 @@ export class TestEnvironment {
     // The core retries until the daemon is up, but waiting here keeps the
     // no-connection state out of the tests.
     await waitFor("the daemon to listen", () => canConnect(environment.#socket));
-    await environment.ur("workspace", "add", "home", environment.home);
+    await environment.addWorkspace("home", environment.home);
     return environment;
   }
 
@@ -97,17 +111,88 @@ export class TestEnvironment {
     await waitFor("the daemon to listen", () => canConnect(this.#socket));
   }
 
-  /** Runs the `ur` command line against the daemon and returns its output. */
-  async ur(...args: string[]): Promise<string> {
-    const { stdout } = await promisify(execFile)(join(BIN, "ur"), args, {
-      env: { ...process.env, UR_SOCKET: this.#socket },
+  /** Sends one request to the daemon over its socket. */
+  async request(request: object): Promise<{ response: Record<string, unknown>; snapshot?: WatchSnapshot }> {
+    return new Promise((resolve, reject) => {
+      const socket = connect(this.#socket);
+      const payload = Buffer.from(JSON.stringify({ id: 1, request }));
+      const header = Buffer.alloc(5);
+      header[0] = 1;
+      header.writeUInt32BE(payload.length, 1);
+      let buffer = Buffer.alloc(0);
+      let snapshot: WatchSnapshot | undefined;
+      let finished = false;
+      const fail = (error: Error) => {
+        if (!finished) {
+          finished = true;
+          socket.destroy();
+          reject(error);
+        }
+      };
+      socket.once("connect", () => socket.write(Buffer.concat([header, payload])));
+      socket.on("data", (chunk) => {
+        buffer = Buffer.concat([buffer, chunk]);
+        while (buffer.length >= 5) {
+          const size = buffer.readUInt32BE(1);
+          if (buffer.length < 5 + size) break;
+          if (buffer[0] !== 1) {
+            fail(new Error(`unexpected daemon frame ${buffer[0]}`));
+            return;
+          }
+          const message = JSON.parse(buffer.subarray(5, 5 + size).toString());
+          buffer = buffer.subarray(5 + size);
+          if (message.type === "event" && message.event.type === "watch_snapshot") {
+            snapshot = message.event;
+          }
+          if (message.type === "response" && message.id === 1) {
+            finished = true;
+            socket.end();
+            if (message.response.type === "error") {
+              reject(new Error(message.response.message));
+            } else {
+              resolve({ response: message.response, snapshot });
+            }
+            return;
+          }
+        }
+      });
+      socket.once("error", fail);
+      socket.once("close", () => fail(new Error("daemon closed before responding")));
     });
-    return stdout.trim();
+  }
+
+  async addWorkspace(name: string, path: string): Promise<void> {
+    await this.request({ type: "add_workspace", name, path });
+  }
+
+  async removeWorkspace(name: string): Promise<void> {
+    await this.request({ type: "remove_workspace", name });
   }
 
   /** Creates a session in the `home` workspace. */
   async newSession(): Promise<string> {
-    return this.ur("new", "home");
+    const { response } = await this.request({ type: "new_session", workspace: "home" });
+    if (response.type !== "session_created") {
+      throw new Error(`unexpected new_session response: ${JSON.stringify(response)}`);
+    }
+    return response.session as string;
+  }
+
+  async prompt(session: string, text: string): Promise<void> {
+    await this.request({ type: "prompt", session, content: [{ type: "text", text }] });
+  }
+
+  async watch(): Promise<WatchSnapshot> {
+    const { snapshot } = await this.request({ type: "watch" });
+    if (snapshot === undefined) throw new Error("watch returned no snapshot");
+    return snapshot;
+  }
+
+  async waitForIdle(session: string): Promise<void> {
+    await waitFor(`${session} to be idle`, async () => {
+      const summary = (await this.watch()).sessions.find((item) => item.session === session);
+      return summary?.status.type === "idle";
+    });
   }
 
   /** Starts `ur-app`, connects to its WebDriver server, and waits for the sidebar. */

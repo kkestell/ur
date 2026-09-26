@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use anyhow::{Context, anyhow};
 use serde::Deserialize;
 
-/// The config file, `$XDG_CONFIG_HOME/ur/config.toml`, else
-/// `~/.config/ur/config.toml`.
+/// The config file, `$XDG_CONFIG_HOME/ur/config.json`, else
+/// `~/.config/ur/config.json`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -25,7 +25,7 @@ impl Config {
         let path = path()?;
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
-        toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
     }
 }
 
@@ -36,5 +36,5 @@ fn path() -> anyhow::Result<PathBuf> {
             .ok_or_else(|| anyhow!("no home directory"))?
             .join(".config"),
     };
-    Ok(config.join("ur/config.toml"))
+    Ok(config.join("ur/config.json"))
 }

@@ -60,10 +60,22 @@ e2eTest("a terminal's row and tab show the shell's name until a program sets a t
   await gui.waitForText(".tab .label", "tallying");
 });
 
+e2eTest("terminals show newest first after a title change", async (environment) => {
+  const gui = await environment.openGui();
+  await gui.showTerminal();
+  await gui.type("printf '\\033]0;older\\007'\r");
+  await gui.waitForText(".sidebar .row:has(.terminal-icon) .label", "older");
+  await gui.request({ type: "open_terminal", workspace: "home" });
+  const labels = () => gui.texts(".sidebar .row:has(.terminal-icon) .label");
+  await waitFor("newest terminal first", async () =>
+    JSON.stringify(await labels()) === JSON.stringify(["sh", "older"]),
+  );
+});
+
 e2eTest("a terminal starts in its workspace's directory", async (environment) => {
   const other = join(environment.home, "other");
   mkdirSync(other);
-  await environment.ur("workspace", "add", "other", other);
+  await environment.addWorkspace("other", other);
   const gui = await environment.openGui();
   // WebDriver cannot drive the native workspace menu.
   await gui.request({ type: "open_terminal", workspace: "other" });
@@ -101,7 +113,7 @@ e2eTest("a terminal whose shell exits leaves the sidebar and closes its tab", as
 e2eTest("removing a workspace stops its terminals", async (environment) => {
   const gui = await environment.openGui();
   await gui.showTerminal();
-  await environment.ur("workspace", "rm", "home");
+  await environment.removeWorkspace("home");
   await gui.waitForNone(".sidebar .row:has(.terminal-icon)");
   await gui.waitForText(".empty", "No workspaces");
 });

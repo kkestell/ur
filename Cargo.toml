@@ -23,7 +23,6 @@ tauri-plugin-dialog = "2.7.3"
 tauri-plugin-opener = "2.5.5"
 tauri-plugin-wdio-webdriver = "1.2.0"
 tempfile = "3.27.0"
-toml = "1.1.6"
 tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7.19", features = ["codec"] }
 ts-rs = "12.0.1"

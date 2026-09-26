@@ -4,14 +4,14 @@ import { e2eTest } from "./harness.ts";
 e2eTest("a working session shows the spinner", async (environment) => {
   const session = await environment.newSession();
   const gui = await environment.openGui();
-  await environment.ur("prompt", session, "hold");
+  await environment.prompt(session, "hold");
   await gui.waitForText(".sidebar .row:has(.status.spinner)", "New session");
 });
 
 e2eTest("a session waiting for permission shows its mark and its workspace's count", async (environment) => {
   const session = await environment.newSession();
   const gui = await environment.openGui();
-  await environment.ur("prompt", session, "tool");
+  await environment.prompt(session, "tool");
   await gui.waitForText(".sidebar .row:has(.status.dot)", "New session");
   await gui.waitForText(".workspace-name .count", "1");
 });
@@ -65,13 +65,13 @@ e2eTest("permission labels and shortcuts use Ctrl on other platforms", async (en
 
 e2eTest("a session that finishes a turn while not shown is unread until it is shown", async (environment) => {
   const shown = await environment.newSession();
-  const hidden = await environment.ur("new", "home");
+  const hidden = await environment.newSession();
   const gui = await environment.openGui();
   // `title` names the session, so its row can be told apart.
-  await environment.ur("prompt", shown, "title");
+  await environment.prompt(shown, "title");
   await gui.click(".sidebar .row", "tallies");
   await gui.waitForNone(".sidebar .row.unread");
-  await environment.ur("prompt", hidden, "hello");
+  await environment.prompt(hidden, "hello");
   await gui.waitForText(".sidebar .row.unread", "New session");
   await gui.focusWindow();
   await gui.click(".sidebar .row.unread", "New session");

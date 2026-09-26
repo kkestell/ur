@@ -28,7 +28,7 @@ pub struct State {
     generation: u64,
     /// In the order they were added.
     workspaces: Vec<Workspace>,
-    /// In the order they were created.
+    /// In creation order for live sessions and discovery order for saved sessions.
     sessions: Vec<Session>,
     /// In the order they were opened.
     terminals: Vec<TerminalSummary>,

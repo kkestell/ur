@@ -26,13 +26,6 @@ e2e:
 
 # Builds the daemon, starts it on the default socket, and runs the GUI with
 # `pnpm tauri dev`. Closing the window or pressing Ctrl-C stops the daemon.
-# Writes ~/.config/ur/config.toml with the development config when missing.
-#
-# From another terminal, the CLI is target/debug/ur:
-#
-#   target/debug/ur workspace add ur ~/projects/ur
-#   target/debug/ur new ur
-#   target/debug/ur prompt <session> "hello"
-#   target/debug/ur read <session> --follow
+# Writes ~/.config/ur/config.json with the development config when missing.
 run:
 	scripts/run

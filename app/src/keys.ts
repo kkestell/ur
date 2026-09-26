@@ -2,8 +2,7 @@ import type { PermissionOptionKind } from "@agentclientprotocol/sdk";
 
 /**
  * The shortcut for each permission option kind. A shortcut answers the
- * selected session's oldest pending request with its first option of that
- * kind, like `ur approve` and `ur deny`.
+ * selected session's oldest pending request with its first option of that kind.
  */
 const shortcuts: { kind: PermissionOptionKind; key: string; shift: boolean; alt: boolean }[] = [
   { kind: "allow_once", key: "y", shift: false, alt: false },
