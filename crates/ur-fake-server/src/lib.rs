@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
@@ -33,11 +34,47 @@ impl Hold {
     }
 }
 
+/// Pauses a selected fake-server request until the test releases it.
+#[derive(Clone, Default)]
+pub struct Pending {
+    enabled: Arc<AtomicBool>,
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+impl Pending {
+    pub fn pause(&self) {
+        self.enabled.store(true, Ordering::SeqCst);
+    }
+
+    pub async fn wait_started(&self) {
+        self.entered.notified().await;
+    }
+
+    pub fn release(&self) {
+        self.enabled.store(false, Ordering::SeqCst);
+        self.release.notify_one();
+    }
+
+    async fn wait_if_paused(&self) {
+        if self.enabled.load(Ordering::SeqCst) {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+    }
+}
+
 /// The fake server's saved history: every session it created, with its `cwd`,
 /// session title, and the updates to replay. Clones share it, so saved
 /// sessions outlive one ACP connection.
 #[derive(Clone)]
-pub struct SavedHistory(Arc<Mutex<Saved>>);
+pub struct SavedHistory(Arc<Mutex<Saved>>, Arc<RequestHolds>);
+
+#[derive(Default)]
+struct RequestHolds {
+    load: Pending,
+    delete: Pending,
+}
 
 #[derive(Serialize, Deserialize)]
 struct Saved {
@@ -116,18 +153,34 @@ impl SavedHistory {
             Err(error) => panic!("reading {}: {error}", file.display()),
         };
         saved.file = Some(file);
-        SavedHistory(Arc::new(Mutex::new(saved)))
+        SavedHistory(Arc::new(Mutex::new(saved)), Arc::default())
     }
 
     fn new(advertised: bool) -> SavedHistory {
-        SavedHistory(Arc::new(Mutex::new(Saved {
-            file: None,
-            advertised,
-            image: true,
-            delete: advertised,
-            created: 0,
-            sessions: Vec::new(),
-        })))
+        SavedHistory(
+            Arc::new(Mutex::new(Saved {
+                file: None,
+                advertised,
+                image: true,
+                delete: advertised,
+                created: 0,
+                sessions: Vec::new(),
+            })),
+            Arc::default(),
+        )
+    }
+
+    pub fn hold_load(&self) -> Pending {
+        self.1.load.clone()
+    }
+
+    pub fn hold_delete(&self) -> Pending {
+        self.1.delete.clone()
+    }
+
+    /// Shares saved sessions while giving another connection independent request holds.
+    pub fn with_new_holds(&self) -> SavedHistory {
+        SavedHistory(self.0.clone(), Arc::default())
     }
 
     fn advertised(&self) -> bool {
@@ -297,6 +350,7 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                 async move |request: LoadSessionRequest,
                             responder,
                             connection: ConnectionTo<Client>| {
+                    history.1.load.wait_if_paused().await;
                     if !history.advertised() {
                         return responder
                             .respond_with_error(agent_client_protocol::Error::method_not_found());
@@ -363,6 +417,7 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                 let history = history.clone();
                 let loaded = loaded.clone();
                 async move |request: DeleteSessionRequest, responder, _connection| {
+                    history.1.delete.wait_if_paused().await;
                     if !history.advertised() {
                         return responder
                             .respond_with_error(agent_client_protocol::Error::method_not_found());

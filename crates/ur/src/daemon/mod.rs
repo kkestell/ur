@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
-#[cfg(test)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::{AcpAgent, AcpAgentConfig};
@@ -47,6 +45,9 @@ pub async fn start(path: &Path) -> anyhow::Result<()> {
         configuration: Mutex::new(Config {
             servers: Vec::new(),
         }),
+        config_file: crate::config::path()?,
+        #[cfg(test)]
+        launches: Mutex::new(HashMap::new()),
     });
     match Config::read() {
         Ok(Some(config)) => {
@@ -72,6 +73,9 @@ pub struct ServerControl {
     state: Arc<Mutex<State>>,
     tasks: Mutex<HashMap<String, JoinHandle<()>>>,
     configuration: Mutex<Config>,
+    config_file: PathBuf,
+    #[cfg(test)]
+    launches: Mutex<HashMap<String, Arc<dyn Fn() -> agent_client_protocol::Channel + Send + Sync>>>,
 }
 
 impl ServerControl {
@@ -95,7 +99,7 @@ impl ServerControl {
         let mut next = configuration.clone();
         next.servers.push(server.clone());
         next.validate()?;
-        next.write()?;
+        next.write_to(&self.config_file)?;
         *configuration = next;
         self.state.lock().unwrap().set_config_error(None);
         self.start(server);
@@ -126,7 +130,7 @@ impl ServerControl {
         };
         let server = server.clone();
         next.validate()?;
-        next.write()?;
+        next.write_to(&self.config_file)?;
         *configuration = next;
         if restart {
             self.start(server);
@@ -149,7 +153,7 @@ impl ServerControl {
                 .cloned()
                 .collect(),
         };
-        next.write()?;
+        next.write_to(&self.config_file)?;
         *configuration = next;
         if let Some(task) = self.tasks.lock().unwrap().remove(id) {
             task.abort();
@@ -173,6 +177,13 @@ impl ServerControl {
         self.state.lock().unwrap().configure_server(&config);
         let command = config.command.clone();
         let id = config.id.clone();
+        #[cfg(test)]
+        if let Some(launch) = self.launches.lock().unwrap().get(&command).cloned() {
+            let (task, ready) =
+                acp::spawn_supervisor(id.clone(), command, move || launch(), self.state.clone());
+            self.tasks.lock().unwrap().insert(id, task);
+            return ready;
+        }
         let launch = move || {
             AcpAgent::new(AcpAgentConfig::new(config.command.clone()).args(config.args.clone()))
         };

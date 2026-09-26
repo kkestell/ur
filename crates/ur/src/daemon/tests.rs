@@ -37,6 +37,8 @@ struct TestDaemon {
     history: SavedHistory,
     /// The running fake server's task.
     server: Arc<Mutex<Option<AbortHandle>>>,
+    control: Option<Arc<super::ServerControl>>,
+    config_file: Option<PathBuf>,
     _dir: TempDir,
 }
 
@@ -102,8 +104,63 @@ impl TestDaemon {
             state_file,
             history,
             server,
+            control: None,
+            config_file: None,
             _dir: dir,
         }
+    }
+
+    fn managed() -> TestDaemon {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("ur.sock");
+        let state_file = dir.path().join("state.json");
+        let config_file = dir.path().join("config.json");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let state = Arc::new(Mutex::new(super::state::State::new(Vec::new())));
+        let control = Arc::new(super::ServerControl {
+            state: state.clone(),
+            tasks: Mutex::new(Default::default()),
+            configuration: Mutex::new(super::Config {
+                servers: Vec::new(),
+            }),
+            config_file: config_file.clone(),
+            launches: Mutex::new(Default::default()),
+        });
+        let terminals = Arc::new(super::terminal::Terminals::new(state.clone()));
+        tokio::spawn(super::server::serve(
+            listener,
+            terminals,
+            state,
+            state_file.clone(),
+            Some(control.clone()),
+        ));
+        TestDaemon {
+            socket,
+            state_file,
+            history: SavedHistory::default(),
+            server: Arc::default(),
+            control: Some(control),
+            config_file: Some(config_file),
+            _dir: dir,
+        }
+    }
+
+    fn launch(&self, command: &str, history: &SavedHistory) {
+        let history = history.clone();
+        self.control
+            .as_ref()
+            .unwrap()
+            .launches
+            .lock()
+            .unwrap()
+            .insert(
+                command.into(),
+                Arc::new(move || {
+                    let (client, agent) = Channel::duplex();
+                    tokio::spawn(fake_server(Hold::default(), history.clone()).connect_to(agent));
+                    client
+                }),
+            );
     }
 
     async fn connect(&self) -> Client {
@@ -187,6 +244,8 @@ fn two_servers() -> (TestDaemon, Arc<Mutex<Option<AbortHandle>>>) {
             state_file,
             history: first_history,
             server: first,
+            control: None,
+            config_file: None,
             _dir: dir,
         },
         second,
@@ -475,6 +534,65 @@ async fn delete(client: &Client, session: &SessionKey) -> Response {
         session: session.clone(),
     };
     client.request(request).await.unwrap()
+}
+
+async fn add_server(client: &Client, name: &str, command: &str) -> String {
+    let response = client
+        .request(Request::AddServer {
+            name: name.into(),
+            command: command.into(),
+            args: Vec::new(),
+        })
+        .await
+        .unwrap();
+    match response {
+        Response::ServerAdded { server } => server,
+        other => panic!("unexpected add response {other:?}"),
+    }
+}
+
+async fn update_server(client: &Client, server: &str, name: &str, command: &str) -> Response {
+    client
+        .request(Request::UpdateServer {
+            server: server.into(),
+            name: name.into(),
+            command: command.into(),
+            args: Vec::new(),
+        })
+        .await
+        .unwrap()
+}
+
+async fn remove_server(client: &Client, server: &str) -> Response {
+    client
+        .request(Request::RemoveServer {
+            server: server.into(),
+        })
+        .await
+        .unwrap()
+}
+
+async fn ready_server(daemon: &TestDaemon, id: &str) {
+    timeout(WAIT, async {
+        loop {
+            let client = daemon.connect().await;
+            let mut events = client.events();
+            assert_eq!(
+                client.request(Request::Watch).await.unwrap(),
+                Response::Done
+            );
+            if let Some(Event::WatchSnapshot { servers, .. }) = events.recv().await
+                && servers
+                    .iter()
+                    .any(|server| server.id == id && server.connected)
+            {
+                break;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("server connects");
 }
 
 async fn set_pace(client: &Client, session: &SessionKey, pace: &str) -> Response {
@@ -1691,4 +1809,372 @@ async fn adding_a_workspace_lists_saved_sessions_from_both_servers() {
     .unwrap();
     assert!(sessions.iter().any(|summary| summary.session == first));
     assert!(sessions.iter().any(|summary| summary.session == second));
+}
+
+#[tokio::test]
+async fn adding_and_renaming_a_server_keeps_its_session() {
+    let daemon = TestDaemon::managed();
+    daemon.launch("/fake/alpha", &SavedHistory::default());
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let mut watcher = watch(&daemon).await;
+
+    let id = add_server(&client, "Alpha", "/fake/alpha").await;
+    ready_server(&daemon, &id).await;
+    let session = create_session_on(&client, &id, "home").await;
+    assert_eq!(
+        update_server(&client, &id, "Renamed", "/fake/alpha").await,
+        Response::Done
+    );
+
+    assert_eq!(
+        prompt(&client, &session, "still here").await,
+        Response::Done
+    );
+    assert_eq!(watch(&daemon).await.sessions.len(), 1);
+    let mut saw_name = false;
+    while let Ok(event) = watcher.events.try_recv() {
+        if let Event::ServersChanged { servers, .. } = event {
+            saw_name |= servers
+                .iter()
+                .any(|server| server.id == id && server.name == "Renamed" && server.connected);
+        }
+    }
+    assert!(saw_name);
+}
+
+#[tokio::test]
+async fn removing_a_server_fails_its_turn_and_removes_only_its_session() {
+    let daemon = TestDaemon::managed();
+    daemon.launch("/fake/alpha", &SavedHistory::default());
+    daemon.launch("/fake/beta", &SavedHistory::default());
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let alpha = add_server(&client, "Alpha", "/fake/alpha").await;
+    let beta = add_server(&client, "Beta", "/fake/beta").await;
+    ready_server(&daemon, &alpha).await;
+    ready_server(&daemon, &beta).await;
+    let removed = create_session_on(&client, &alpha, "home").await;
+    let kept = create_session_on(&client, &beta, "home").await;
+    let subscriber_client = daemon.connect().await;
+    let mut subscription = subscribe(&subscriber_client, &removed).await;
+    let mut watcher = watch(&daemon).await;
+    assert_eq!(prompt(&client, &removed, "hold").await, Response::Done);
+    subscription.wait_for(3).await;
+
+    assert_eq!(remove_server(&client, &alpha).await, Response::Done);
+
+    assert_eq!(
+        watcher.next_turn_end(&removed).await,
+        Status::Failed {
+            message: "the server was removed".into()
+        }
+    );
+    loop {
+        if watcher.next().await
+            == (Event::SessionDeleted {
+                session: removed.clone(),
+            })
+        {
+            break;
+        }
+    }
+    assert_eq!(
+        subscription.wait_for(4).await[3],
+        turn_error("the server was removed")
+    );
+    assert_eq!(
+        subscription.events.recv().await,
+        Some(Event::SessionRemoved {
+            session: removed.clone()
+        })
+    );
+    assert_eq!(
+        watch(&daemon)
+            .await
+            .sessions
+            .iter()
+            .map(|s| &s.session)
+            .collect::<Vec<_>>(),
+        vec![&kept]
+    );
+    assert_eq!(prompt(&client, &kept, "works").await, Response::Done);
+}
+
+#[tokio::test]
+async fn removing_a_server_resolves_pending_permission() {
+    let daemon = TestDaemon::managed();
+    daemon.launch("/fake/alpha", &SavedHistory::default());
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let id = add_server(&client, "Alpha", "/fake/alpha").await;
+    ready_server(&daemon, &id).await;
+    let session = create_session_on(&client, &id, "home").await;
+    let mut watcher = watch(&daemon).await;
+    assert_eq!(prompt(&client, &session, "tool").await, Response::Done);
+    assert_eq!(watcher.next_change(&session).await.status, Status::Working);
+    let request_id = requests(watcher.next_change(&session).await)[0].request_id;
+    assert_eq!(remove_server(&client, &id).await, Response::Done);
+    assert_eq!(
+        answer(&client, &session, request_id, "go").await,
+        Response::Error {
+            message: format!("no session {session}")
+        }
+    );
+    assert!(watch(&daemon).await.sessions.is_empty());
+}
+
+#[tokio::test]
+async fn removing_a_server_answers_waiting_and_in_flight_deletes() {
+    for in_flight in [false, true] {
+        let daemon = TestDaemon::managed();
+        let history = SavedHistory::default();
+        let pending = history.hold_delete();
+        if in_flight {
+            pending.pause();
+        }
+        daemon.launch("/fake/alpha", &history);
+        let client = daemon.connect().await;
+        assert_eq!(add_workspace(&client, "home").await, Response::Done);
+        let id = add_server(&client, "Alpha", "/fake/alpha").await;
+        ready_server(&daemon, &id).await;
+        let session = create_session_on(&client, &id, "home").await;
+        let mut watcher = watch(&daemon).await;
+        if !in_flight {
+            assert_eq!(prompt(&client, &session, "hold").await, Response::Done);
+            assert_eq!(watcher.next_change(&session).await.status, Status::Working);
+        }
+        let mut deleting = Box::pin(delete(&client, &session));
+        assert!(futures::poll!(&mut deleting).is_pending());
+        if in_flight {
+            timeout(WAIT, pending.wait_started()).await.unwrap();
+        }
+        assert_eq!(remove_server(&client, &id).await, Response::Done);
+        assert!(
+            matches!(
+                timeout(WAIT, deleting).await.unwrap(),
+                Response::Error { .. }
+            ),
+            "in_flight={in_flight}"
+        );
+        assert!(watch(&daemon).await.sessions.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn launch_edit_reloads_from_the_new_connection() {
+    let daemon = TestDaemon::managed();
+    let history = SavedHistory::default();
+    daemon.launch("/fake/old", &history);
+    daemon.launch("/fake/new", &history);
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let id = add_server(&client, "Alpha", "/fake/old").await;
+    ready_server(&daemon, &id).await;
+    let session = create_session_on(&client, &id, "home").await;
+    let mut watcher = watch(&daemon).await;
+    assert_eq!(prompt(&client, &session, "before").await, Response::Done);
+    assert_eq!(
+        watcher.next_turn_end(&session).await,
+        idle(StopReason::EndTurn)
+    );
+    let subscriber_client = daemon.connect().await;
+    let mut subscriber = subscribe(&subscriber_client, &session).await;
+    assert_eq!(
+        update_server(&client, &id, "Alpha", "/fake/new").await,
+        Response::Done
+    );
+    ready_server(&daemon, &id).await;
+    let replay = subscriber.next_snapshot().await.to_vec();
+    assert!(replay.contains(&user_message("before")), "{replay:?}");
+    assert_eq!(prompt(&client, &session, "after").await, Response::Done);
+    assert_eq!(
+        watcher.next_turn_end(&session).await,
+        idle(StopReason::EndTurn)
+    );
+    let transcript = transcript(&daemon, &session).await;
+    assert!(transcript.contains(&user_message("before")));
+    assert!(transcript.contains(&user_prompt("after")));
+}
+
+#[tokio::test]
+async fn launch_edit_settles_a_load_and_ignores_the_retired_result() {
+    let daemon = TestDaemon::managed();
+    let history = SavedHistory::default();
+    let stalled = history.with_new_holds();
+    let pending = stalled.hold_load();
+    pending.pause();
+    daemon.launch("/fake/old", &history);
+    daemon.launch("/fake/stalled", &stalled);
+    daemon.launch("/fake/new", &history.with_new_holds());
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let id = add_server(&client, "Alpha", "/fake/old").await;
+    ready_server(&daemon, &id).await;
+    let session = create_session_on(&client, &id, "home").await;
+    let subscriber_client = daemon.connect().await;
+    let mut subscriber = subscribe(&subscriber_client, &session).await;
+
+    assert_eq!(
+        update_server(&client, &id, "Alpha", "/fake/stalled").await,
+        Response::Done
+    );
+    timeout(WAIT, pending.wait_started()).await.unwrap();
+    let waiting_client = daemon.connect().await;
+    let mut waiting = Box::pin(waiting_client.request(Request::Subscribe {
+        session: session.clone(),
+    }));
+    assert!(futures::poll!(&mut waiting).is_pending());
+    assert_eq!(
+        update_server(&client, &id, "Alpha", "/fake/new").await,
+        Response::Done
+    );
+
+    assert_eq!(
+        timeout(WAIT, waiting).await.unwrap().unwrap(),
+        Response::Done
+    );
+    ready_server(&daemon, &id).await;
+    let fresh = subscriber.next_snapshot().await.to_vec();
+    let mut watcher = watch(&daemon).await;
+    assert_eq!(
+        prompt(&client, &session, "new connection").await,
+        Response::Done
+    );
+    assert_eq!(
+        watcher.next_turn_end(&session).await,
+        idle(StopReason::EndTurn)
+    );
+    let current = transcript(&daemon, &session).await;
+    assert!(current.contains(&user_prompt("new connection")));
+    assert!(current.starts_with(&fresh));
+    assert_eq!(remove_server(&client, &id).await, Response::Done);
+    pending.release();
+    tokio::task::yield_now().await;
+    assert!(watch(&daemon).await.sessions.is_empty());
+}
+
+#[tokio::test]
+async fn failed_config_writes_leave_servers_and_sessions_intact() {
+    for action in ["add", "update", "remove"] {
+        let daemon = TestDaemon::managed();
+        let history = SavedHistory::default();
+        daemon.launch("/fake/alpha", &history);
+        let client = daemon.connect().await;
+        assert_eq!(add_workspace(&client, "home").await, Response::Done);
+        let id = add_server(&client, "Alpha", "/fake/alpha").await;
+        ready_server(&daemon, &id).await;
+        let session = create_session_on(&client, &id, "home").await;
+        let config_file = daemon.config_file.as_ref().unwrap();
+        std::fs::remove_file(config_file).unwrap();
+        std::fs::create_dir(config_file).unwrap();
+        let response = match action {
+            "add" => client
+                .request(Request::AddServer {
+                    name: "Beta".into(),
+                    command: "/fake/beta".into(),
+                    args: Vec::new(),
+                })
+                .await
+                .unwrap(),
+            "update" => update_server(&client, &id, "Changed", "/fake/new").await,
+            "remove" => remove_server(&client, &id).await,
+            _ => unreachable!(),
+        };
+        assert!(
+            matches!(response, Response::Error { .. }),
+            "{action}: {response:?}"
+        );
+        {
+            let control = daemon.control.as_ref().unwrap();
+            let configuration = control.configuration.lock().unwrap();
+            assert_eq!(configuration.servers.len(), 1, "{action}");
+            assert_eq!(configuration.servers[0].name, "Alpha", "{action}");
+        }
+        assert_eq!(watch(&daemon).await.sessions.len(), 1, "{action}");
+        assert_eq!(
+            prompt(&client, &session, "still connected").await,
+            Response::Done,
+            "{action}"
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn several_servers_initialize_independently_before_serving() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("ur.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let state = Arc::new(Mutex::new(super::state::State::new(Vec::new())));
+    let control = Arc::new(super::ServerControl {
+        state: state.clone(),
+        tasks: Mutex::new(Default::default()),
+        configuration: Mutex::new(super::Config {
+            servers: Vec::new(),
+        }),
+        config_file: dir.path().join("config.json"),
+        launches: Mutex::new(Default::default()),
+    });
+    let silent_agents = Arc::new(Mutex::new(Vec::new()));
+    control
+        .launches
+        .lock()
+        .unwrap()
+        .insert("/fake/stalled".into(), {
+            let silent_agents = silent_agents.clone();
+            Arc::new(move || {
+                let (client, agent) = Channel::duplex();
+                silent_agents.lock().unwrap().push(agent);
+                client
+            })
+        });
+    let history = SavedHistory::default();
+    control.launches.lock().unwrap().insert(
+        "/fake/healthy".into(),
+        Arc::new(move || {
+            let (client, agent) = Channel::duplex();
+            tokio::spawn(fake_server(Hold::default(), history.clone()).connect_to(agent));
+            client
+        }),
+    );
+    let stalled = control.start(super::ServerConfig {
+        id: "stalled".into(),
+        name: "Stalled".into(),
+        command: "/fake/stalled".into(),
+        args: Vec::new(),
+    });
+    let healthy = control.start(super::ServerConfig {
+        id: "healthy".into(),
+        name: "Healthy".into(),
+        command: "/fake/healthy".into(),
+        args: Vec::new(),
+    });
+    let state_file = dir.path().join("state.json");
+    let serving_state = state.clone();
+    tokio::spawn(async move {
+        tokio::join!(stalled.notified(), healthy.notified());
+        let terminals = Arc::new(super::terminal::Terminals::new(serving_state.clone()));
+        super::server::serve(
+            listener,
+            terminals,
+            serving_state,
+            state_file,
+            Some(control),
+        )
+        .await
+        .unwrap();
+    });
+    tokio::task::yield_now().await;
+    assert!(state.lock().unwrap().server("healthy").is_ok());
+    assert!(tokio::net::UnixStream::connect(&socket).await.is_ok());
+    tokio::time::advance(Duration::from_secs(30)).await;
+    tokio::task::yield_now().await;
+    let client = timeout(WAIT, Client::connect(&socket))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        client.request(Request::Watch).await.unwrap(),
+        Response::Done
+    );
 }

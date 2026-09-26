@@ -31,20 +31,21 @@ Map each file here as it is added, following the project layout in `docs/agents/
   `ClientMessage`, `DaemonMessage`, `socket_path()`, and `state_dir()`.
 - `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the core, with `request()`,
   `events()`, `pty()`, and `pty_input()`.
-- `crates/ur-fake-server/` — the fake server: `lib.rs` exports `fake_server()`, `Hold`, and
-  `SavedHistory`, and `main.rs` serves it over stdin and stdout, keeping its saved history in the
-  file its argument names, if any. Tests can select image and delete capabilities. It gives every
-  session the `pace` config option and answers `session/set_config_option` and `session/delete`. The
-  `options` script sends several config options, with a model that accepts images, to check the
-  editor layout.
+- `crates/ur-fake-server/` — the fake server: `lib.rs` exports `fake_server()`, `Hold`, `Pending`,
+  and `SavedHistory`, and `main.rs` serves it over stdin and stdout, keeping its saved history in
+  the file its argument names, if any. Tests can select image and delete capabilities. It gives
+  every session the `pace` config option and answers `session/set_config_option` and
+  `session/delete`. The `options` script sends several config options, with a model that accepts
+  images, to check the editor layout. `SavedHistory` supplies separate holds for load and delete
+  requests in daemon tests.
 - `crates/ur/src/main.rs` — the `ur` command line: `daemon` and the development tool `agent-run`.
 - `crates/ur/src/config.rs` — ordered named servers with stable IDs, configuration validation,
-  one-shot selection, and atomic JSON saving.
+  one-shot selection, and atomic JSON saving to a selected path.
 - `crates/ur/src/one_shot.rs` — `ur agent-run`, the one-shot client, and its tests against a test
   agent.
 - `crates/ur/src/daemon/mod.rs` — `start()`: binds the socket, reads the state and config, starts
-  every server concurrently, and serves; `ServerControl` saves server changes and manages their
-  supervisors.
+  every server concurrently, and serves; `ServerControl` saves server changes to its config path and
+  manages their supervisors, with in-process launches in tests.
 - `crates/ur/src/daemon/state.rs` — `State`: per-server ACP connections, capabilities, and
   generations, shared workspaces, watchers, terminal summaries, and server-owned sessions with their
   transcripts, session titles, config options, operation guards and the loads and deletes they hold,
@@ -63,8 +64,8 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `crates/ur/src/daemon/terminal.rs` — `Terminals`: login shells through `portable-pty`, started in
   their workspace path, their `vt100::Parser` with `Title`, which records terminal title changes,
   terminal attachment and detaching, closing, the screen snapshot, and the reports to `State`.
-- `crates/ur/src/daemon/tests.rs` — the daemon's session tests, run in process against the fake
-  server.
+- `crates/ur/src/daemon/tests.rs` — the daemon's session and server-change tests, run in process
+  against separate fake server launches and saved histories.
 - `crates/ur/tests/terminal.rs` — integration tests that run `ur daemon`.
 - `app/src-tauri/Cargo.toml` — the `webdriver` feature, which embeds `tauri-plugin-wdio-webdriver`'s
   WebDriver server for the end-to-end suite and keeps the app in the background on macOS. Release

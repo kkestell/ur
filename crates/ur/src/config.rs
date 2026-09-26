@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::io::ErrorKind;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, anyhow};
 use serde::{Deserialize, Serialize};
@@ -81,12 +81,11 @@ impl Config {
         Ok(Some(config))
     }
 
-    pub fn write(&self) -> anyhow::Result<()> {
-        let path = path()?;
+    pub fn write_to(&self, path: &Path) -> anyhow::Result<()> {
         std::fs::create_dir_all(path.parent().expect("config file has a parent"))?;
         let temporary = path.with_extension("json.tmp");
         std::fs::write(&temporary, serde_json::to_vec_pretty(self)?)?;
-        std::fs::rename(&temporary, &path).with_context(|| format!("saving {}", path.display()))?;
+        std::fs::rename(&temporary, path).with_context(|| format!("saving {}", path.display()))?;
         Ok(())
     }
 }
