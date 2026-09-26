@@ -21,7 +21,8 @@ model names, modes, permission labels, and session or tool IDs have no special m
 
 - One configured server per daemon. Its executable and argument list live in the `server` object of
   `$XDG_CONFIG_HOME/ur/config.json` (under `~/.config` when unset). The one-shot client and daemon
-  use this same configuration. Development uses:
+  use this same configuration. The GUI saves it through `set_server`, reconnecting the ACP server
+  without restarting the daemon. Development uses:
 
   ```json
   {"server": {"command": "ox", "args": []}}
@@ -192,6 +193,7 @@ unchanged. The GUI groups them for display as described below. JSON client reque
 
 ```text
 watch
+set_server(command, args)
 add_workspace | remove_workspace
 new_session(workspace) | delete_session(session)
 subscribe(session) | focus(sessions)
@@ -207,22 +209,24 @@ the daemon removed the terminal. Each socket connection gets it once, after all 
 output.
 
 There are three levels of events. `watch` covers the sidebar: workspaces, their sessions and
-terminals, each session's title, status, and unread flag, each terminal's title, and the server's
-capabilities. Pending permission requests travel in the session status, so every watching client
-receives them. After the watch snapshot, the daemon sends `capabilities_changed` after each
-successful `initialize`, `workspace_added`, `workspace_removed` (which also removes the workspace's
-sessions and terminals), `session_changed` with the session's whole summary when a session is added
-or its status or unread flag changes, `session_deleted` when a session is deleted,
-`terminal_changed` with the terminal's whole summary when a terminal is opened or its terminal title
-changes, and `terminal_exited`. `subscribe` covers one session's content: its transcript and config
-options. After the session snapshot, the daemon sends each transcript entry and
-`config_options_changed` when the config options change outside a load. A subscribed session removed
-with its workspace, or deleted, gets `session_removed`. `attach_terminal` covers one terminal's
-initial screen restoration and live output, using the terminal attachment format established in
-milestone 0. For `watch` and `subscribe`, under one lock the daemon queues a snapshot and registers
-the client for live events. Socket writes happen outside the lock. Each connection gets the snapshot
-followed by live changes in order. A client that cannot keep up is dropped. Transcript replacement
-after a load sends a fresh session snapshot, which clients use to replace their local state.
+terminals, each session's title, status, and unread flag, each terminal's title, and server state
+and capabilities. Server state includes the executable, arguments, connection status, and latest
+error. Pending permission requests travel in the session status, so every watching client receives
+them. After the watch snapshot, the daemon sends `server_state_changed` whenever server state
+changes and `capabilities_changed` after each successful `initialize`, `workspace_added`,
+`workspace_removed` (which also removes the workspace's sessions and terminals), `session_changed`
+with the session's whole summary when a session is added or its status or unread flag changes,
+`session_deleted` when a session is deleted, `terminal_changed` with the terminal's whole summary
+when a terminal is opened or its terminal title changes, and `terminal_exited`. `subscribe` covers
+one session's content: its transcript and config options. After the session snapshot, the daemon
+sends each transcript entry and `config_options_changed` when the config options change outside a
+load. A subscribed session removed with its workspace, or deleted, gets `session_removed`.
+`attach_terminal` covers one terminal's initial screen restoration and live output, using the
+terminal attachment format described under Terminals in the daemon. For `watch` and `subscribe`,
+under one lock the daemon queues a snapshot and registers the client for live events. Socket writes
+happen outside the lock. Each connection gets the snapshot followed by live changes in order. A
+client that cannot keep up is dropped. Transcript replacement after a load sends a fresh session
+snapshot, which clients use to replace their local state.
 
 ### Project layout
 
@@ -236,7 +240,8 @@ One Cargo workspace:
   daemon launches its binary from the config file.
 - `app/`: the Tauri 2 app. `app/src` is the frontend, React and TypeScript built with Vite.
   `app/src-tauri` is the app's Rust core, a workspace member that depends on `ur-client`.
-  `pnpm tauri dev` runs it against a daemon that is already running.
+  `pnpm tauri dev` builds a debug sidecar and can connect to an existing daemon. The unsigned macOS
+  bundle and DMG include a release sidecar built for the same target as the app.
 
 ```text
 crates/ur/src/
@@ -348,7 +353,10 @@ writes no protocol types by hand.
 ### GUI architecture
 
 The GUI is a single-window Tauri app. Its Rust core is the socket client: it connects to the daemon,
-retries until the daemon is up, and is the only part of the app that speaks the wire protocol. The
+starts the bundled `ur daemon` sidecar if none is listening, retries until the daemon is up, and is
+the only part of the app that speaks the wire protocol. Closing the window leaves the daemon and
+terminals running. The server setup screen saves an absolute executable path and separate arguments
+through the daemon; it shows ACP connection failures so the user can correct the selection. The
 webview never touches the socket.
 
 - One Tauri command, `request`, takes a wire-protocol `Request` and returns the daemon's `Response`.

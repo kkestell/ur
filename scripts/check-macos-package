@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+app="${1:?usage: scripts/check-macos-package path/to/ur.app path/to/ur.dmg}"
+dmg="${2:?usage: scripts/check-macos-package path/to/ur.app path/to/ur.dmg}"
+test -d "$app/Contents"
+test -x "$app/Contents/MacOS/ur-app"
+sidecar="$(find "$app/Contents" -type f -name ur -perm -111 -print -quit)"
+test -n "$sidecar" || { echo "the app bundle has no executable ur sidecar" >&2; exit 1; }
+test -f "$dmg"
+hdiutil verify "$dmg"
+echo "macOS package contains ur-app and its daemon sidecar; DMG verified"

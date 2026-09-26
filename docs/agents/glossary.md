@@ -62,7 +62,9 @@
   reply. Its saved history is a `SavedHistory`, which the daemon's tests share between fake servers.
 - **Daemon**: The long-running `ur daemon` process. It owns the ACP connection, session statuses,
   in-memory transcripts, pending permission requests, and terminals, and serves daemon clients on
-  the socket.
+  the socket. The GUI starts its bundled daemon sidecar when no daemon is listening.
+- **Server state**: The configured ACP server executable and arguments, whether its connection is
+  ready, and its latest connection error. Watch sends it in the snapshot and on each change.
 - **One-shot client**: `ur agent-run`, which launches the server and speaks ACP directly for one
   prompt without a daemon.
 - **Daemon client**: The GUI or a test client connected to the daemon socket. Every daemon client
@@ -225,7 +227,7 @@
 - **Event**: A JSON message the daemon pushes to a daemon client. Events carry ACP schema types
   unchanged.
 - **Watch**: The request that registers a daemon client for sidebar events: workspaces, their
-  session summaries and terminal summaries, and the server's capabilities. Pending permission
+  session summaries and terminal summaries, server state, and capabilities. Pending permission
   requests arrive in the session status.
 - **Session summary**: One session as watch shows it: its session ID, workspace, session status,
   unread flag, session title, and last activity. It is `SessionSummary` in code.

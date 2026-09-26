@@ -5,9 +5,16 @@ THIS DOCUMENT MUST BE KEPT UP TO DATE
 Map each file here as it is added, following the project layout in `docs/agents/architecture.md`.
 
 - `README.md` — the project description and keyboard shortcut table.
-- `Makefile` — `make check` runs every validation check; `make format` formats the Rust code and the
-  Markdown files; `make e2e` runs the end-to-end suite; `make run` starts the daemon and the GUI for
-  poking around.
+- `Makefile` — `make check` prepares the debug sidecar and runs every validation check;
+  `make format` formats the Rust code and the Markdown files; `make e2e` runs the end-to-end suite;
+  `make run` starts the daemon and the GUI for poking around.
+- `scripts/build-sidecar` — builds the `ur` daemon for Tauri's target and copies it to the sidecar
+  path for development, tests, and unsigned macOS packages.
+- `scripts/build-macos` — builds the unsigned macOS app and DMG, then checks the package.
+- `.github/workflows/release-macos.yml` — checks and builds the unsigned Apple Silicon DMG on a
+  GitHub macOS runner, then publishes that runner-built artifact for a version tag.
+- `scripts/check-macos-package` — checks that an unsigned macOS app and DMG contain the app and
+  daemon sidecar and that the DMG is readable.
 - `scripts/run` — `make run`: writes the development config file when it is missing, builds and
   starts the daemon on the default socket, runs `pnpm tauri dev`, and stops the daemon when the GUI
   exits.
@@ -16,12 +23,12 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `.cargo/config.toml` — sets `TS_RS_EXPORT_DIR` so `cargo test` writes the TypeScript bindings to
   `app/src/ipc/bindings/`.
 - `crates/ur-client/src/frame.rs` — `Frame` and `FrameCodec`, the wire protocol framing.
-- `crates/ur-client/src/protocol.rs` — `TerminalId`, `Request` (with `open_terminal(workspace)`,
-  `detach_terminal`, `close_terminal`, `delete_session`, and `set_config_option`), `Response`,
-  `Event` (with `capabilities_changed`, `session_deleted`, `terminal_changed`, and
-  `config_options_changed`), `Workspace`, `SessionSummary`, `TerminalSummary`, `Status`,
-  `PendingPermission`, `Entry`, `ClientMessage`, `DaemonMessage`, `socket_path()`, and
-  `state_dir()`.
+- `crates/ur-client/src/protocol.rs` — `TerminalId`, `Request` (with `set_server`,
+  `open_terminal(workspace)`, `detach_terminal`, `close_terminal`, `delete_session`, and
+  `set_config_option`), `Response`, `Event` (with `capabilities_changed`, `session_deleted`,
+  `terminal_changed`, and `config_options_changed`), `Workspace`, `SessionSummary`,
+  `TerminalSummary`, `Status`, `PendingPermission`, `ServerState`, `Entry`, `ClientMessage`,
+  `DaemonMessage`, `socket_path()`, and `state_dir()`.
 - `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the core, with `request()`,
   `events()`, `pty()`, and `pty_input()`.
 - `crates/ur-fake-server/` — the fake server: `lib.rs` exports `fake_server()`, `Hold`, and
@@ -31,11 +38,12 @@ Map each file here as it is added, following the project layout in `docs/agents/
   `session/set_config_option` and `session/delete`. The `options` script sends several config
   options, with a model that accepts images, to check the editor layout.
 - `crates/ur/src/main.rs` — the `ur` command line: `daemon` and the development tool `agent-run`.
-- `crates/ur/src/config.rs` — `Config` and `ServerConfig`, the JSON config file.
+- `crates/ur/src/config.rs` — `Config` and `ServerConfig`, reading and atomically saving the JSON
+  config file.
 - `crates/ur/src/one_shot.rs` — `ur agent-run`, the one-shot client, and its tests against a test
   agent.
-- `crates/ur/src/daemon/mod.rs` — `start()`: binds the socket, removing a stale one, and reads the
-  config file; `run()`: reads the state file, starts the supervisor, then serves.
+- `crates/ur/src/daemon/mod.rs` — `start()`: binds the socket, reads the state and config, and
+  serves; `ServerControl` saves server choices and replaces the ACP supervisor.
 - `crates/ur/src/daemon/state.rs` — `State`: the ACP connection with its capabilities and
   generation, workspaces, watchers, terminal summaries, and sessions, saved or loaded, with their
   transcripts, session titles, config options, operation guards and the loads and deletes they hold,
@@ -113,6 +121,8 @@ Map each file here as it is added, following the project layout in `docs/agents/
   and the sidebar's default, minimum, and maximum widths.
 - `app/src/components/StatusMark.tsx` — `StatusMark`, a session's status mark, shared by the sidebar
   and the tabs.
+- `app/src/components/ServerSetup.tsx` — the ACP executable picker, separate argument inputs,
+  connection errors, and server settings controls.
 - `app/src/components/Layout.tsx` — `Layout`: `DockviewReact` with `SessionPanel` (the thread, the
   editor, and the permission shortcuts for the selection), `TerminalPanel`, `PaneActions` (the
   pane's `+`), and the watermark with the empty states; tab moves with pointer events, and divider
@@ -163,6 +173,8 @@ Map each file here as it is added, following the project layout in `docs/agents/
   tests, excluding ad-hoc files in `artifacts/`.
 - `app/e2e/terminal.test.ts` — the end-to-end tests for terminals.
 - `app/e2e/session.test.ts` — the end-to-end tests for agent sessions against the fake server.
+- `app/e2e/server-setup.test.ts` — starts the app without a daemon or config, corrects a bad server
+  choice, then checks reconnection after closing and reopening the app.
 - `app/e2e/attention.test.ts` — the end-to-end tests for session status, unread sessions, and
   permission requests.
 - `app/e2e/editor.test.ts` — the end-to-end tests for the editor: its height, slash commands, config

@@ -36,8 +36,8 @@ flow once a downloadable build exists.
 - Keep the server generic: the app does not ship Ox or interpret Ox's config file. The selected
   server must be installed separately. Use the existing workspace and session controls after the
   server is connected.
-- Produce a signed and notarized DMG for download from GitHub Releases. A local unsigned bundle is
-  useful for development, but the installation guide waits for a verified release artifact. Tauri
+- Produce an unsigned DMG that can be built and distributed without an Apple developer account.
+  Document macOS's manual first-open step and do not require signing or notarization. Tauri
   documents both [sidecar bundling](https://v2.tauri.app/develop/sidecar/) and
   [DMG distribution](https://v2.tauri.app/distribute/dmg/).
 
@@ -55,9 +55,8 @@ flow once a downloadable build exists.
   session without restarting the app. An invalid executable shows the failure and can be corrected.
 - With a running terminal, close and reopen the app. The same daemon, terminal, and screen remain.
   Opening a second app window does not start another daemon.
-- Build a macOS app bundle and DMG. Install the bundle outside the repository and repeat the first
-  launch and reopen checks. Verify the sidecar is inside the bundle and the release artifact passes
-  macOS signature and notarization checks.
+- Build a macOS app bundle and unsigned DMG. Install the bundle outside the repository and repeat
+  the first launch and reopen checks. Verify the sidecar is inside the bundle.
 
 ## Implementation plan
 
@@ -74,8 +73,9 @@ flow once a downloadable build exists.
    Show server state in the GUI and use the native file picker for the executable.
 5. Extend `app/e2e/harness.ts` and the GUI tests to cover app-managed daemon startup, server setup,
    and persistence after the window closes. Add a macOS package smoke check in `scripts/`.
-6. Build, sign, notarize, and publish the first DMG. Then add the download, installation, and
-   first-use steps to the README.
+6. Add a GitHub Actions release workflow that builds and checks the unsigned DMG on a macOS runner
+   and publishes that runner-built artifact for a version tag. Then add the download, installation,
+   manual first-open, and first-use steps to the README.
 
 ## Documentation updates
 

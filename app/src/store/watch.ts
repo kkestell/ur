@@ -2,6 +2,7 @@ import type { AgentCapabilities } from "@agentclientprotocol/sdk";
 import { useSyncExternalStore } from "react";
 import { type Connection, type WatchEvent, onConnection, onWatch } from "../ipc";
 import type { SessionSummary } from "../ipc/bindings/SessionSummary";
+import type { ServerState } from "../ipc/bindings/ServerState";
 import type { TerminalSummary } from "../ipc/bindings/TerminalSummary";
 import type { Workspace } from "../ipc/bindings/Workspace";
 
@@ -16,6 +17,8 @@ export type WatchState = {
   terminals: TerminalSummary[];
   /** The current ACP connection's capabilities, or `null` without one. */
   capabilities: AgentCapabilities | null;
+  serverState: ServerState;
+  connectionError: string | null;
 };
 
 export type ConnectionEvent = { type: "connection" } & Connection;
@@ -28,6 +31,8 @@ export const initialWatch: WatchState = {
   sessions: [],
   terminals: [],
   capabilities: null,
+  serverState: { command: null, args: [], connected: false, error: null },
+  connectionError: null,
 };
 
 /**
@@ -47,6 +52,8 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
         sessions: event.connected ? state.sessions : [],
         terminals: event.connected ? state.terminals : [],
         capabilities: event.connected ? state.capabilities : null,
+        serverState: event.connected ? state.serverState : initialWatch.serverState,
+        connectionError: event.error,
       };
     case "watch_snapshot":
       return {
@@ -56,9 +63,16 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
         sessions: event.sessions,
         terminals: event.terminals,
         capabilities: event.capabilities,
+        serverState: event.server_state,
       };
     case "capabilities_changed":
       return { ...state, capabilities: event.capabilities };
+    case "server_state_changed":
+      return {
+        ...state,
+        serverState: event.server_state,
+        capabilities: event.server_state.connected ? state.capabilities : null,
+      };
     case "workspace_added":
       return { ...state, workspaces: [...state.workspaces, event.workspace] };
     case "workspace_removed":

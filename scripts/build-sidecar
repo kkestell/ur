@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+
+profile="${UR_SIDECAR_PROFILE:-${1:-release}}"
+target="${TAURI_ENV_TARGET_TRIPLE:-$(rustc --print host-tuple)}"
+case "$profile" in
+  debug) cargo build -p ur --target "$target" ;;
+  release) cargo build -p ur --release --target "$target" ;;
+  *) echo "unknown sidecar profile: $profile" >&2; exit 1 ;;
+esac
+
+target_dir="${CARGO_TARGET_DIR:-target}"
+mkdir -p app/src-tauri/binaries
+cp "$target_dir/$target/$profile/ur" "app/src-tauri/binaries/ur-$target"
+if [ "$profile" = debug ] && [ "$target" = "$(rustc --print host-tuple)" ]; then
+  mkdir -p "$target_dir/debug"
+  cp "$target_dir/$target/debug/ur" "$target_dir/debug/ur"
+fi

@@ -38,6 +38,8 @@ pub enum Request {
     /// and terminals. Watching again from the same socket connection replaces
     /// the earlier registration.
     Watch,
+    /// Saves the ACP server executable and arguments, then connects to it.
+    SetServer { command: String, args: Vec<String> },
     /// Adds a workspace. `path` must be an absolute path to a directory, and is
     /// stored as is.
     AddWorkspace { name: String, path: PathBuf },
@@ -140,6 +142,11 @@ pub enum Event {
         /// The current ACP connection's capabilities, or `None` without one.
         #[ts(type = "import(\"@agentclientprotocol/sdk\").AgentCapabilities | null")]
         capabilities: Option<Box<AgentCapabilities>>,
+        server_state: ServerState,
+    },
+    /// The configured ACP server or its latest connection failure changed.
+    ServerStateChanged {
+        server_state: ServerState,
     },
     /// A successful `initialize` started a new ACP connection with these
     /// capabilities.
@@ -196,6 +203,16 @@ pub enum Event {
         #[ts(type = "string")]
         session: SessionId,
     },
+}
+
+/// The selected ACP server and the status of its connection.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ServerState {
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub connected: bool,
+    pub error: Option<String>,
 }
 
 /// A workspace, as the wire protocol and the state file hold it.

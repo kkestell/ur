@@ -9,7 +9,7 @@
     "test": "vitest run",
     "preview": "vite preview",
     "tauri": "tauri",
-    "e2e": "export CARGO_TARGET_DIR=\"$(cd .. && pwd)/target/e2e\" && cargo build -p ur -p ur-fake-server && tauri build --debug --no-bundle --features webdriver && tsc -p e2e && node --test --test-concurrency=1 \"e2e/*.test.ts\""
+    "e2e": "export CARGO_TARGET_DIR=\"$(cd .. && pwd)/target/e2e\" UR_SIDECAR_PROFILE=debug && cargo build -p ur -p ur-fake-server && tauri build --debug --no-bundle --features webdriver && tsc -p e2e && node --test --test-concurrency=1 \"e2e/*.test.ts\""
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

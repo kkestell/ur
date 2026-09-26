@@ -8,6 +8,7 @@ use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
 use ur_client::{ClientMessage, DaemonMessage, Frame, FrameCodec, Request, Response, Workspace};
 
+use super::ServerControl;
 use super::ops;
 use super::state::State;
 use super::terminal::Terminals;
@@ -19,6 +20,7 @@ pub async fn serve(
     terminals: Arc<Terminals>,
     state: Arc<Mutex<State>>,
     state_file: PathBuf,
+    control: Option<Arc<ServerControl>>,
 ) -> anyhow::Result<()> {
     loop {
         let (stream, _) = listener.accept().await?;
@@ -27,6 +29,7 @@ pub async fn serve(
             terminals.clone(),
             state.clone(),
             state_file.clone(),
+            control.clone(),
         ));
     }
 }
@@ -63,6 +66,7 @@ async fn connection(
     terminals: Arc<Terminals>,
     state: Arc<Mutex<State>>,
     state_file: PathBuf,
+    control: Option<Arc<ServerControl>>,
 ) {
     let (mut sink, mut stream) = Framed::new(stream, FrameCodec).split();
     let (sender, mut receiver) = mpsc::channel(OUTBOX_CAPACITY);
@@ -84,9 +88,15 @@ async fn connection(
             match frame {
                 Frame::Json(json) => match serde_json::from_slice::<ClientMessage>(&json) {
                     Ok(ClientMessage { id, request }) => {
-                        if let Some(response) =
-                            handle(id, request, &terminals, &state, &state_file, &outbox)
-                        {
+                        if let Some(response) = handle(
+                            id,
+                            request,
+                            &terminals,
+                            &state,
+                            &state_file,
+                            control.as_deref(),
+                            &outbox,
+                        ) {
                             outbox.send(Frame::json(&DaemonMessage::Response { id, response }));
                         }
                     }
@@ -125,6 +135,7 @@ fn handle(
     terminals: &Arc<Terminals>,
     state: &Arc<Mutex<State>>,
     state_file: &Path,
+    control: Option<&ServerControl>,
     outbox: &Outbox,
 ) -> Option<Response> {
     let result = match request {
@@ -153,6 +164,10 @@ fn handle(
             state.lock().unwrap().watch(outbox.clone());
             Ok(Response::Done)
         }
+        Request::SetServer { command, args } => control
+            .ok_or_else(|| anyhow::anyhow!("server setup is unavailable"))
+            .and_then(|control| control.configure(command, args))
+            .map(|()| Response::Done),
         Request::AddWorkspace { name, path } => {
             ops::add_workspace(state, state_file, Workspace { name, path }).map(|()| Response::Done)
         }

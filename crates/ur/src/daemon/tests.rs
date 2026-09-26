@@ -264,6 +264,7 @@ async fn watch(daemon: &TestDaemon) -> Watch {
             sessions,
             capabilities,
             terminals: _,
+            server_state: _,
         }) => Watch {
             workspaces,
             sessions,

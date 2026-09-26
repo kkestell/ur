@@ -10,8 +10,8 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::{Agent, ConnectionTo, Responder};
 use anyhow::{anyhow, bail};
 use ur_client::{
-    DaemonMessage, Entry, Event, Frame, PendingPermission, Response, SessionSummary, Status,
-    TerminalId, TerminalSummary, Workspace,
+    DaemonMessage, Entry, Event, Frame, PendingPermission, Response, ServerState, SessionSummary,
+    Status, TerminalId, TerminalSummary, Workspace,
 };
 
 use super::server::Outbox;
@@ -23,6 +23,7 @@ use super::server::Outbox;
 pub struct State {
     /// The ACP connection, or why there is none.
     server: Result<Server, String>,
+    server_state: ServerState,
     /// The generation of the current or last ACP connection. Prompt and load
     /// results from an earlier one are ignored.
     generation: u64,
@@ -107,6 +108,12 @@ impl State {
     pub fn new(workspaces: Vec<Workspace>) -> State {
         State {
             server: Err("the server has not started".to_string()),
+            server_state: ServerState {
+                command: None,
+                args: Vec::new(),
+                connected: false,
+                error: None,
+            },
             generation: 0,
             workspaces,
             sessions: Vec::new(),
@@ -128,7 +135,28 @@ impl State {
                 },
             );
         }
+        self.server_state.connected = server.is_ok();
+        self.server_state.error = server.as_ref().err().cloned();
         self.server = server;
+        broadcast(
+            &mut self.watchers,
+            Event::ServerStateChanged {
+                server_state: self.server_state.clone(),
+            },
+        );
+    }
+
+    pub fn configure_server(&mut self, command: String, args: Vec<String>) {
+        self.server_state.command = Some(command);
+        self.server_state.args = args;
+        self.server_state.connected = false;
+        self.server_state.error = None;
+        broadcast(
+            &mut self.watchers,
+            Event::ServerStateChanged {
+                server_state: self.server_state.clone(),
+            },
+        );
     }
 
     pub fn server(&self) -> anyhow::Result<&Server> {
@@ -176,7 +204,7 @@ impl State {
                 publish(&mut self.watchers, session);
             }
         }
-        self.server = Err(reason);
+        self.set_server(Err(reason));
     }
 
     /// Queues the watch snapshot and registers the outbox for later changes.
@@ -192,6 +220,7 @@ impl State {
                 .as_ref()
                 .ok()
                 .map(|server| Box::new(server.capabilities.clone())),
+            server_state: self.server_state.clone(),
         }));
         self.watchers
             .retain(|other| !other.same_connection(&outbox));

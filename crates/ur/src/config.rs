@@ -1,18 +1,18 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, anyhow};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// The config file, `$XDG_CONFIG_HOME/ur/config.json`, else
 /// `~/.config/ur/config.json`.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub server: ServerConfig,
 }
 
 /// The server the daemon and the one-shot client launch.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     pub command: String,
@@ -26,6 +26,15 @@ impl Config {
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
         serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+    }
+
+    pub fn write(&self) -> anyhow::Result<()> {
+        let path = path()?;
+        std::fs::create_dir_all(path.parent().expect("config file has a parent"))?;
+        let temporary = path.with_extension("json.tmp");
+        std::fs::write(&temporary, serde_json::to_vec_pretty(self)?)?;
+        std::fs::rename(&temporary, &path).with_context(|| format!("saving {}", path.display()))?;
+        Ok(())
     }
 }
 

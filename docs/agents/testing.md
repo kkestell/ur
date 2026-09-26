@@ -6,8 +6,8 @@ build. `pnpm -C app test` runs the webview's unit tests under vitest.
 
 Test ACP behavior against a test agent built with the SDK's `Agent.builder()` in the test process,
 without a model provider or Ox. The daemon's tests run the fake server in process over
-`Channel::duplex()`. Use Ox for live end-to-end checks, including each milestone's check in
-`docs/agents/todo.md`. `make run` starts the daemon and the GUI for them.
+`Channel::duplex()`. Use Ox for live end-to-end checks listed in `docs/agents/todo.md`. `make run`
+starts the daemon and the GUI for them.
 
 ## Test discipline
 
@@ -38,6 +38,12 @@ test gets a `TestEnvironment`: a temporary directory for the socket, `HOME`, the
 fake server's saved history file, and a config file that launches the fake server, and a daemon
 started in it with one workspace, `home`, at the test's `HOME`. The saved history file lets sessions
 outlive a daemon restart. A failing test saves a screenshot to `app/e2e/artifacts/` for diagnosis.
+The server setup test starts without a config file or daemon so the GUI launches its bundled daemon.
+`scripts/check-macos-package` checks the app and unsigned DMG after a release build.
+
+The macOS end-to-end suite opens real app windows and makes each one frontmost. Run it only when the
+desktop can be interrupted; the current WebKit setup does not render session panes while its window
+is hidden.
 
 Tests drive the GUI the way the user does, through clicks, the editor, and the terminal, and assert
 on what the window shows. `TestEnvironment.request()` sends setup requests to the daemon socket for
@@ -55,6 +61,11 @@ requests, and errors.
 
 ### End-to-end guarantee list
 
+- With no daemon or config file, the app starts its bundled daemon. A failed server choice shows an
+  error, and a corrected choice connects without restarting the app. The daemon, session, and thread
+  remain available after the app closes and reopens.
+- A running terminal remains usable when the ACP server fails to start after changing its
+  executable.
 - A terminal survives closing and reopening the GUI: an editor's unsaved buffer is still on screen
   after the GUI reopens at a different window size, the editor sees the new size, and it accepts
   input.

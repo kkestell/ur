@@ -34,13 +34,24 @@ const MAX_RESTART_DELAY: Duration = Duration::from_secs(30);
 /// `INITIALIZE_TIMEOUT`. Each time the ACP connection ends, `State` records
 /// the reason, which names `command`, and the supervisor starts the server
 /// again.
+#[cfg(test)]
 pub async fn supervise<S: ConnectTo<Client> + 'static>(
     command: String,
     launch: impl Fn() -> S + Send + 'static,
     state: Arc<Mutex<State>>,
-) {
+) -> tokio::task::JoinHandle<()> {
+    let (task, ready) = spawn_supervisor(command, launch, state);
+    ready.notified().await;
+    task
+}
+
+pub fn spawn_supervisor<S: ConnectTo<Client> + 'static>(
+    command: String,
+    launch: impl Fn() -> S + Send + 'static,
+    state: Arc<Mutex<State>>,
+) -> (tokio::task::JoinHandle<()>, Arc<Notify>) {
     let ready = Arc::new(Notify::new());
-    tokio::spawn({
+    let task = tokio::spawn({
         let ready = ready.clone();
         async move {
             let mut delay = RESTART_DELAY;
@@ -57,7 +68,7 @@ pub async fn supervise<S: ConnectTo<Client> + 'static>(
             }
         }
     });
-    ready.notified().await;
+    (task, ready)
 }
 
 /// Runs one ACP connection: sends `initialize`, lists every workspace's saved

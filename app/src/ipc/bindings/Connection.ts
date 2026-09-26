@@ -3,4 +3,4 @@
 /**
  * The payload of the `connection` event and command.
  */
-export type Connection = { connected: boolean, socket: string, };
+export type Connection = { connected: boolean, socket: string, error: string | null, };

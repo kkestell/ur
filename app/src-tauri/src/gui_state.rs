@@ -25,6 +25,7 @@ pub struct Saved {
 pub struct Connection {
     pub connected: bool,
     pub socket: String,
+    pub error: Option<String>,
 }
 
 impl GuiState {

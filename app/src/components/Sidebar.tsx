@@ -14,16 +14,19 @@ export function Sidebar({
   watch,
   selection,
   onOpen,
+  onConfigureServer,
 }: {
   watch: WatchState;
   selection: TabItem | null;
   onOpen: (item: TabItem) => void;
+  onConfigureServer: () => void;
 }) {
   const canDelete = watch.capabilities?.sessionCapabilities?.delete != null;
   return (
     <nav className="sidebar min-w-0 flex-1 overflow-y-auto border-r-2 border-divider bg-panel pb-3 select-none">
       <div className="sidebar-header flex h-10 items-center gap-2 px-4 text-xs font-medium tracking-wide text-fg-dim uppercase">
         <span className="label min-w-0 flex-1">Workspaces</span>
+        <button className="rounded px-1 hover:bg-control" title="Server settings" onClick={onConfigureServer}>Server</button>
         <button className="icon-button flex size-7 items-center justify-center rounded text-fg-muted hover:bg-control hover:text-fg" title="Add Workspace" onClick={() => void addWorkspace()}>
           <Plus size={16} strokeWidth={1.75} />
         </button>

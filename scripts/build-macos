@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+
+pnpm -C app tauri build --bundles app --no-sign
+staging="$(mktemp -d)"
+trap 'rm -rf "$staging"' EXIT
+cp -R target/release/bundle/macos/ur.app "$staging/ur.app"
+ln -s /Applications "$staging/Applications"
+mkdir -p target/release/bundle/dmg
+dmg="target/release/bundle/dmg/ur-macos-$(uname -m).dmg"
+hdiutil create -volname ur -srcfolder "$staging" -ov -format UDZO "$dmg"
+scripts/check-macos-package target/release/bundle/macos/ur.app "$dmg"
+echo "$dmg"

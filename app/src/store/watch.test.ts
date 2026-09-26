@@ -41,6 +41,7 @@ const connected = reduceWatch(initialWatch, {
   type: "connection",
   connected: true,
   socket: "/tmp/ur.sock",
+  error: null,
 });
 
 test("sessions_stay_in_creation_order_newest_first", () => {
@@ -48,6 +49,7 @@ test("sessions_stay_in_creation_order_newest_first", () => {
     type: "watch_snapshot",
     terminals: [],
     capabilities: null,
+    server_state: initialWatch.serverState,
     workspaces: [{ name: "ws", path: "/ws" }],
     sessions: [
       summary("old", "ws", "2026-03-01T00:00:00Z"),
@@ -68,6 +70,7 @@ test("session_activity_and_attention_do_not_change_order", () => {
     type: "watch_snapshot",
     terminals: [],
     capabilities: null,
+    server_state: initialWatch.serverState,
     workspaces: [{ name: "ws", path: "/ws" }],
     sessions: [
       summary("unread", "ws", "2026-01-01T00:00:00Z", { unread: true }),
@@ -94,6 +97,7 @@ test("workspaces_are_alphabetical_even_with_attention", () => {
     type: "watch_snapshot",
     terminals: [],
     capabilities: null,
+    server_state: initialWatch.serverState,
     workspaces: [
       { name: "c", path: "/c" },
       { name: "b", path: "/b" },
@@ -115,6 +119,7 @@ test("a_removed_workspace_drops_its_sessions", () => {
     type: "watch_snapshot",
     terminals: [],
     capabilities: null,
+    server_state: initialWatch.serverState,
     workspaces: [
       { name: "a", path: "/a" },
       { name: "b", path: "/b" },
@@ -131,10 +136,11 @@ test("a_disconnect_clears_the_watch_state", () => {
     type: "watch_snapshot",
     terminals: [terminal(1, "a")],
     capabilities: null,
+    server_state: initialWatch.serverState,
     workspaces: [{ name: "a", path: "/a" }],
     sessions: [summary("s1", "a", null)],
   });
-  state = reduceWatch(state, { type: "connection", connected: false, socket: "/tmp/ur.sock" });
+  state = reduceWatch(state, { type: "connection", connected: false, socket: "/tmp/ur.sock", error: null });
   expect(state).toEqual({ ...initialWatch, socket: "/tmp/ur.sock" });
 });
 
@@ -143,6 +149,7 @@ test("a_deleted_session_leaves_the_sidebar", () => {
     type: "watch_snapshot",
     terminals: [],
     capabilities: null,
+    server_state: initialWatch.serverState,
     workspaces: [{ name: "a", path: "/a" }],
     sessions: [summary("s1", "a", null), summary("s2", "a", null)],
   });
@@ -155,6 +162,7 @@ test("the_capabilities_come_from_the_snapshot_and_later_changes", () => {
     type: "watch_snapshot",
     terminals: [],
     capabilities: { loadSession: true },
+    server_state: initialWatch.serverState,
     workspaces: [],
     sessions: [],
   });
@@ -166,11 +174,29 @@ test("the_capabilities_come_from_the_snapshot_and_later_changes", () => {
   expect(state.capabilities).toEqual({ promptCapabilities: { image: true } });
 });
 
+test("server_state_reports_setup_and_connection_errors", () => {
+  let state = reduceWatch(connected, {
+    type: "watch_snapshot",
+    terminals: [],
+    capabilities: null,
+    server_state: { command: null, args: [], connected: false, error: "no config" },
+    workspaces: [],
+    sessions: [],
+  });
+  expect(state.serverState.error).toBe("no config");
+  state = reduceWatch(state, {
+    type: "server_state_changed",
+    server_state: { command: "/bin/agent", args: ["--acp"], connected: true, error: null },
+  });
+  expect(state.serverState).toEqual({ command: "/bin/agent", args: ["--acp"], connected: true, error: null });
+});
+
 test("terminals_follow_watch_events", () => {
   let state = reduceWatch(connected, {
     type: "watch_snapshot",
     terminals: [terminal(1, "a")],
     capabilities: null,
+    server_state: initialWatch.serverState,
     workspaces: [
       { name: "a", path: "/a" },
       { name: "b", path: "/b" },
@@ -201,6 +227,7 @@ test("workspace_terminals_show_newest_first", () => {
     type: "watch_snapshot",
     terminals: [terminal(1, "a"), terminal(2, "b"), terminal(3, "a")],
     capabilities: null,
+    server_state: initialWatch.serverState,
     workspaces: [
       { name: "a", path: "/a" },
       { name: "b", path: "/b" },
@@ -216,13 +243,14 @@ test("has_snapshot_follows_the_connection", () => {
     type: "watch_snapshot",
     terminals: [],
     capabilities: null,
+    server_state: initialWatch.serverState,
     workspaces: [],
     sessions: [],
   });
   expect(state.hasSnapshot).toBe(true);
-  state = reduceWatch(state, { type: "connection", connected: false, socket: "/tmp/ur.sock" });
+  state = reduceWatch(state, { type: "connection", connected: false, socket: "/tmp/ur.sock", error: null });
   expect(state.hasSnapshot).toBe(false);
   // Reconnecting waits for the new connection's snapshot.
-  state = reduceWatch(state, { type: "connection", connected: true, socket: "/tmp/ur.sock" });
+  state = reduceWatch(state, { type: "connection", connected: true, socket: "/tmp/ur.sock", error: null });
   expect(state.hasSnapshot).toBe(false);
 });

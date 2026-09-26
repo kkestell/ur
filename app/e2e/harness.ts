@@ -34,6 +34,7 @@ type SessionSummary = {
 type WatchSnapshot = {
   type: "watch_snapshot";
   sessions: SessionSummary[];
+  server_state: { connected: boolean; command: string | null; error: string | null };
 };
 
 /**
@@ -48,11 +49,13 @@ export class TestEnvironment {
   readonly #socket: string;
   readonly #state: string;
   readonly #config: string;
-  #daemon!: ChildProcess;
-  #daemonExited!: Promise<void>;
+  #daemon?: ChildProcess;
+  #daemonExited?: Promise<void>;
+  readonly #managed: boolean;
   readonly #guis: Gui[] = [];
 
-  private constructor(dir: string) {
+  private constructor(dir: string, managed = false) {
+    this.#managed = managed;
     this.#dir = dir;
     this.#socket = join(dir, "ur.sock");
     this.home = join(dir, "home");
@@ -61,16 +64,18 @@ export class TestEnvironment {
     mkdirSync(this.home);
     mkdirSync(this.#state);
     mkdirSync(join(this.#config, "ur"), { recursive: true });
-    writeFileSync(
-      join(this.#config, "ur/config.json"),
-      JSON.stringify({
-        server: {
-          command: join(BIN, "ur-fake-server"),
-          args: [join(dir, "history.json")],
-        },
-      }),
-    );
-    this.#spawnDaemon();
+    if (!managed) {
+      writeFileSync(
+        join(this.#config, "ur/config.json"),
+        JSON.stringify({
+          server: {
+            command: join(BIN, "ur-fake-server"),
+            args: [join(dir, "history.json")],
+          },
+        }),
+      );
+    }
+    if (!managed) this.#spawnDaemon();
   }
 
   static async start(): Promise<TestEnvironment> {
@@ -80,6 +85,22 @@ export class TestEnvironment {
     await waitFor("the daemon to listen", () => canConnect(environment.#socket));
     await environment.addWorkspace("home", environment.home);
     return environment;
+  }
+
+  static async startManaged(): Promise<TestEnvironment> {
+    return new TestEnvironment(mkdtempSync(join(tmpdir(), "ur-e2e-")), true);
+  }
+
+  get fakeServer(): string {
+    return join(BIN, "ur-fake-server");
+  }
+
+  get configFile(): string {
+    return join(this.#config, "ur/config.json");
+  }
+
+  get historyFile(): string {
+    return join(this.#dir, "history.json");
   }
 
   #spawnDaemon(): void {
@@ -96,12 +117,12 @@ export class TestEnvironment {
       stdio: ["ignore", "inherit", "inherit"],
     });
     // Listen now: the daemon can exit before `stop`, such as when it crashes.
-    this.#daemonExited = new Promise((resolve) => this.#daemon.once("exit", () => resolve()));
+    this.#daemonExited = new Promise((resolve) => this.#daemon!.once("exit", () => resolve()));
   }
 
   /** Kills the daemon and waits for it to exit. */
   async stopDaemon(): Promise<void> {
-    this.#daemon.kill("SIGKILL");
+    this.#daemon?.kill("SIGKILL");
     await this.#daemonExited;
   }
 
@@ -196,12 +217,15 @@ export class TestEnvironment {
   }
 
   /** Starts `ur-app`, connects to its WebDriver server, and waits for the sidebar. */
-  async openGui(): Promise<Gui> {
+  async openGui(expectWorkspace = true): Promise<Gui> {
     const child = spawn(join(BIN, "ur-app"), [], {
       env: {
         ...process.env,
         UR_SOCKET: this.#socket,
         XDG_STATE_HOME: this.#state,
+        XDG_CONFIG_HOME: this.#config,
+        HOME: this.home,
+        SHELL: "/bin/sh",
         TAURI_WEBDRIVER_PORT: String(WEBDRIVER_PORT),
       },
       stdio: ["ignore", "inherit", "inherit"],
@@ -213,7 +237,7 @@ export class TestEnvironment {
     await gui.connect();
     await gui.focusWindow();
     // The workspace comes with the watch snapshot.
-    await waitFor("the sidebar to render", () => gui.hasElement(".workspace"));
+    if (expectWorkspace) await waitFor("the sidebar to render", () => gui.hasElement(".workspace"));
     return gui;
   }
 
@@ -230,7 +254,12 @@ export class TestEnvironment {
     for (const gui of this.#guis) {
       await gui.close();
     }
-    await this.stopDaemon();
+    if (this.#managed) {
+      const { stdout } = await promisify(execFile)("lsof", ["-t", this.#socket]).catch(() => ({ stdout: "" }));
+      for (const pid of stdout.trim().split(/\s+/).filter(Boolean)) process.kill(Number(pid), "SIGKILL");
+    } else {
+      await this.stopDaemon();
+    }
     // The shells and their applications get SIGHUP when the daemon exits and
     // can still be writing files such as `.viminfo`, so retry the removal.
     await waitFor("the test directory to be removed", async () => {
@@ -503,6 +532,15 @@ export class Gui {
       setter.call(textarea, text);
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     }, text);
+  }
+
+  async setInput(selector: string, text: string): Promise<void> {
+    await this.#session().execute((selector, text) => {
+      const input = (window as unknown as ShownWindow).shown(selector)[0] as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, text);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }, selector, text);
   }
 
   /** Presses `key` in the first element matching `selector`, as a keydown event. */

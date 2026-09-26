@@ -1,6 +1,10 @@
 use std::collections::{BTreeSet, HashMap};
+use std::fs::{self, OpenOptions};
 use std::io;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -22,6 +26,8 @@ pub struct Link {
     client: Mutex<Option<Client>>,
     /// The task forwarding each attached terminal's output.
     attachments: Mutex<HashMap<TerminalId, AbortHandle>>,
+    launch_attempted: Mutex<bool>,
+    launch_error: Mutex<Option<String>>,
 }
 
 /// The desired set: what `run()` restores after reconnecting. The focus sent
@@ -64,6 +70,8 @@ impl Link {
             desired: Mutex::new(Desired::default()),
             client: Mutex::new(None),
             attachments: Mutex::new(HashMap::new()),
+            launch_attempted: Mutex::new(false),
+            launch_error: Mutex::new(None),
         }
     }
 
@@ -77,15 +85,68 @@ impl Link {
     pub async fn run(app: AppHandle) {
         let link = app.state::<Link>();
         loop {
+            let mut misses = 0;
             let client = loop {
                 match Client::connect(&link.socket).await {
                     Ok(client) => break client,
-                    Err(_) => tokio::time::sleep(RETRY_DELAY).await,
+                    Err(_) => {
+                        misses += 1;
+                        let start = {
+                            let mut attempted = link.launch_attempted.lock().unwrap();
+                            if *attempted || misses < 3 {
+                                false
+                            } else {
+                                *attempted = true;
+                                true
+                            }
+                        };
+                        if start {
+                            match Link::spawn_daemon() {
+                                Ok((mut child, log)) => {
+                                    let app = app.clone();
+                                    tokio::spawn(async move {
+                                        loop {
+                                            tokio::time::sleep(RETRY_DELAY).await;
+                                            match child.try_wait() {
+                                                Ok(Some(status)) => {
+                                                    let link = app.state::<Link>();
+                                                    if link.client.lock().unwrap().is_none() {
+                                                        *link.launch_error.lock().unwrap() = Some(
+                                                            format!(
+                                                                "the bundled daemon exited ({status}); see {}",
+                                                                log.display()
+                                                            ),
+                                                        );
+                                                        link.emit_connection(&app, false);
+                                                    }
+                                                    return;
+                                                }
+                                                Ok(None) => {}
+                                                Err(error) => {
+                                                    eprintln!(
+                                                        "ur-app: checking the daemon: {error}"
+                                                    );
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                                Err(error) => {
+                                    *link.launch_error.lock().unwrap() = Some(error.to_string());
+                                    link.emit_connection(&app, false);
+                                }
+                            }
+                        }
+                        tokio::time::sleep(RETRY_DELAY).await;
+                    }
                 }
             };
             // Take the receiver before any request so no snapshot is missed.
             let mut events = client.events();
             *link.client.lock().unwrap() = Some(client.clone());
+            *link.launch_attempted.lock().unwrap() = false;
+            *link.launch_error.lock().unwrap() = None;
             link.emit_connection(&app, true);
 
             let (watch, subscribed, focus) = {
@@ -122,6 +183,7 @@ impl Link {
                 let name = match &event {
                     Event::WatchSnapshot { .. }
                     | Event::CapabilitiesChanged { .. }
+                    | Event::ServerStateChanged { .. }
                     | Event::WorkspaceAdded { .. }
                     | Event::WorkspaceRemoved { .. }
                     | Event::SessionChanged { .. }
@@ -141,6 +203,25 @@ impl Link {
             *link.client.lock().unwrap() = None;
             link.emit_connection(&app, false);
         }
+    }
+
+    fn spawn_daemon() -> io::Result<(Child, PathBuf)> {
+        let log_dir = ur_client::state_dir()?;
+        fs::create_dir_all(&log_dir)?;
+        let log = log_dir.join("daemon.log");
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let stderr = options.open(&log)?;
+        let sidecar = std::env::current_exe()?.with_file_name("ur");
+        let child = Command::new(sidecar)
+            .arg("daemon")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::from(stderr))
+            .spawn()?;
+        Ok((child, log))
     }
 
     /// Records the sessions the webview shows and sends the focus.
@@ -189,6 +270,7 @@ impl Link {
         Connection {
             connected: self.client.lock().unwrap().is_some(),
             socket: self.socket.display().to_string(),
+            error: self.launch_error.lock().unwrap().clone(),
         }
     }
 
@@ -289,6 +371,7 @@ impl Link {
         let connection = Connection {
             connected,
             socket: self.socket.display().to_string(),
+            error: self.launch_error.lock().unwrap().clone(),
         };
         if let Err(error) = app.emit("connection", connection) {
             eprintln!("ur-app: emitting connection: {error}");

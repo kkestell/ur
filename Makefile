@@ -3,6 +3,7 @@
 check: check-rust check-app check-docs
 
 check-rust:
+	scripts/build-sidecar debug
 	cargo fmt --all -- --check
 	cargo test --workspace --all-targets --all-features
 	cargo build --workspace --all-features
