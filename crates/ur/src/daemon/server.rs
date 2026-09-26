@@ -128,8 +128,8 @@ fn handle(
     outbox: &Outbox,
 ) -> Option<Response> {
     let result = match request {
-        Request::OpenTerminal => terminals
-            .open()
+        Request::OpenTerminal { workspace } => terminals
+            .open(&workspace)
             .map(|terminal| Response::Opened { terminal }),
         Request::AttachTerminal {
             terminal,
@@ -145,6 +145,10 @@ fn handle(
         } => terminals
             .resize(terminal, rows, cols)
             .map(|()| Response::Done),
+        Request::DetachTerminal { terminal } => {
+            terminals.detach(terminal, outbox).map(|()| Response::Done)
+        }
+        Request::CloseTerminal { terminal } => terminals.close(terminal).map(|()| Response::Done),
         Request::Watch => {
             state.lock().unwrap().watch(outbox.clone());
             Ok(Response::Done)
@@ -153,7 +157,7 @@ fn handle(
             ops::add_workspace(state, state_file, Workspace { name, path }).map(|()| Response::Done)
         }
         Request::RemoveWorkspace { name } => {
-            ops::remove_workspace(state, state_file, &name).map(|()| Response::Done)
+            ops::remove_workspace(state, terminals, state_file, &name).map(|()| Response::Done)
         }
         Request::NewSession { workspace } => {
             match ops::new_session(state, workspace, id, outbox.clone()) {

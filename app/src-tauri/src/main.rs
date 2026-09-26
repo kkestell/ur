@@ -25,6 +25,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::request,
             commands::attach_terminal,
+            commands::detach_terminal,
             commands::terminal_input,
             commands::connection,
             commands::selection,

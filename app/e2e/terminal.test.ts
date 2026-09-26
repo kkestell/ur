@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { e2eTest, waitFor } from "./harness.ts";
 
@@ -48,4 +48,59 @@ e2eTest("quitting a restored full-screen application returns to the shell", asyn
     !lines.some((row) => row.startsWith("Processes:")),
     `top's last frame is still on screen:\n${lines.join("\n")}`,
   );
+});
+
+e2eTest("a terminal row shows the shell's name until a program sets a title", async (environment) => {
+  const gui = await environment.openGui();
+  await gui.showTerminal();
+  await gui.waitForText(".sidebar .row:has(.terminal-icon) .label", "sh");
+  await gui.waitForText(".terminal-header .label", "sh");
+  await gui.type("printf '\\033]0;tallying\\007'\r");
+  await gui.waitForText(".sidebar .row:has(.terminal-icon) .label", "tallying");
+  await gui.waitForText(".terminal-header .label", "tallying");
+});
+
+e2eTest("a terminal starts in its workspace's directory", async (environment) => {
+  const other = join(environment.home, "other");
+  mkdirSync(other);
+  await environment.ur("workspace", "add", "other", other);
+  const gui = await environment.openGui();
+  // WebDriver cannot drive the native workspace menu.
+  await gui.request({ type: "open_terminal", workspace: "other" });
+  await gui.click(".sidebar .row:has(.terminal-icon)");
+  const workspaces = await gui.texts(".workspace:has(.terminal-icon) .workspace-name .label");
+  assert.deepEqual(workspaces, ["other"]);
+  await gui.type("pwd\r");
+  await gui.waitForLine(realpathSync(other));
+});
+
+e2eTest("Close Terminal removes the terminal's row", async (environment) => {
+  const gui = await environment.openGui();
+  await gui.showTerminal();
+  const opened = (await gui.request({ type: "open_terminal", workspace: "home" })) as {
+    terminal: number;
+  };
+  const rows = async () => (await gui.texts(".sidebar .row:has(.terminal-icon)")).length;
+  await waitFor("two terminal rows", async () => (await rows()) === 2);
+  // Close Terminal is a native menu, which WebDriver cannot drive.
+  await gui.request({ type: "close_terminal", terminal: opened.terminal });
+  await waitFor("one terminal row", async () => (await rows()) === 1);
+  await gui.type("echo still here\r");
+  await gui.waitForLine("still here");
+});
+
+e2eTest("a terminal whose shell exits leaves the sidebar", async (environment) => {
+  const gui = await environment.openGui();
+  await gui.showTerminal();
+  await gui.type("exit\r");
+  await gui.waitForNone(".sidebar .row:has(.terminal-icon)");
+  await gui.waitForText(".empty", "Select a session");
+});
+
+e2eTest("removing a workspace stops its terminals", async (environment) => {
+  const gui = await environment.openGui();
+  await gui.showTerminal();
+  await environment.ur("workspace", "rm", "home");
+  await gui.waitForNone(".sidebar .row:has(.terminal-icon)");
+  await gui.waitForText(".empty", "No workspaces");
 });

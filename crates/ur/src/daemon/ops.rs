@@ -22,6 +22,7 @@ use super::acp;
 use super::server::Outbox;
 use super::state::{State, respond};
 use super::state_file;
+use super::terminal::Terminals;
 
 /// Adds a workspace whose path is an absolute path to a directory, and saves
 /// it in the state file. When the server can list sessions, a spawned task
@@ -67,18 +68,26 @@ pub fn add_workspace(
     Ok(())
 }
 
-/// Removes a workspace from the state file, then cancels its running prompts
-/// and removes it and its sessions.
+/// Removes a workspace from the state file, then cancels its running prompts,
+/// removes it and its sessions, and closes its terminals.
 pub fn remove_workspace(
     state: &Arc<Mutex<State>>,
+    terminals: &Terminals,
     state_file: &Path,
     name: &str,
 ) -> anyhow::Result<()> {
-    state.lock().unwrap().remove_workspace(
+    let removed = state.lock().unwrap().remove_workspace(
         name,
         |workspaces| state_file::write(state_file, workspaces),
         send_cancel,
-    )
+    )?;
+    for terminal in removed {
+        // A shell that exited meanwhile is already gone.
+        if let Err(error) = terminals.close(terminal) {
+            eprintln!("ur daemon: {error:#}");
+        }
+    }
+    Ok(())
 }
 
 /// Sends `session/new` in the workspace and answers request `id` when the

@@ -12,36 +12,22 @@ pub async fn request(link: State<'_, Link>, request: Request) -> Result<Response
         .map_err(|error| error.to_string())
 }
 
-/// Attaches the GUI's terminal from the GUI state file. When there is none, or
-/// the daemon rejects the attachment, opens a new terminal, attaches it, and
-/// saves it.
+/// Attaches the terminal and forwards its output to `output`.
 #[tauri::command]
 pub async fn attach_terminal(
     link: State<'_, Link>,
+    terminal: TerminalId,
     rows: u16,
     cols: u16,
     output: Channel<ChannelBytes>,
-) -> Result<TerminalId, String> {
-    let mut gui_state = GuiState::load().map_err(|error| error.to_string())?;
-    if let Some(terminal) = gui_state.saved(link.socket()).terminal
-        && link
-            .attach(terminal, rows, cols, output.clone())
-            .await
-            .is_ok()
-    {
-        return Ok(terminal);
-    }
+) -> Result<(), String> {
+    link.attach(terminal, rows, cols, output).await
+}
 
-    let terminal = match link.request(Request::OpenTerminal).await {
-        Ok(Response::Opened { terminal }) => terminal,
-        Ok(Response::Error { message }) => return Err(message),
-        Ok(other) => return Err(format!("unexpected response {other:?}")),
-        Err(error) => return Err(error.to_string()),
-    };
-    link.attach(terminal, rows, cols, output).await?;
-    gui_state.saved_mut(link.socket()).terminal = Some(terminal);
-    gui_state.save().map_err(|error| error.to_string())?;
-    Ok(terminal)
+/// Ends the terminal attachment. The terminal keeps running.
+#[tauri::command]
+pub async fn detach_terminal(link: State<'_, Link>, terminal: TerminalId) -> Result<(), String> {
+    link.detach(terminal).await
 }
 
 #[tauri::command]

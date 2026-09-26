@@ -15,10 +15,12 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `.cargo/config.toml` — sets `TS_RS_EXPORT_DIR` so `cargo test` writes the TypeScript bindings to
   `app/src/ipc/bindings/`.
 - `crates/ur-client/src/frame.rs` — `Frame` and `FrameCodec`, the wire protocol framing.
-- `crates/ur-client/src/protocol.rs` — `TerminalId`, `Request` (with `delete_session` and
-  `set_config_option`), `Response`, `Event` (with `capabilities_changed`, `session_deleted`, and
-  `config_options_changed`), `Workspace`, `SessionSummary`, `Status`, `PendingPermission`, `Entry`,
-  `ClientMessage`, `DaemonMessage`, `socket_path()`, and `state_dir()`.
+- `crates/ur-client/src/protocol.rs` — `TerminalId`, `Request` (with `open_terminal(workspace)`,
+  `detach_terminal`, `close_terminal`, `delete_session`, and `set_config_option`), `Response`,
+  `Event` (with `capabilities_changed`, `session_deleted`, `terminal_changed`, and
+  `config_options_changed`), `Workspace`, `SessionSummary`, `TerminalSummary`, `Status`,
+  `PendingPermission`, `Entry`, `ClientMessage`, `DaemonMessage`, `socket_path()`, and
+  `state_dir()`.
 - `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the core and the CLI, with
   `request()`, `events()`, `pty()`, and `pty_input()`.
 - `crates/ur-fake-server/` — the fake server: `lib.rs` exports `fake_server()`, `Hold`, and
@@ -37,21 +39,23 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `crates/ur/src/daemon/mod.rs` — `start()`: binds the socket, removing a stale one, and reads the
   config file; `run()`: reads the state file, starts the supervisor, then serves.
 - `crates/ur/src/daemon/state.rs` — `State`: the ACP connection with its capabilities and
-  generation, workspaces, watchers, and sessions, saved or loaded, with their transcripts, session
-  titles, config options, operation guards and the loads and deletes they hold, statuses, unread
-  flags, focus, pending permission requests, and subscribers.
+  generation, workspaces, watchers, terminal summaries, and sessions, saved or loaded, with their
+  transcripts, session titles, config options, operation guards and the loads and deletes they hold,
+  statuses, unread flags, focus, pending permission requests, and subscribers.
 - `crates/ur/src/daemon/state_file.rs` — `read()` and `write()` for the state file.
 - `crates/ur/src/daemon/acp.rs` — `supervise()`: the supervisor, which starts the server again after
   it exits, and each ACP connection's handlers; `list_sessions()`; `initialize()`, shared with the
   one-shot client.
 - `crates/ur/src/daemon/ops.rs` — `add_workspace()`, which also lists the workspace's saved
-  sessions, and `remove_workspace()`, which write the state file; `new_session()`, `subscribe()`,
-  `prompt()`, `load()`, `delete_session()`, and `set_config_option()`, which handle the server's
-  responses in `on_receiving_result` callbacks; and `cancel()`.
+  sessions, and `remove_workspace()`, which also closes the workspace's terminals, which write the
+  state file; `new_session()`, `subscribe()`, `prompt()`, `load()`, `delete_session()`, and
+  `set_config_option()`, which handle the server's responses in `on_receiving_result` callbacks; and
+  `cancel()`.
 - `crates/ur/src/daemon/server.rs` — the accept loop, each socket connection's reader and writer,
   request handling, and `Outbox`.
-- `crates/ur/src/daemon/terminal.rs` — `Terminals`: login shells through `portable-pty`, their
-  `vt100::Parser`, terminal attachment, and the screen snapshot.
+- `crates/ur/src/daemon/terminal.rs` — `Terminals`: login shells through `portable-pty`, started in
+  their workspace path, their `vt100::Parser` with `Title`, which records terminal title changes,
+  terminal attachment and detaching, closing, the screen snapshot, and the reports to `State`.
 - `crates/ur/src/daemon/tests.rs` — the daemon's session tests, run in process against the fake
   server.
 - `crates/ur/tests/terminal.rs` — integration tests that run `ur daemon`.
@@ -67,19 +71,21 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `app/src-tauri/src/link.rs` — `Link`: the reconnect loop `run()`, which owns the `Client`, replays
   the desired set `Desired { watch, subscribed, visible, focused }` after each connect, forwards
   events to the webview under the `watch`, `session`, and `connection` event names, routing each
-  event type to one name, and forwards terminal output to the webview's `Channel`; `set_visible()`
-  and `set_focused()`, which send `focus` for the visible sessions while the window has focus.
+  event type to one name, and forwards terminal output to the webview's `Channel`, one forwarding
+  task per attached terminal, which `detach()` aborts before sending `detach_terminal`;
+  `set_visible()` and `set_focused()`, which send `focus` for the visible sessions while the window
+  has focus.
 - `app/src-tauri/src/commands.rs` — the core commands `request`, `attach_terminal`,
-  `terminal_input`, `connection`, `selection`, `select`, and `set_visible`.
-- `app/src-tauri/src/gui_state.rs` — the GUI state file: `Saved { terminal, selection }` per socket
-  path, `Selection`, and `Connection`.
-- `app/src/ipc/` — `request()`, `attachTerminal()`, `terminalInput()`, `connection()`,
-  `selection()`, `select()`, `setVisible()`, and the `onWatch()`, `onSession()`, and
+  `detach_terminal`, `terminal_input`, `connection`, `selection`, `select`, and `set_visible`.
+- `app/src-tauri/src/gui_state.rs` — the GUI state file: `Saved { selection }` per socket path,
+  `Selection`, and `Connection`.
+- `app/src/ipc/` — `request()`, `attachTerminal()`, `detachTerminal()`, `terminalInput()`,
+  `connection()`, `selection()`, `select()`, `setVisible()`, and the `onWatch()`, `onSession()`, and
   `onConnection()` listeners; `bindings/` is generated by `cargo test` and committed.
 - `app/src/store/watch.ts` — `WatchState`, `reduceWatch()`, `needsAttention()`,
-  `workspaceSessions()`, `orderedWorkspaces()`, `attentionCount()`, and `useWatch()`: the
-  connection, workspaces, sessions, and the server's capabilities outside React, ordered by
-  attention.
+  `workspaceSessions()`, `workspaceTerminals()`, `orderedWorkspaces()`, `attentionCount()`, and
+  `useWatch()`: the connection, workspaces, sessions, terminals, and the server's capabilities
+  outside React, with sessions ordered by attention and terminals in opening order.
 - `app/src/store/sessions.ts` — every subscribed session's `ThreadState`, `useSession()`, which
   subscribes once, and `useThread()`.
 - `app/src/transcript/blocks.ts` — `Block` and `ThreadState`, the thread's display types. The user
@@ -91,13 +97,13 @@ Map each file here as it is added, following the project layout in `docs/agents/
   requests placed among the blocks, each merged with the tool call block of the same ID.
 - `app/src/keys.ts` — `shortcutKind()` and `shortcutLabel()`, the shortcut for each permission
   option kind.
-- `app/src/actions.ts` — `addWorkspace()`, `newSession()`, `removeWorkspace()`, `deleteSession()`,
-  `showWorkspaceMenu()`, and `showSessionMenu()`: the folder picker, confirmations, error messages,
-  and native menus.
+- `app/src/actions.ts` — `addWorkspace()`, `newSession()`, `newTerminal()`, `closeTerminal()`,
+  `removeWorkspace()`, `deleteSession()`, `showWorkspaceMenu()`, `showSessionMenu()`, and
+  `showTerminalMenu()`: the folder picker, confirmations, error messages, and native menus.
 - `app/src/slash.ts` — `slashQuery()` and `matchingCommands()`, the command list's matching.
 - `app/src/usage.ts` — `usageText()`, the usage indicator's popover lines.
-- `app/src/components/Sidebar.tsx` — the header's `+`, the workspaces, their sessions, and the
-  Terminal row, with each session's status mark, attention counts, and the workspace and session
+- `app/src/components/Sidebar.tsx` — the header's `+`, the workspaces, their sessions and terminal
+  rows, with each session's status mark, attention counts, and the workspace, session, and terminal
   menus.
 - `app/src/components/Thread.tsx` — the items of the selected session, with user message thumbnails,
   and `Thought`, the Thinking row.
@@ -114,13 +120,18 @@ Map each file here as it is added, following the project layout in `docs/agents/
   and Send or Stop.
 - `app/src/components/ConfigPicker.tsx` — `ConfigPicker`, the list or toggle for one config option.
 - `app/src/components/UsageIndicator.tsx` — `UsageIndicator`, the ring and its popover.
-- `app/src/components/TerminalPane.tsx` — the xterm.js view of the GUI's terminal.
+- `app/src/components/TerminalPane.tsx` — `TerminalPane`: the terminal header and the xterm.js view
+  of one terminal, which attaches on mount and detaches on unmount.
 - `app/src/main.tsx` — renders `App`, and stops files dropped outside the editor from navigating the
   webview.
-- `app/src/App.tsx` — the layout, the selection, the empty states with Add Workspace, the session
-  header, `set_visible` for the rendered selection, and the permission shortcuts.
+- `app/src/App.tsx` — the layout, the selection, which shows as no selection when its session or
+  terminal is not in the watch state, the empty states with Add Workspace, the session header,
+  `TerminalPane` keyed by terminal ID, `set_visible` for the rendered selection, and the permission
+  shortcuts.
 - `app/e2e/harness.ts` — `TestEnvironment`, `Gui`, and `e2eTest`, used by the end-to-end suite and
-  ad-hoc checks. `TestEnvironment` writes a config file that launches the fake server.
+  ad-hoc checks. `TestEnvironment` writes a config file that launches the fake server with its saved
+  history file and adds the `home` workspace; `Gui.showTerminal()` opens a terminal in it and
+  selects its terminal row.
 - `app/e2e/terminal.test.ts` — the end-to-end tests for terminals.
 - `app/e2e/session.test.ts` — the end-to-end tests for agent sessions against the fake server.
 - `app/e2e/attention.test.ts` — the end-to-end tests for session status, unread sessions, and

@@ -12,11 +12,9 @@ pub struct GuiState {
     saved: HashMap<String, Saved>,
 }
 
-/// One socket path's record: the GUI's one terminal, until Workspace terminal
-/// controls list terminals under their workspaces, and the selection.
+/// One socket path's record: the selection.
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Saved {
-    pub terminal: Option<TerminalId>,
     pub selection: Option<Selection>,
 }
 
@@ -25,7 +23,7 @@ pub struct Saved {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
 pub enum Selection {
-    Terminal,
+    Terminal { terminal: TerminalId },
     Session { session: String },
 }
 

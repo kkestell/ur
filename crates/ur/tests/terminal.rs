@@ -5,24 +5,30 @@ use std::time::Duration;
 use bytes::Bytes;
 use tempfile::TempDir;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::error::TryRecvError;
 use tokio::time::{sleep, timeout};
-use ur_client::{Client, Request, Response, TerminalId};
+use ur_client::{Client, Event, Request, Response, TerminalId, TerminalSummary};
 
 const WAIT: Duration = Duration::from_secs(5);
 
-/// A daemon on a socket in its own directory, which is also `$HOME` and
-/// `$XDG_STATE_HOME`. `/bin/sh` keeps user shell configuration out of the
-/// terminals.
+/// A daemon on a socket in its own directory, which is also `$HOME`,
+/// `$XDG_STATE_HOME`, and the path of its one workspace, `home`. `/bin/sh`
+/// keeps user shell configuration out of the terminals.
 struct Daemon {
     process: Child,
     socket: PathBuf,
-    _dir: TempDir,
+    dir: TempDir,
 }
 
 impl Daemon {
     fn start() -> Daemon {
         let dir = tempfile::tempdir().unwrap();
         let socket = dir.path().join("ur.sock");
+        let state = serde_json::json!({
+            "workspaces": [{ "name": "home", "path": dir.path() }],
+        });
+        std::fs::create_dir(dir.path().join("ur")).unwrap();
+        std::fs::write(dir.path().join("ur/state.json"), state.to_string()).unwrap();
         let process = Command::new(env!("CARGO_BIN_EXE_ur"))
             .arg("daemon")
             .env("UR_SOCKET", &socket)
@@ -34,8 +40,12 @@ impl Daemon {
         Daemon {
             process,
             socket,
-            _dir: dir,
+            dir,
         }
+    }
+
+    fn home(&self) -> PathBuf {
+        self.dir.path().to_path_buf()
     }
 
     async fn connect(&self) -> Client {
@@ -86,13 +96,47 @@ impl View {
         let contents = self.parser.screen().contents();
         contents.lines().any(|row| row.trim_end() == line)
     }
+
+    async fn wait_for_close(&mut self) {
+        let closed = timeout(WAIT, async { while self.pty.recv().await.is_some() {} }).await;
+        assert!(closed.is_ok(), "the pty receiver closes");
+    }
 }
 
+/// Opens a terminal in `home`.
 async fn open(client: &Client) -> TerminalId {
-    match client.request(Request::OpenTerminal).await.unwrap() {
+    let request = Request::OpenTerminal {
+        workspace: "home".to_string(),
+    };
+    match client.request(request).await.unwrap() {
         Response::Opened { terminal } => terminal,
         other => panic!("open_terminal answered {other:?}"),
     }
+}
+
+/// Watches, and returns the watch snapshot's terminals and the later events.
+async fn watch(client: &Client) -> (Vec<TerminalSummary>, UnboundedReceiver<Event>) {
+    let mut events = client.events();
+    assert_eq!(
+        client.request(Request::Watch).await.unwrap(),
+        Response::Done
+    );
+    match events.try_recv() {
+        Ok(Event::WatchSnapshot { terminals, .. }) => (terminals, events),
+        other => panic!("expected the watch snapshot before the response, got {other:?}"),
+    }
+}
+
+async fn next_event(events: &mut UnboundedReceiver<Event>) -> Event {
+    timeout(WAIT, events.recv())
+        .await
+        .expect("an event arrives")
+        .expect("the socket connection is open")
+}
+
+/// Skips events until `expected` arrives.
+async fn wait_for_event(events: &mut UnboundedReceiver<Event>, expected: Event) {
+    while next_event(events).await != expected {}
 }
 
 async fn attach(client: &Client, terminal: TerminalId, rows: u16, cols: u16) -> View {
@@ -170,33 +214,163 @@ async fn attach_resizes_the_terminal() {
 }
 
 #[tokio::test]
-async fn attaching_an_unknown_terminal_is_an_error() {
+async fn unknown_terminals_and_workspaces_are_errors() {
     let daemon = Daemon::start();
     let client = daemon.connect().await;
+    let cases = [
+        (
+            "attaching an unknown terminal",
+            Request::AttachTerminal {
+                terminal: 99,
+                rows: 24,
+                cols: 80,
+            },
+        ),
+        (
+            "detaching an unknown terminal",
+            Request::DetachTerminal { terminal: 99 },
+        ),
+        (
+            "closing an unknown terminal",
+            Request::CloseTerminal { terminal: 99 },
+        ),
+        (
+            "opening a terminal in an unknown workspace",
+            Request::OpenTerminal {
+                workspace: "nowhere".to_string(),
+            },
+        ),
+    ];
+    for (case, request) in cases {
+        let response = client.request(request).await.unwrap();
+        assert!(
+            matches!(response, Response::Error { .. }),
+            "{case} answered {response:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn terminal_starts_in_its_workspace() {
+    let daemon = Daemon::start();
+    let client = daemon.connect().await;
+    let terminal = open(&client).await;
+    let mut view = attach(&client, terminal, 24, 200).await;
+    run(&client, terminal, "pwd -P");
+    let home = daemon.home().canonicalize().unwrap();
+    view.wait_for_line(home.to_str().unwrap()).await;
+}
+
+#[tokio::test]
+async fn watch_shows_terminals_and_their_titles() {
+    let daemon = Daemon::start();
+    let watcher = daemon.connect().await;
+    let (_, mut events) = watch(&watcher).await;
+    let client = daemon.connect().await;
+    let terminal = open(&client).await;
+    let summary = |title: &str| TerminalSummary {
+        terminal,
+        workspace: "home".to_string(),
+        title: title.to_string(),
+    };
+    assert_eq!(
+        next_event(&mut events).await,
+        Event::TerminalChanged {
+            summary: summary("sh")
+        }
+    );
+
+    run(&client, terminal, r"printf '\033]2;building\007'");
+    assert_eq!(
+        next_event(&mut events).await,
+        Event::TerminalChanged {
+            summary: summary("building")
+        }
+    );
+    let (terminals, _) = watch(&daemon.connect().await).await;
+    assert_eq!(terminals, [summary("building")]);
+}
+
+#[tokio::test]
+async fn close_terminal_stops_its_programs() {
+    let daemon = Daemon::start();
+    let watcher = daemon.connect().await;
+    let (_, mut events) = watch(&watcher).await;
+    let client = daemon.connect().await;
+    let terminal = open(&client).await;
+    let mut view = attach(&client, terminal, 24, 80).await;
+    run(&client, terminal, "echo started; sleep 1000");
+    view.wait_for_line("started").await;
+
+    assert_eq!(
+        client
+            .request(Request::CloseTerminal { terminal })
+            .await
+            .unwrap(),
+        Response::Done
+    );
+    // The PTY closes only once `sleep`, which holds it open, has exited too.
+    view.wait_for_close().await;
+    wait_for_event(&mut events, Event::TerminalExited { terminal }).await;
     let request = Request::AttachTerminal {
-        terminal: 99,
+        terminal,
         rows: 24,
         cols: 80,
     };
     let response = client.request(request).await.unwrap();
     assert!(
         matches!(response, Response::Error { .. }),
-        "attaching an unknown terminal answered {response:?}"
+        "attaching a closed terminal answered {response:?}"
     );
+}
+
+#[tokio::test]
+async fn removing_a_workspace_stops_its_terminals() {
+    let daemon = Daemon::start();
+    let client = daemon.connect().await;
+    let terminal = open(&client).await;
+    let mut view = attach(&client, terminal, 24, 80).await;
+    let request = Request::RemoveWorkspace {
+        name: "home".to_string(),
+    };
+    assert_eq!(client.request(request).await.unwrap(), Response::Done);
+    view.wait_for_close().await;
+}
+
+#[tokio::test]
+async fn a_detached_connection_gets_no_output() {
+    let daemon = Daemon::start();
+    let first = daemon.connect().await;
+    let terminal = open(&first).await;
+    let mut first_view = attach(&first, terminal, 24, 80).await;
+    let detach = Request::DetachTerminal { terminal };
+    assert_eq!(first.request(detach.clone()).await.unwrap(), Response::Done);
+    // Drop the screen snapshot and any output from before the detach.
+    while first_view.pty.try_recv().is_ok() {}
+
+    let second = daemon.connect().await;
+    let mut second_view = attach(&second, terminal, 24, 80).await;
+    run(&second, terminal, "echo after");
+    second_view.wait_for_line("after").await;
+
+    // Output fans out to every attached outbox at once, so a `PTY` frame
+    // queued for the first socket connection would arrive before this
+    // response.
+    assert_eq!(first.request(detach).await.unwrap(), Response::Done);
+    assert_eq!(first_view.pty.try_recv(), Err(TryRecvError::Empty));
 }
 
 #[tokio::test]
 async fn shell_exit_ends_the_terminal() {
     let daemon = Daemon::start();
+    let watcher = daemon.connect().await;
+    let (_, mut events) = watch(&watcher).await;
     let client = daemon.connect().await;
     let terminal = open(&client).await;
     let mut view = attach(&client, terminal, 24, 80).await;
     run(&client, terminal, "exit");
-    let closed = timeout(WAIT, async { while view.pty.recv().await.is_some() {} }).await;
-    assert!(
-        closed.is_ok(),
-        "the pty receiver closes after the shell exits"
-    );
+    view.wait_for_close().await;
+    wait_for_event(&mut events, Event::TerminalExited { terminal }).await;
 
     let request = Request::AttachTerminal {
         terminal,

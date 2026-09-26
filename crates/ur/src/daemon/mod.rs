@@ -67,5 +67,6 @@ async fn run<S: ConnectTo<Client> + 'static>(
             state.lock().unwrap().set_server(Err(reason));
         }
     }
-    server::serve(listener, Arc::default(), state, state_file).await
+    let terminals = Arc::new(terminal::Terminals::new(state.clone()));
+    server::serve(listener, terminals, state, state_file).await
 }

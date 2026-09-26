@@ -4,9 +4,9 @@ import { e2eTest } from "./harness.ts";
 
 e2eTest("the empty states follow the workspaces and the selection", async (environment) => {
   const gui = await environment.openGui();
-  await gui.waitForText(".empty", "No workspaces");
-  await environment.newSession();
   await gui.waitForText(".empty", "Select a session");
+  await environment.ur("workspace", "rm", "home");
+  await gui.waitForText(".empty", "No workspaces");
 });
 
 e2eTest("a session created from the CLI answers a prompt sent from the editor", async (environment) => {
@@ -89,7 +89,7 @@ e2eTest("a session that comes back with its workspace shows its thread", async (
   await gui.waitForText(".block.agent", "you said: hello");
 
   await environment.ur("workspace", "rm", "home");
-  await gui.waitForNone(".sidebar .row:not(.terminal-row)");
+  await gui.waitForNone(".workspace .row");
   await environment.ur("workspace", "add", "home", environment.home);
   await gui.click(".sidebar .row", "New session");
   await gui.waitForText(".block.agent", "you said: hello");

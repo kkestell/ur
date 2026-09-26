@@ -1,22 +1,26 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, anyhow, bail};
 use bytes::Bytes;
-use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
-use ur_client::{DaemonMessage, Event, Frame, TerminalId};
+use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use ur_client::{Frame, TerminalId, TerminalSummary};
 
 use super::server::Outbox;
+use super::state::State;
 
 const INITIAL_ROWS: u16 = 24;
 const INITIAL_COLS: u16 = 80;
 const ENTER_ALTERNATE_SCREEN: &[u8] = b"\x1b[?1049h";
 
-/// The daemon's terminals by ID, and the next ID.
-#[derive(Default)]
+/// The daemon's terminals by ID, and the next ID. Their terminal summaries
+/// live in `State`. Locks are taken in the order `State`, the terminal map,
+/// then a terminal's `output`.
 pub struct Terminals {
+    state: Arc<Mutex<State>>,
     terminals: Mutex<HashMap<TerminalId, Arc<Terminal>>>,
     last_id: AtomicU32,
 }
@@ -25,6 +29,7 @@ struct Terminal {
     output: Mutex<Output>,
     /// Separate from `output` so a slow write never blocks output.
     writer: Mutex<Box<dyn Write + Send>>,
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
 }
 
 /// What the reader thread and terminal attachments share. Holding one lock
@@ -32,20 +37,48 @@ struct Terminal {
 /// registration of its outbox.
 struct Output {
     master: Box<dyn MasterPty + Send>,
-    parser: vt100::Parser,
+    parser: vt100::Parser<Title>,
     outboxes: Vec<Outbox>,
 }
 
+/// Records the terminal title a program sets with OSC 0 or OSC 2.
+struct Title {
+    changed: Option<String>,
+}
+
+impl vt100::Callbacks for Title {
+    fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
+        self.changed = Some(String::from_utf8_lossy(title).into_owned());
+    }
+}
+
 impl Terminals {
-    /// Starts a login shell. portable-pty runs `$SHELL` and starts it in
-    /// `$HOME` when no working directory is set.
-    pub fn open(self: &Arc<Self>) -> anyhow::Result<TerminalId> {
+    pub fn new(state: Arc<Mutex<State>>) -> Terminals {
+        Terminals {
+            state,
+            terminals: Mutex::default(),
+            last_id: AtomicU32::default(),
+        }
+    }
+
+    /// Starts a login shell in the workspace path. portable-pty runs `$SHELL`,
+    /// whose file name is the first terminal title. `State` stays locked
+    /// until the terminal summary is added, so the workspace cannot be removed
+    /// first, and the reader thread starts only after it.
+    pub fn open(self: &Arc<Self>, workspace: &str) -> anyhow::Result<TerminalId> {
+        let mut state = self.state.lock().unwrap();
+        let path = state.workspace_path(workspace)?;
         let pair = native_pty_system()
             .openpty(size(INITIAL_ROWS, INITIAL_COLS))
             .context("opening a PTY")?;
         let mut command = CommandBuilder::new_default_prog();
+        command.cwd(path);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
+        let shell = command.get_shell();
+        let title = Path::new(&shell)
+            .file_name()
+            .map_or(shell.clone(), |name| name.to_string_lossy().into_owned());
         let child = pair
             .slave
             .spawn_command(command)
@@ -59,12 +92,24 @@ impl Terminals {
             output: Mutex::new(Output {
                 master: pair.master,
                 // No scrollback: the screen snapshot never includes it.
-                parser: vt100::Parser::new(INITIAL_ROWS, INITIAL_COLS, 0),
+                parser: vt100::Parser::new_with_callbacks(
+                    INITIAL_ROWS,
+                    INITIAL_COLS,
+                    0,
+                    Title { changed: None },
+                ),
                 outboxes: Vec::new(),
             }),
             writer: Mutex::new(writer),
+            killer: Mutex::new(child.clone_killer()),
         });
         self.terminals.lock().unwrap().insert(id, terminal.clone());
+        state.add_terminal(TerminalSummary {
+            terminal: id,
+            workspace: workspace.to_string(),
+            title,
+        });
+        drop(state);
 
         let terminals = self.clone();
         std::thread::spawn(move || terminals.read(id, &terminal, reader, child));
@@ -102,6 +147,33 @@ impl Terminals {
         Ok(())
     }
 
+    /// Stops sending the terminal's output to this outbox's socket connection.
+    pub fn detach(&self, id: TerminalId, outbox: &Outbox) -> anyhow::Result<()> {
+        let terminals = self.terminals.lock().unwrap();
+        let terminal = terminals.get(&id).ok_or_else(|| unknown(id))?;
+        terminal
+            .output
+            .lock()
+            .unwrap()
+            .outboxes
+            .retain(|other| !other.same_connection(outbox));
+        Ok(())
+    }
+
+    /// Sends `SIGHUP` to the shell without waiting. The shell passes it to its
+    /// jobs, and the kernel sends it to the foreground process group when the
+    /// shell exits. The reader thread ends the terminal once the PTY closes.
+    pub fn close(&self, id: TerminalId) -> anyhow::Result<()> {
+        let terminals = self.terminals.lock().unwrap();
+        let terminal = terminals.get(&id).ok_or_else(|| unknown(id))?;
+        terminal
+            .killer
+            .lock()
+            .unwrap()
+            .kill()
+            .with_context(|| format!("closing terminal {id}"))
+    }
+
     pub fn resize(&self, id: TerminalId, rows: u16, cols: u16) -> anyhow::Result<()> {
         let terminals = self.terminals.lock().unwrap();
         let terminal = terminals.get(&id).ok_or_else(|| unknown(id))?;
@@ -122,8 +194,8 @@ impl Terminals {
         Ok(())
     }
 
-    /// The reader thread: feeds the parser, fans the output out, and ends the
-    /// terminal when the shell exits.
+    /// The reader thread: feeds the parser, fans the output out, reports
+    /// terminal title changes, and ends the terminal when the shell exits.
     fn read(
         &self,
         id: TerminalId,
@@ -137,24 +209,25 @@ impl Terminals {
                 Ok(0) | Err(_) => break,
                 Ok(len) => len,
             };
-            let mut output = terminal.output.lock().unwrap();
-            output.parser.process(&buffer[..len]);
-            let frame = Frame::Pty {
-                id,
-                bytes: Bytes::copy_from_slice(&buffer[..len]),
+            let title = {
+                let mut output = terminal.output.lock().unwrap();
+                output.parser.process(&buffer[..len]);
+                let frame = Frame::Pty {
+                    id,
+                    bytes: Bytes::copy_from_slice(&buffer[..len]),
+                };
+                output.outboxes.retain(|outbox| outbox.send(frame.clone()));
+                output.parser.callbacks_mut().changed.take()
             };
-            output.outboxes.retain(|outbox| outbox.send(frame.clone()));
+            if let Some(title) = title {
+                self.state.lock().unwrap().set_terminal_title(id, title);
+            }
         }
 
         let _ = child.wait();
         self.terminals.lock().unwrap().remove(&id);
-        let outboxes = std::mem::take(&mut terminal.output.lock().unwrap().outboxes);
-        let exited = Frame::json(&DaemonMessage::Event {
-            event: Event::TerminalExited { terminal: id },
-        });
-        for outbox in outboxes {
-            outbox.send(exited.clone());
-        }
+        let attached = std::mem::take(&mut terminal.output.lock().unwrap().outboxes);
+        self.state.lock().unwrap().remove_terminal(id, &attached);
     }
 }
 

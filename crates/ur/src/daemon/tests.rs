@@ -263,6 +263,7 @@ async fn watch(daemon: &TestDaemon) -> Watch {
             workspaces,
             sessions,
             capabilities,
+            terminals: _,
         }) => Watch {
             workspaces,
             sessions,
@@ -963,7 +964,12 @@ async fn session_requests_fail_without_a_server() {
         }
         assert!(
             matches!(
-                client.request(Request::OpenTerminal).await.unwrap(),
+                client
+                    .request(Request::OpenTerminal {
+                        workspace: "home".to_string()
+                    })
+                    .await
+                    .unwrap(),
                 Response::Opened { .. }
             ),
             "{case}: open_terminal works"

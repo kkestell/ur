@@ -37,8 +37,8 @@ against the fake server. `pnpm -C app e2e` builds the daemon, the fake server, a
 embedded WebDriver server, into `target/e2e`, then runs the tests in `app/e2e/` one at a time. Each
 test gets a `TestEnvironment`: a temporary directory for the socket, `HOME`, the GUI state file, the
 fake server's saved history file, and a config file that launches the fake server, and a daemon
-started in it. The saved history file lets sessions outlive a daemon restart. A failing test saves a
-screenshot to `app/e2e/artifacts/` for diagnosis.
+started in it with one workspace, `home`, at the test's `HOME`. The saved history file lets sessions
+outlive a daemon restart. A failing test saves a screenshot to `app/e2e/artifacts/` for diagnosis.
 
 Tests drive the GUI the way the user does, through clicks, the editor, and the terminal, and assert
 on what the window shows. `TestEnvironment.ur()` runs the command line for setup the GUI does
@@ -46,10 +46,11 @@ through native dialogs or menus, which WebDriver cannot drive, and `Gui.request(
 through the core's `request` command for the same reason. `openGui()` makes `ur-app` the frontmost
 application with `Gui.focusWindow()`, since the GUI focuses its visible sessions only while its
 window has focus and WebDriver cannot focus the window; a test that depends on focus calls it again
-before that step. `Gui.showTerminal()` shows the terminal, so its view is the only xterm.js on the
-page. Terminal tests assert on terminal text, read from the xterm.js rows, and type through
-`Gui.type`, not WebDriver key actions. The fake server's prompt scripts, named in `fake_server()`'s
-documentation, give agent session tests replies, permission requests, and errors.
+before that step. `Gui.showTerminal()` opens a terminal in `home` and selects its terminal row, so
+its view is the only xterm.js on the page. Terminal tests assert on terminal text, read from the
+xterm.js rows, and type through `Gui.type`, not WebDriver key actions. The fake server's prompt
+scripts, named in `fake_server()`'s documentation, give agent session tests replies, permission
+requests, and errors.
 
 ### End-to-end guarantee list
 
@@ -58,6 +59,11 @@ documentation, give agent session tests replies, permission requests, and errors
   input.
 - Quitting a restored full-screen application returns to the shell, and none of its last screen is
   left behind.
+- A terminal row shows the shell's name until a program sets a title.
+- A terminal starts in its workspace's directory.
+- Close Terminal removes the terminal's row.
+- A terminal whose shell exits leaves the sidebar.
+- Removing a workspace stops its terminals.
 - The empty states follow the workspaces and the selection.
 - A session created from the command line answers a prompt sent from the editor.
 - Stop cancels a running turn.

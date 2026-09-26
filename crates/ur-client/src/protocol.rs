@@ -16,7 +16,8 @@ pub type TerminalId = u32;
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
 pub enum Request {
-    OpenTerminal,
+    /// Starts a login shell in the workspace path.
+    OpenTerminal { workspace: String },
     AttachTerminal {
         terminal: TerminalId,
         rows: u16,
@@ -27,25 +28,25 @@ pub enum Request {
         rows: u16,
         cols: u16,
     },
-    /// Sends the watch snapshot, then every change to workspaces and sessions.
+    /// Stops sending the terminal's output to this socket connection. The
+    /// terminal keeps running.
+    DetachTerminal { terminal: TerminalId },
+    /// Sends `SIGHUP` to the terminal's shell. The terminal is removed, and
+    /// `terminal_exited` sent, when the shell exits.
+    CloseTerminal { terminal: TerminalId },
+    /// Sends the watch snapshot, then every change to workspaces, sessions,
+    /// and terminals.
     /// Watching again from the same socket connection replaces the earlier
     /// registration.
     Watch,
     /// Adds a workspace. `path` must be an absolute path to a directory, and is
     /// stored as is.
-    AddWorkspace {
-        name: String,
-        path: PathBuf,
-    },
+    AddWorkspace { name: String, path: PathBuf },
     /// Cancels the workspace's running prompts, then removes the workspace and
-    /// its sessions.
-    RemoveWorkspace {
-        name: String,
-    },
+    /// its sessions, and stops its terminals.
+    RemoveWorkspace { name: String },
     /// Creates a session with the workspace path as its `cwd`.
-    NewSession {
-        workspace: String,
-    },
+    NewSession { workspace: String },
     /// Deletes a session from the server, when it advertises `session/delete`.
     /// A running turn is cancelled first, and the response waits for
     /// `session/delete` to return.
@@ -124,16 +125,19 @@ pub enum Response {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
 pub enum Event {
-    /// The shell of an attached terminal exited, and the daemon removed the
-    /// terminal.
+    /// A terminal's shell exited, and the daemon removed the terminal. Sent
+    /// once to each watching or attached socket connection, after all of the
+    /// terminal's output.
     TerminalExited {
         terminal: TerminalId,
     },
-    /// Every workspace in the order it was added, and every session in the
-    /// order it was created, sent before later changes.
+    /// Every workspace in the order it was added, every session in the order
+    /// it was created, and every terminal in the order it was opened, sent
+    /// before later changes.
     WatchSnapshot {
         workspaces: Vec<Workspace>,
         sessions: Vec<SessionSummary>,
+        terminals: Vec<TerminalSummary>,
         /// The current ACP connection's capabilities, or `None` without one.
         #[ts(type = "import(\"@agentclientprotocol/sdk\").AgentCapabilities | null")]
         capabilities: Option<Box<AgentCapabilities>>,
@@ -147,7 +151,7 @@ pub enum Event {
     WorkspaceAdded {
         workspace: Workspace,
     },
-    /// The workspace and its sessions are gone.
+    /// The workspace, its sessions, and its terminals are gone.
     WorkspaceRemoved {
         name: String,
     },
@@ -155,6 +159,10 @@ pub enum Event {
     /// activity changed.
     SessionChanged {
         summary: SessionSummary,
+    },
+    /// A terminal was opened, or its terminal title changed.
+    TerminalChanged {
+        summary: TerminalSummary,
     },
     /// The session was deleted and is gone from the sidebar.
     SessionDeleted {
@@ -212,6 +220,15 @@ pub struct SessionSummary {
     pub title: Option<String>,
     /// The last activity, from `session/list` or `session_info_update`.
     pub updated_at: Option<String>,
+}
+
+/// One terminal as watch shows it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TerminalSummary {
+    pub terminal: TerminalId,
+    pub workspace: String,
+    pub title: String,
 }
 
 /// The session status.

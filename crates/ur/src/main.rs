@@ -59,7 +59,8 @@ enum Command {
 enum WorkspaceCommand {
     /// Add a workspace with a name and a directory.
     Add { name: String, path: PathBuf },
-    /// Cancel a workspace's running prompts and remove it with its sessions.
+    /// Cancel a workspace's running prompts, stop its terminals, and remove it
+    /// with its sessions.
     Rm { name: String },
 }
 

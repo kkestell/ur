@@ -22,7 +22,8 @@ type TauriWindow = {
 /**
  * One test's temporary directory and daemon, and the GUI launches made in it.
  * The daemon's config file launches the fake server, which keeps its saved
- * history in the directory, so sessions outlive a daemon restart.
+ * history in the directory, so sessions outlive a daemon restart. Its one
+ * workspace, `home`, is the test's `HOME`.
  */
 export class TestEnvironment {
   readonly home: string;
@@ -57,6 +58,7 @@ export class TestEnvironment {
     // The core retries until the daemon is up, but waiting here keeps the
     // no-connection state out of the tests.
     await waitFor("the daemon to listen", () => canConnect(environment.#socket));
+    await environment.ur("workspace", "add", "home", environment.home);
     return environment;
   }
 
@@ -97,9 +99,8 @@ export class TestEnvironment {
     return stdout.trim();
   }
 
-  /** Adds the `home` workspace at `home` and creates a session in it. */
+  /** Creates a session in the `home` workspace. */
   async newSession(): Promise<string> {
-    await this.ur("workspace", "add", "home", this.home);
     return this.ur("new", "home");
   }
 
@@ -120,7 +121,8 @@ export class TestEnvironment {
     await waitFor("the WebDriver server", webdriverReady);
     await gui.connect();
     await gui.focusWindow();
-    await waitFor("the sidebar to render", () => gui.hasElement(".sidebar"));
+    // The workspace comes with the watch snapshot.
+    await waitFor("the sidebar to render", () => gui.hasElement(".workspace"));
     return gui;
   }
 
@@ -214,12 +216,15 @@ export class Gui {
   }
 
   /**
-   * Selects the sidebar's Terminal row, unless a reopened GUI restored it, and
-   * waits for the terminal to render.
+   * Opens a terminal in the `home` workspace and selects its terminal row,
+   * unless a reopened GUI restored the terminal selection, and waits for the
+   * terminal to render.
    */
   async showTerminal(): Promise<void> {
     if (!(await this.hasElement(".xterm"))) {
-      await this.click(".terminal-row");
+      // WebDriver cannot drive the native workspace menu.
+      await this.request({ type: "open_terminal", workspace: "home" });
+      await this.click(".sidebar .row:has(.terminal-icon)");
     }
     await waitFor("the terminal to render", async () =>
       (await this.lines()).some((row) => row !== ""),

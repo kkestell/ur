@@ -1,11 +1,13 @@
 import { expect, test, vi } from "vitest";
 import type { SessionSummary } from "../ipc/bindings/SessionSummary";
+import type { TerminalSummary } from "../ipc/bindings/TerminalSummary";
 import {
   attentionCount,
   initialWatch,
   orderedWorkspaces,
   reduceWatch,
   workspaceSessions,
+  workspaceTerminals,
 } from "./watch";
 
 // The store installs its Tauri listeners when it loads.
@@ -31,6 +33,10 @@ function summary(
   };
 }
 
+function terminal(id: number, workspace: string, title = "zsh"): TerminalSummary {
+  return { terminal: id, workspace, title };
+}
+
 const connected = reduceWatch(initialWatch, {
   type: "connection",
   connected: true,
@@ -40,6 +46,7 @@ const connected = reduceWatch(initialWatch, {
 test("sessions_order_by_last_activity", () => {
   const state = reduceWatch(connected, {
     type: "watch_snapshot",
+    terminals: [],
     capabilities: null,
     workspaces: [{ name: "ws", path: "/ws" }],
     sessions: [
@@ -59,6 +66,7 @@ test("sessions_order_by_last_activity", () => {
 test("sessions_needing_attention_come_first", () => {
   const state = reduceWatch(connected, {
     type: "watch_snapshot",
+    terminals: [],
     capabilities: null,
     workspaces: [{ name: "ws", path: "/ws" }],
     sessions: [
@@ -83,6 +91,7 @@ test("sessions_needing_attention_come_first", () => {
 test("workspaces_needing_attention_come_first", () => {
   const state = reduceWatch(connected, {
     type: "watch_snapshot",
+    terminals: [],
     capabilities: null,
     workspaces: [
       { name: "a", path: "/a" },
@@ -103,6 +112,7 @@ test("workspaces_needing_attention_come_first", () => {
 test("a_removed_workspace_drops_its_sessions", () => {
   let state = reduceWatch(connected, {
     type: "watch_snapshot",
+    terminals: [],
     capabilities: null,
     workspaces: [
       { name: "a", path: "/a" },
@@ -118,6 +128,7 @@ test("a_removed_workspace_drops_its_sessions", () => {
 test("a_disconnect_clears_the_watch_state", () => {
   let state = reduceWatch(connected, {
     type: "watch_snapshot",
+    terminals: [terminal(1, "a")],
     capabilities: null,
     workspaces: [{ name: "a", path: "/a" }],
     sessions: [summary("s1", "a", null)],
@@ -129,6 +140,7 @@ test("a_disconnect_clears_the_watch_state", () => {
 test("a_deleted_session_leaves_the_sidebar", () => {
   let state = reduceWatch(connected, {
     type: "watch_snapshot",
+    terminals: [],
     capabilities: null,
     workspaces: [{ name: "a", path: "/a" }],
     sessions: [summary("s1", "a", null), summary("s2", "a", null)],
@@ -140,6 +152,7 @@ test("a_deleted_session_leaves_the_sidebar", () => {
 test("the_capabilities_come_from_the_snapshot_and_later_changes", () => {
   let state = reduceWatch(connected, {
     type: "watch_snapshot",
+    terminals: [],
     capabilities: { loadSession: true },
     workspaces: [],
     sessions: [],
@@ -150,4 +163,48 @@ test("the_capabilities_come_from_the_snapshot_and_later_changes", () => {
     capabilities: { promptCapabilities: { image: true } },
   });
   expect(state.capabilities).toEqual({ promptCapabilities: { image: true } });
+});
+
+test("terminals_follow_watch_events", () => {
+  let state = reduceWatch(connected, {
+    type: "watch_snapshot",
+    terminals: [terminal(1, "a")],
+    capabilities: null,
+    workspaces: [
+      { name: "a", path: "/a" },
+      { name: "b", path: "/b" },
+    ],
+    sessions: [],
+  });
+  expect(state.terminals).toEqual([terminal(1, "a")]);
+  state = reduceWatch(state, { type: "terminal_changed", summary: terminal(2, "b") });
+  state = reduceWatch(state, { type: "terminal_changed", summary: terminal(3, "a") });
+  expect(state.terminals).toEqual([terminal(1, "a"), terminal(2, "b"), terminal(3, "a")]);
+  state = reduceWatch(state, {
+    type: "terminal_changed",
+    summary: terminal(2, "b", "npm run dev"),
+  });
+  expect(state.terminals).toEqual([
+    terminal(1, "a"),
+    terminal(2, "b", "npm run dev"),
+    terminal(3, "a"),
+  ]);
+  state = reduceWatch(state, { type: "terminal_exited", terminal: 1 });
+  expect(state.terminals).toEqual([terminal(2, "b", "npm run dev"), terminal(3, "a")]);
+  state = reduceWatch(state, { type: "workspace_removed", name: "a" });
+  expect(state.terminals).toEqual([terminal(2, "b", "npm run dev")]);
+});
+
+test("workspace_terminals_keep_their_opening_order", () => {
+  const state = reduceWatch(connected, {
+    type: "watch_snapshot",
+    terminals: [terminal(1, "a"), terminal(2, "b"), terminal(3, "a")],
+    capabilities: null,
+    workspaces: [
+      { name: "a", path: "/a" },
+      { name: "b", path: "/b" },
+    ],
+    sessions: [],
+  });
+  expect(workspaceTerminals(state, "a").map((summary) => summary.terminal)).toEqual([1, 3]);
 });

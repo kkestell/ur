@@ -2,6 +2,7 @@ import type { AgentCapabilities } from "@agentclientprotocol/sdk";
 import { useSyncExternalStore } from "react";
 import { type Connection, type WatchEvent, onConnection, onWatch } from "../ipc";
 import type { SessionSummary } from "../ipc/bindings/SessionSummary";
+import type { TerminalSummary } from "../ipc/bindings/TerminalSummary";
 import type { Workspace } from "../ipc/bindings/Workspace";
 
 export type WatchState = {
@@ -9,6 +10,8 @@ export type WatchState = {
   socket: string;
   workspaces: Workspace[];
   sessions: SessionSummary[];
+  /** In the order they were opened. */
+  terminals: TerminalSummary[];
   /** The current ACP connection's capabilities, or `null` without one. */
   capabilities: AgentCapabilities | null;
 };
@@ -20,12 +23,14 @@ export const initialWatch: WatchState = {
   socket: "",
   workspaces: [],
   sessions: [],
+  terminals: [],
   capabilities: null,
 };
 
 /**
  * Applies one watch or connection event. A disconnect clears the workspaces,
- * sessions, and capabilities; the next watch snapshot fills them again.
+ * sessions, terminals, and capabilities; the next watch snapshot fills them
+ * again.
  */
 export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEvent): WatchState {
   switch (event.type) {
@@ -36,6 +41,7 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
         socket: event.socket,
         workspaces: event.connected ? state.workspaces : [],
         sessions: event.connected ? state.sessions : [],
+        terminals: event.connected ? state.terminals : [],
         capabilities: event.connected ? state.capabilities : null,
       };
     case "watch_snapshot":
@@ -43,6 +49,7 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
         ...state,
         workspaces: event.workspaces,
         sessions: event.sessions,
+        terminals: event.terminals,
         capabilities: event.capabilities,
       };
     case "capabilities_changed":
@@ -54,6 +61,7 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
         ...state,
         workspaces: state.workspaces.filter((workspace) => workspace.name !== event.name),
         sessions: state.sessions.filter((session) => session.workspace !== event.name),
+        terminals: state.terminals.filter((terminal) => terminal.workspace !== event.name),
       };
     case "session_changed": {
       const index = state.sessions.findIndex(
@@ -71,6 +79,23 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
       return {
         ...state,
         sessions: state.sessions.filter((session) => session.session !== event.session),
+      };
+    case "terminal_changed": {
+      const index = state.terminals.findIndex(
+        (terminal) => terminal.terminal === event.summary.terminal,
+      );
+      const terminals = [...state.terminals];
+      if (index === -1) {
+        terminals.push(event.summary);
+      } else {
+        terminals[index] = event.summary;
+      }
+      return { ...state, terminals };
+    }
+    case "terminal_exited":
+      return {
+        ...state,
+        terminals: state.terminals.filter((terminal) => terminal.terminal !== event.terminal),
       };
   }
 }
@@ -103,6 +128,11 @@ export function workspaceSessions(state: WatchState, workspace: string): Session
       }
       return b.updated_at.localeCompare(a.updated_at);
     });
+}
+
+/** The workspace's terminals in the order they were opened. */
+export function workspaceTerminals(state: WatchState, workspace: string): TerminalSummary[] {
+  return state.terminals.filter((terminal) => terminal.workspace === workspace);
 }
 
 /** The workspaces with a session needing attention first, each group in creation order. */

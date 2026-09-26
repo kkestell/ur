@@ -5,6 +5,7 @@ import type { Request } from "./ipc/bindings/Request";
 import type { Response } from "./ipc/bindings/Response";
 import type { SessionSummary } from "./ipc/bindings/SessionSummary";
 import type { Status } from "./ipc/bindings/Status";
+import type { TerminalSummary } from "./ipc/bindings/TerminalSummary";
 import type { WatchState } from "./store/watch";
 
 /**
@@ -31,13 +32,34 @@ export async function newSession(
   }
 }
 
+/** Opens a terminal in the workspace, then selects it. */
+export async function newTerminal(
+  workspace: string,
+  onSelect: (selection: Selection) => void,
+): Promise<void> {
+  const response = await send({ type: "open_terminal", workspace });
+  if (response?.type === "opened") {
+    onSelect({ type: "terminal", terminal: response.terminal });
+  }
+}
+
+/** Stops the terminal's shell. The terminal leaves the sidebar when it exits. */
+export async function closeTerminal(terminal: number): Promise<void> {
+  await send({ type: "close_terminal", terminal });
+}
+
 /** Asks for confirmation, then removes the workspace. */
 export async function removeWorkspace(watch: WatchState, name: string): Promise<void> {
   const running = watch.sessions.some(
     (session) => session.workspace === name && isRunning(session.status),
   );
+  const terminals = watch.terminals.some((terminal) => terminal.workspace === name);
   const confirmed = await ask(
-    lines(`Remove "${name}"?`, running && "Its running turns will be cancelled."),
+    lines(
+      `Remove "${name}"?`,
+      running && "Its running turns will be cancelled.",
+      terminals && "Its terminals will be closed.",
+    ),
     { title: "Remove workspace?", kind: "warning", okLabel: "Remove" },
   );
   if (confirmed) {
@@ -60,7 +82,7 @@ export async function deleteSession(summary: SessionSummary): Promise<void> {
   }
 }
 
-/** The workspace menu: New Session and Remove Workspace…. */
+/** The workspace menu: New Session, New Terminal, and Remove Workspace…. */
 export async function showWorkspaceMenu(
   watch: WatchState,
   workspace: string,
@@ -69,6 +91,7 @@ export async function showWorkspaceMenu(
   const menu = await Menu.new({
     items: [
       { text: "New Session", action: () => void newSession(workspace, onSelect) },
+      { text: "New Terminal", action: () => void newTerminal(workspace, onSelect) },
       { item: "Separator" },
       { text: "Remove Workspace…", action: () => void removeWorkspace(watch, workspace) },
     ],
@@ -80,6 +103,14 @@ export async function showWorkspaceMenu(
 export async function showSessionMenu(summary: SessionSummary): Promise<void> {
   const menu = await Menu.new({
     items: [{ text: "Delete…", action: () => void deleteSession(summary) }],
+  });
+  await menu.popup();
+}
+
+/** The terminal menu: Close Terminal. */
+export async function showTerminalMenu(summary: TerminalSummary): Promise<void> {
+  const menu = await Menu.new({
+    items: [{ text: "Close Terminal", action: () => void closeTerminal(summary.terminal) }],
   });
   await menu.popup();
 }

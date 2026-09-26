@@ -1,7 +1,13 @@
-import { addWorkspace, showSessionMenu, showWorkspaceMenu } from "../actions";
+import { addWorkspace, showSessionMenu, showTerminalMenu, showWorkspaceMenu } from "../actions";
 import type { Selection } from "../ipc";
 import type { SessionSummary } from "../ipc/bindings/SessionSummary";
-import { type WatchState, attentionCount, orderedWorkspaces, workspaceSessions } from "../store/watch";
+import {
+  type WatchState,
+  attentionCount,
+  orderedWorkspaces,
+  workspaceSessions,
+  workspaceTerminals,
+} from "../store/watch";
 
 export function Sidebar({
   watch,
@@ -58,16 +64,29 @@ export function Sidebar({
                   <StatusMark status={session.status} />
                 </div>
               ))}
+              {workspaceTerminals(watch, workspace.name).map((terminal) => (
+                <div
+                  key={terminal.terminal}
+                  className={
+                    "row" +
+                    (selection?.type === "terminal" && selection.terminal === terminal.terminal
+                      ? " selected"
+                      : "")
+                  }
+                  onClick={() => onSelect({ type: "terminal", terminal: terminal.terminal })}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    void showTerminalMenu(terminal);
+                  }}
+                >
+                  <span className="terminal-icon">&gt;_</span>
+                  <span className="label">{terminal.title}</span>
+                </div>
+              ))}
             </div>
           </div>
         );
       })}
-      <div
-        className={"row terminal-row" + (selection?.type === "terminal" ? " selected" : "")}
-        onClick={() => onSelect({ type: "terminal" })}
-      >
-        Terminal
-      </div>
     </nav>
   );
 }

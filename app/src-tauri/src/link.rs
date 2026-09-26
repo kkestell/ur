@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -6,11 +6,10 @@ use std::time::Duration;
 
 use tauri::ipc::{Channel, Response as ChannelBytes};
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::task::AbortHandle;
 use ur_client::{Client, Event, Request, Response, TerminalId};
 
 use crate::gui_state::Connection;
-
-const SHELL_EXITED: &[u8] = b"\r\n[shell exited]\r\n";
 
 /// The wait between connection attempts.
 const RETRY_DELAY: Duration = Duration::from_millis(500);
@@ -21,6 +20,8 @@ pub struct Link {
     socket: PathBuf,
     desired: Mutex<Desired>,
     client: Mutex<Option<Client>>,
+    /// The task forwarding each attached terminal's output.
+    attachments: Mutex<HashMap<TerminalId, AbortHandle>>,
 }
 
 /// The desired set: what `run()` restores after reconnecting. The focus sent
@@ -62,6 +63,7 @@ impl Link {
             socket,
             desired: Mutex::new(Desired::default()),
             client: Mutex::new(None),
+            attachments: Mutex::new(HashMap::new()),
         }
     }
 
@@ -118,14 +120,14 @@ impl Link {
                         .remove(&session.to_string());
                 }
                 let name = match &event {
-                    // The terminal attachment path already ends its output.
-                    Event::TerminalExited { .. } => continue,
                     Event::WatchSnapshot { .. }
                     | Event::CapabilitiesChanged { .. }
                     | Event::WorkspaceAdded { .. }
                     | Event::WorkspaceRemoved { .. }
                     | Event::SessionChanged { .. }
-                    | Event::SessionDeleted { .. } => "watch",
+                    | Event::SessionDeleted { .. }
+                    | Event::TerminalChanged { .. }
+                    | Event::TerminalExited { .. } => "watch",
                     Event::SessionSnapshot { .. }
                     | Event::Entry { .. }
                     | Event::ConfigOptionsChanged { .. }
@@ -216,7 +218,9 @@ impl Link {
     }
 
     /// Attaches the terminal and forwards its output to `output` until the
-    /// terminal exits or the socket connection ends.
+    /// terminal exits, the socket connection ends, or `detach()`. Attaching
+    /// the same terminal again closes the earlier `pty` receiver, which ends
+    /// the earlier forwarding task.
     pub async fn attach(
         &self,
         terminal: TerminalId,
@@ -237,15 +241,37 @@ impl Link {
             Ok(other) => return Err(format!("unexpected response {other:?}")),
             Err(error) => return Err(error.to_string()),
         }
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             while let Some(bytes) = pty.recv().await {
                 if output.send(ChannelBytes::new(bytes.to_vec())).is_err() {
                     return;
                 }
             }
-            let _ = output.send(ChannelBytes::new(SHELL_EXITED.to_vec()));
         });
+        self.attachments
+            .lock()
+            .unwrap()
+            .insert(terminal, task.abort_handle());
         Ok(())
+    }
+
+    /// Stops forwarding the terminal's output and sends `detach_terminal`.
+    /// Aborting the forwarding task drops its `pty` receiver, so `Client`
+    /// drops the route. While disconnected, there is no terminal attachment
+    /// to end.
+    pub async fn detach(&self, terminal: TerminalId) -> Result<(), String> {
+        if let Some(task) = self.attachments.lock().unwrap().remove(&terminal) {
+            task.abort();
+        }
+        let Ok(client) = self.client() else {
+            return Ok(());
+        };
+        match client.request(Request::DetachTerminal { terminal }).await {
+            Ok(Response::Done) => Ok(()),
+            Ok(Response::Error { message }) => Err(message),
+            Ok(other) => Err(format!("unexpected response {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
     }
 
     pub async fn terminal_input(&self, terminal: TerminalId, data: String) -> io::Result<()> {

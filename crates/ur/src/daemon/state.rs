@@ -11,13 +11,13 @@ use agent_client_protocol::{Agent, ConnectionTo, Responder};
 use anyhow::{anyhow, bail};
 use ur_client::{
     DaemonMessage, Entry, Event, Frame, PendingPermission, Response, SessionSummary, Status,
-    Workspace,
+    TerminalId, TerminalSummary, Workspace,
 };
 
 use super::server::Outbox;
 
-/// The daemon's ACP connection, workspaces, and sessions, behind one std
-/// mutex. Methods queue their events on outboxes while the lock is held, which
+/// The daemon's ACP connection, workspaces, sessions, and terminal summaries,
+/// behind one std mutex. `Terminals` holds the PTYs and reports to it. Methods queue their events on outboxes while the lock is held, which
 /// keeps each daemon client's events in order. They never wait and never
 /// await.
 pub struct State {
@@ -30,6 +30,8 @@ pub struct State {
     workspaces: Vec<Workspace>,
     /// In the order they were created.
     sessions: Vec<Session>,
+    /// In the order they were opened.
+    terminals: Vec<TerminalSummary>,
     watchers: Vec<Outbox>,
     /// The request ID for the next pending permission request.
     next_request_id: u32,
@@ -108,6 +110,7 @@ impl State {
             generation: 0,
             workspaces,
             sessions: Vec::new(),
+            terminals: Vec::new(),
             watchers: Vec::new(),
             next_request_id: 1,
         }
@@ -183,6 +186,7 @@ impl State {
         outbox.send(event(Event::WatchSnapshot {
             workspaces: self.workspaces.clone(),
             sessions: self.sessions.iter().map(Session::summary).collect(),
+            terminals: self.terminals.clone(),
             capabilities: self
                 .server
                 .as_ref()
@@ -228,16 +232,17 @@ impl State {
     }
 
     /// Calls `save` with the list of workspaces without this one. If it
-    /// succeeds, cancels the workspace's running prompts, removes its sessions,
-    /// and removes it. The cancelled prompts are not waited for; their results
-    /// and later updates find no session. A waiting delete answers `Done`,
-    /// since its session is gone.
+    /// succeeds, cancels the workspace's running prompts, removes its sessions
+    /// and terminal summaries, and removes it. Returns the removed terminals,
+    /// which the caller closes. The cancelled prompts are not waited for; their
+    /// results and later updates find no session. A waiting delete answers
+    /// `Done`, since its session is gone.
     pub fn remove_workspace(
         &mut self,
         name: &str,
         save: impl FnOnce(&[Workspace]) -> anyhow::Result<()>,
         send_cancel: impl Fn(&ConnectionTo<Agent>, &SessionId) -> agent_client_protocol::Result<()>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Vec<TerminalId>> {
         if !self
             .workspaces
             .iter()
@@ -275,13 +280,64 @@ impl State {
             }
         }
         self.sessions.retain(|session| session.workspace != name);
+        let terminals = self
+            .terminals
+            .extract_if(.., |terminal| terminal.workspace == name)
+            .map(|terminal| terminal.terminal)
+            .collect();
         broadcast(
             &mut self.watchers,
             Event::WorkspaceRemoved {
                 name: name.to_string(),
             },
         );
-        Ok(())
+        Ok(terminals)
+    }
+
+    pub fn add_terminal(&mut self, summary: TerminalSummary) {
+        broadcast(
+            &mut self.watchers,
+            Event::TerminalChanged {
+                summary: summary.clone(),
+            },
+        );
+        self.terminals.push(summary);
+    }
+
+    /// Does nothing when the terminal title is unchanged, or the terminal was
+    /// removed with its workspace.
+    pub fn set_terminal_title(&mut self, id: TerminalId, title: String) {
+        let Some(summary) = self
+            .terminals
+            .iter_mut()
+            .find(|summary| summary.terminal == id)
+        else {
+            return;
+        };
+        if summary.title != title {
+            summary.title = title;
+            let summary = summary.clone();
+            broadcast(&mut self.watchers, Event::TerminalChanged { summary });
+        }
+    }
+
+    /// Removes the terminal summary if it is still there, and sends
+    /// `terminal_exited` to every watcher and to each attached outbox whose
+    /// socket connection is not watching, so each gets it once.
+    pub fn remove_terminal(&mut self, id: TerminalId, attached: &[Outbox]) {
+        self.terminals.retain(|summary| summary.terminal != id);
+        let exited = Event::TerminalExited { terminal: id };
+        let frame = event(exited.clone());
+        for outbox in attached {
+            if !self
+                .watchers
+                .iter()
+                .any(|watcher| watcher.same_connection(outbox))
+            {
+                outbox.send(frame.clone());
+            }
+        }
+        broadcast(&mut self.watchers, exited);
     }
 
     /// Adds a session created in `workspace` with the config options from

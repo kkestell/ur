@@ -3,4 +3,4 @@
 /**
  * The session or terminal chosen in the sidebar.
  */
-export type Selection = { "type": "terminal" } | { "type": "session", session: string, };
+export type Selection = { "type": "terminal", terminal: number, } | { "type": "session", session: string, };

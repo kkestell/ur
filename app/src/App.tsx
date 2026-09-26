@@ -27,7 +27,6 @@ export default function App() {
   // `undefined` until the saved selection is read, so nothing is drawn that a
   // click could change before the saved selection replaces it.
   const [selection, setSelection] = useState<Selection | null>();
-  const [terminalError, setTerminalError] = useState<string>();
 
   useEffect(() => {
     connection()
@@ -69,16 +68,22 @@ export default function App() {
   };
 
   // A selected session that is gone, because its workspace was removed or the
-  // daemon restarted without it, shows as no selection.
-  const selected = selection?.type === "session" && visible === null ? null : selection;
+  // daemon restarted without it, shows as no selection. So does a selected
+  // terminal that has exited, or whose `terminal_changed` has not arrived.
+  const terminal =
+    selection?.type === "terminal"
+      ? watch.terminals.find((terminal) => terminal.terminal === selection.terminal)
+      : undefined;
+  const selected =
+    (selection?.type === "session" && visible === null) ||
+    (selection?.type === "terminal" && terminal === undefined)
+      ? null
+      : selection;
 
   let main;
-  if (selected?.type === "terminal") {
-    main = terminalError !== undefined ? (
-      <pre className="error">{terminalError}</pre>
-    ) : (
-      <TerminalPane onError={setTerminalError} />
-    );
+  if (terminal !== undefined) {
+    // Keyed so switching terminals mounts a fresh view that attaches.
+    main = <TerminalPane key={terminal.terminal} summary={terminal} />;
   } else if (selected?.type === "session") {
     // Keyed so the editor's draft and message stay with their session.
     main = <Session key={selected.session} id={selected.session} onSelect={onSelect} />;

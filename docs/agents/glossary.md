@@ -227,10 +227,12 @@
 - **Event**: A JSON message the daemon pushes to a daemon client. Events carry ACP schema types
   unchanged.
 - **Watch**: The request that registers a daemon client for sidebar events: workspaces, their
-  sessions and terminals, each session's title, status, and unread flag, each terminal's title, and
-  the server's capabilities. Pending permission requests arrive in the session status.
+  session summaries and terminal summaries, and the server's capabilities. Pending permission
+  requests arrive in the session status.
 - **Session summary**: One session as watch shows it: its session ID, workspace, session status,
   unread flag, session title, and last activity. It is `SessionSummary` in code.
+- **Terminal summary**: One terminal as watch shows it: its terminal ID, workspace, and terminal
+  title. It is `TerminalSummary` in code.
 - **Subscribe**: The request that registers a daemon client for one session's content: its
   transcript and config options.
 - **Snapshot**: The current state sent before live events: `WatchSnapshot` for watch,
@@ -258,21 +260,25 @@
 - **Thread**: The GUI view of one session's transcript, with the editor below it.
 - **Editor**: The borderless prompt input under a thread, with the command list, image attachment
   chips, the usage indicator, config pickers, and Send or Stop.
-- **Workspace menu**: The native context menu of a workspace row: New Session and Remove Workspace….
+- **Workspace menu**: The native context menu of a workspace row: New Session, New Terminal, and
+  Remove Workspace….
 - **Session menu**: The native context menu of a session row: Delete…, shown when the server
   advertises `session/delete`.
+- **Terminal menu**: The native context menu of a terminal row: Close Terminal. It is
+  `showTerminalMenu()` in code.
 - **Session header**: The row above the thread with the session title and `+`, which creates a
   session in the same workspace.
+- **Terminal header**: The row above a terminal's xterm.js view with the terminal icon and terminal
+  title. It is `terminal-header` in CSS.
 - **Command list**: The list of matching slash commands above the editor while typing `/`.
 - **Config picker**: The editor control for one config option: a list of a select option's values,
   or a toggle for a boolean option. It is `ConfigPicker` in code.
 - **Pane**: A dockview group holding tabs. The active pane receives sidebar selections.
 - **Tab**: A dockview panel for one agent session or terminal. Closing it changes only the layout.
 - **Layout**: The dockview arrangement of panes and tabs, saved in the GUI state file.
-- **Selection**: The session or the Terminal row's terminal chosen in the sidebar, saved in the GUI
-  state file.
-- **Terminal row**: The sidebar row below the workspaces that selects the GUI's one terminal. It
-  lasts until Workspace terminal controls list terminals under their workspaces.
+- **Selection**: The session or terminal chosen in the sidebar, saved in the GUI state file.
+- **Terminal row**: A sidebar row for one terminal, listed under its workspace after the sessions,
+  showing the terminal icon and terminal title.
 
 ### Notifications and hooks
 

@@ -6,7 +6,8 @@ changing its launch configuration, not ur's code. When all milestones in `todo.m
 run ten agent sessions across three repositories, close the window, come back later, see which
 sessions need attention, and approve, answer, or cancel them from the GUI or the command line.
 Terminal panes keep shells and TUI apps running when the GUI closes. Reopening a pane restores the
-running application's screen. Terminals last for the lifetime of the daemon.
+running application's screen. Terminals last until closed, their workspace is removed, or the daemon
+exits.
 
 This is a hobby project. Keep the implementation small, make the ordinary workflow work, and use
 testing to find the next problems worth solving. Prefer explicit limitations to speculative recovery
@@ -193,25 +194,27 @@ open_terminal(workspace) | attach_terminal(terminal, rows, cols) | detach_termin
 terminal_resize | close_terminal
 ```
 
-`terminal_exited` tells every attached daemon client that a terminal's shell exited and the daemon
-removed the terminal. It follows all of that terminal's output on the same socket connection.
+`terminal_exited` tells every watching or attached daemon client that a terminal's shell exited and
+the daemon removed the terminal. Each socket connection gets it once, after all of that terminal's
+output.
 
 There are three levels of events. `watch` covers the sidebar: workspaces, their sessions and
 terminals, each session's title, status, and unread flag, each terminal's title, and the server's
 capabilities. Pending permission requests travel in the session status, so every watching client
 receives them. After the watch snapshot, the daemon sends `capabilities_changed` after each
 successful `initialize`, `workspace_added`, `workspace_removed` (which also removes the workspace's
-sessions), `session_changed` with the session's whole summary when a session is added or its status
-or unread flag changes, and `session_deleted` when a session is deleted. `subscribe` covers one
-session's content: its transcript and config options. After the session snapshot, the daemon sends
-each transcript entry and `config_options_changed` when the config options change outside a load. A
-subscribed session removed with its workspace, or deleted, gets `session_removed`. `attach_terminal`
-covers one terminal's initial screen restoration and live output, using the terminal attachment
-format established in milestone 0. For `watch` and `subscribe`, under one lock the daemon queues a
-snapshot and registers the client for live events. Socket writes happen outside the lock. Each
-connection gets the snapshot followed by live changes in order. A client that cannot keep up is
-dropped. Transcript replacement after a load sends a fresh session snapshot, which clients use to
-replace their local state.
+sessions and terminals), `session_changed` with the session's whole summary when a session is added
+or its status or unread flag changes, `session_deleted` when a session is deleted,
+`terminal_changed` with the terminal's whole summary when a terminal is opened or its terminal title
+changes, and `terminal_exited`. `subscribe` covers one session's content: its transcript and config
+options. After the session snapshot, the daemon sends each transcript entry and
+`config_options_changed` when the config options change outside a load. A subscribed session removed
+with its workspace, or deleted, gets `session_removed`. `attach_terminal` covers one terminal's
+initial screen restoration and live output, using the terminal attachment format established in
+milestone 0. For `watch` and `subscribe`, under one lock the daemon queues a snapshot and registers
+the client for live events. Socket writes happen outside the lock. Each connection gets the snapshot
+followed by live changes in order. A client that cannot keep up is dropped. Transcript replacement
+after a load sends a fresh session snapshot, which clients use to replace their local state.
 
 ### Project layout
 
@@ -264,7 +267,7 @@ app/src-tauri/src/
                   subscribed, attached, focus }; forwards events to app.emit
                   and PTY bytes to the terminal Channel
   commands.rs     request(req: Request) -> Response, attach_terminal,
-                  terminal_input, set_visible
+                  detach_terminal, terminal_input, set_visible
   terminal.rs     terminal ID to Channel<tauri::ipc::Response>
   gui_state.rs    gui.json
 
@@ -342,11 +345,11 @@ webview never touches the socket.
 
 - One Tauri command, `request`, takes a wire-protocol `Request` and returns the daemon's `Response`.
   The tagged `Request` enum carries the name and arguments, so adding a request touches
-  `protocol.rs` and the daemon only. The other commands are `attach_terminal`, `terminal_input`,
-  `selection`, `select`, `connection`, and `set_visible`. `attach_terminal` is separate because it
-  takes the terminal's `Channel`, which `request` cannot carry. `connection` gives the webview the
-  current connection when it starts, since a `connection` event emitted before its listener is
-  installed is lost.
+  `protocol.rs` and the daemon only. The other commands are `attach_terminal`, `detach_terminal`,
+  `terminal_input`, `selection`, `select`, `connection`, and `set_visible`. `attach_terminal` is
+  separate because it takes the terminal's `Channel`, which `request` cannot carry. `connection`
+  gives the webview the current connection when it starts, since a `connection` event emitted before
+  its listener is installed is lost.
 - Daemon events reach the webview as Tauri events: `watch` events under one name, and every
   subscribed session's events under the one name `session`, with the webview dispatching on the
   payload's session ID. Tauri event names allow only alphanumerics, `-`, `/`, `:`, and `_`, and
@@ -372,9 +375,10 @@ webview never touches the socket.
   the place of the tool call block with its tool call ID, or follows the last block.
 - Native pieces come from Tauri and are used from the webview: the dialog plugin for the folder
   picker, confirmations, and error messages, the opener plugin, which opens links in agent messages
-  in the default browser, and the menu API's `Menu.popup()` for the workspace and session menus.
-  Image files are dropped on the editor as HTML drop events, since the window's `dragDropEnabled` is
-  off, and the webview reads them into image content. Keyboard shortcuts are handled in the webview.
+  in the default browser, and the menu API's `Menu.popup()` for the workspace, session, and terminal
+  menus. Image files are dropped on the editor as HTML drop events, since the window's
+  `dragDropEnabled` is off, and the webview reads them into image content. Keyboard shortcuts are
+  handled in the webview.
 - The core writes the GUI state file described below.
 
 The `useSession` hook sends `subscribe` the first time a session is used and never unsubscribes: the
@@ -390,9 +394,14 @@ automatically resent; the user can inspect the session before trying again.
 ### Terminals in the daemon
 
 The daemon owns each login shell through `portable-pty` and retains the terminal state while the GUI
-is closed. A terminal pane is an xterm.js `Terminal` with the fit addon. On attachment, the GUI
-restores the current screen and resumes live output. `onData` goes through `terminal_input` to the
-PTY, and `onResize` goes to `terminal_resize`.
+is closed. A terminal belongs to a workspace, and its shell starts in the workspace path. Its
+terminal title is the shell's file name until a program sets one with OSC 0 or OSC 2, which the
+parser reports through `vt100::Callbacks::set_window_title()`. `State` holds each terminal's summary
+for watch, and `Terminals` holds the PTYs, parsers, and attachments under their own mutexes and
+reports opens, terminal title changes, and exits to `State`. Locks are taken in the order `State`,
+the terminal map, then a terminal's output. A terminal pane is an xterm.js `Terminal` with the fit
+addon. On attachment, the GUI restores the current screen and resumes live output. `onData` goes
+through `terminal_input` to the PTY, and `onResize` goes to `terminal_resize`.
 
 Reliable restoration of running TUI apps is a requirement. Milestone 0 must start with the Rust
 `vt100` crate: feed PTY output into `vt100::Parser` while the GUI is open or closed, then use
@@ -420,18 +429,21 @@ The terminal attachment format, established in milestone 0:
 - The parser keeps no scrollback. The normal buffer's contents and scrollback from before the
   attachment are not restored.
 
-Detaching or losing the GUI leaves the shell and its applications running. Close Terminal and Remove
-Workspace stop the corresponding terminals.
+`detach_terminal`, or losing the GUI, ends the terminal attachment and leaves the shell and its
+applications running. Close Terminal and Remove Workspace stop the corresponding terminals: the
+daemon sends `SIGHUP` to the shell, which passes it to its jobs, and the kernel sends it to the
+foreground process group when the shell exits. The terminal ends when its PTY closes, the same way
+as a shell that ran `exit`. A program that ignores `SIGHUP` and keeps the PTY open keeps its
+terminal listed.
 
 Selecting a terminal that already has a tab activates that tab.
 
 ### GUI state
 
 The core keeps the GUI's layout in `$XDG_STATE_HOME/ur/gui.json`, keyed by socket path: the selected
-session or terminal, the GUI's one terminal until Workspace terminal controls list terminals under
-their workspaces, and from milestone 10 the pane layout as dockview's serialized layout. Panes refer
-to sessions and terminals by ID. When the GUI opens, it drops panes whose session or terminal no
-longer exists.
+session or terminal and, from milestone 10, the pane layout as dockview's serialized layout. Panes
+refer to sessions and terminals by ID. When the GUI opens, it drops panes whose session or terminal
+no longer exists.
 
 ### Transport
 

@@ -18,7 +18,9 @@ export type WatchEvent = Extract<
       | "workspace_added"
       | "workspace_removed"
       | "session_changed"
-      | "session_deleted";
+      | "session_deleted"
+      | "terminal_changed"
+      | "terminal_exited";
   }
 >;
 
@@ -32,15 +34,21 @@ export function request(request: Request): Promise<Response> {
   return invoke("request", { request });
 }
 
-/** Attaches the GUI's terminal, or a new one, and returns its ID. */
+/** Attaches the terminal: its screen snapshot, then its live output. */
 export function attachTerminal(
+  terminal: number,
   rows: number,
   cols: number,
   onOutput: (bytes: Uint8Array) => void,
-): Promise<number> {
+): Promise<void> {
   const output = new Channel<ArrayBuffer>();
   output.onmessage = (bytes) => onOutput(new Uint8Array(bytes));
-  return invoke("attach_terminal", { rows, cols, output });
+  return invoke("attach_terminal", { terminal, rows, cols, output });
+}
+
+/** Ends the terminal attachment. The terminal keeps running. */
+export function detachTerminal(terminal: number): Promise<void> {
+  return invoke("detach_terminal", { terminal });
 }
 
 export function terminalInput(terminal: number, data: string): Promise<void> {
