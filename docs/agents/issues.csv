@@ -7,3 +7,4 @@ OX-0005,2026-09-25 17:21,A terminal attach error persists until the GUI restarts
 OX-0006,2026-09-25 18:18,An interrupted turn reloaded from the server reads as a rejected prompt,low,correctness,unplanned,reviews/2026-09-25-009-attention-in-the-gui.md
 OX-0007,2026-09-25 18:46,Agent message links replace the app with a web page,high,correctness,fixed,reviews/2026-09-25-010-thread-rendering.md
 OX-0008,2026-09-25 19:38,A session holding about 12 MB of images disconnects the GUI in a loop,high,correctness,fixed,reviews/2026-09-25-012-session-management-and-editor.md
+OX-0009,2026-09-25 21:03,A restored hidden terminal is sized to the whole dock area,low,correctness,unplanned,reviews/2026-09-25-015-pane-grid.md
