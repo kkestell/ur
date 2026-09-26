@@ -10,10 +10,11 @@ const TAG_JSON: u8 = 0x01;
 const TAG_PTY: u8 = 0x02;
 const HEADER_LEN: usize = 5;
 const TERMINAL_ID_LEN: usize = 4;
-const MAX_PAYLOAD_LEN: usize = 16 * 1024 * 1024;
 
 /// One message on the daemon socket: a one-byte tag, a big-endian `u32`
-/// payload length, and the payload.
+/// payload length, and the payload. The `u32` length is the only bound on a
+/// payload's size: the decoder accepts any length, because both ends of the
+/// socket are ur on the local machine.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Frame {
     Json(Bytes),
@@ -41,11 +42,6 @@ impl Decoder for FrameCodec {
         let len = u32::from_be_bytes([src[1], src[2], src[3], src[4]]) as usize;
         if tag != TAG_JSON && tag != TAG_PTY {
             return Err(invalid(format!("unknown frame tag {tag:#04x}")));
-        }
-        if len > MAX_PAYLOAD_LEN {
-            return Err(invalid(format!(
-                "frame payload of {len} bytes is too large"
-            )));
         }
         if tag == TAG_PTY && len < TERMINAL_ID_LEN {
             return Err(invalid("PTY frame is shorter than a terminal ID".into()));
@@ -105,6 +101,7 @@ mod tests {
                 id: 7,
                 bytes: Bytes::from_static(b"\x1b[31mred\r\n"),
             },
+            Frame::Json(Bytes::from(vec![b'x'; 20 * 1024 * 1024])),
         ];
         for frame in frames {
             let mut buffer = BytesMut::new();
@@ -117,16 +114,11 @@ mod tests {
 
     #[test]
     fn decoder_rejects_malformed_frames() {
-        let too_large = (MAX_PAYLOAD_LEN as u32 + 1).to_be_bytes();
-        let cases: [(&str, Vec<u8>); 3] = [
+        let cases: [(&str, Vec<u8>); 2] = [
             ("unknown tag", vec![0x03, 0, 0, 0, 0]),
             (
                 "PTY payload shorter than a terminal ID",
                 vec![TAG_PTY, 0, 0, 0, 3, 0, 0, 1],
-            ),
-            (
-                "payload over 16 MiB",
-                [&[TAG_JSON][..], &too_large].concat(),
             ),
         ];
         for (name, bytes) in cases {

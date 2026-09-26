@@ -70,6 +70,7 @@ documentation, give agent session tests replies, permission requests, and errors
 - The session header shows the session title.
 - The session header's + creates a session in its workspace and selects it.
 - Deleting a session removes it from the sidebar.
+- A session holding 20 MB of images loads after reopening the GUI.
 - A working session shows the spinner.
 - A session waiting for permission shows its mark and its workspace's count.
 - Clicking a permission option answers the request.

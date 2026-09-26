@@ -407,6 +407,35 @@ export class Gui {
     return this.#session().execute(() => document.querySelector(".thread")!.scrollTop);
   }
 
+  /**
+   * Prompts `session` with `text` and one image of `bytes` random bytes,
+   * built in the webview so it does not cross WebDriver.
+   */
+  async promptWithImage(session: string, text: string, bytes: number): Promise<void> {
+    await this.#session().execute(
+      async (session, text, bytes) => {
+        const data = new Uint8Array(bytes);
+        // `getRandomValues` fills at most 64 KiB per call.
+        for (let offset = 0; offset < bytes; offset += 65536) {
+          crypto.getRandomValues(data.subarray(offset, offset + 65536));
+        }
+        let binary = "";
+        for (let offset = 0; offset < bytes; offset += 65536) {
+          binary += String.fromCharCode(...data.subarray(offset, offset + 65536));
+        }
+        const content = [
+          { type: "text", text },
+          { type: "image", mimeType: "image/png", data: btoa(binary) },
+        ];
+        const tauri = (window as unknown as TauriWindow).__TAURI_INTERNALS__;
+        await tauri.invoke("request", { request: { type: "prompt", session, content } });
+      },
+      session,
+      text,
+      bytes,
+    );
+  }
+
   /** Sends `request` through the core's `request` command and returns the response. */
   async request(request: object): Promise<unknown> {
     return this.#session().execute((request) => {

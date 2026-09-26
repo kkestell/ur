@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout as sleep } from "node:timers/promises";
 import { e2eTest } from "./harness.ts";
 
 e2eTest("the empty states follow the workspaces and the selection", async (environment) => {
@@ -139,4 +140,21 @@ e2eTest("deleting a session removes it from the sidebar", async (environment) =>
   await gui.request({ type: "delete_session", session });
   await gui.waitForNone(".workspace .row");
   await gui.waitForText(".empty", "Select a session");
+});
+
+e2eTest("a session holding 20 MB of images loads after reopening the GUI", async (environment) => {
+  const session = await environment.newSession();
+  let gui = await environment.openGui();
+  await gui.click(".sidebar .row", "New session");
+  await gui.promptWithImage(session, "big", 20 * 1024 * 1024);
+  await gui.waitForText(".block.agent", "you said: big (1 image)");
+  await gui.close();
+
+  // The session snapshot holds the image, in one frame over 16 MiB.
+  gui = await environment.openGui();
+  await gui.waitForText(".block.agent", "you said: big (1 image)");
+  await sleep(1000);
+  assert.ok(!(await gui.hasElement(".connecting")), "the GUI lost its connection");
+  await gui.sendPrompt("after");
+  await gui.waitForText(".block.agent", "you said: after");
 });
