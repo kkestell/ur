@@ -11,7 +11,7 @@
 - [x] Attention in the GUI: session status in the sidebar and permission requests in the thread.
 - [x] Thread rendering: Markdown, thinking, and tool calls as in the wireframes.
   - [x] [OX-0007](issues.csv:8): Agent message links replace the app with a web page
-- [ ] Session management and editor: workspaces, sessions, slash commands, config options, and
+- [x] Session management and editor: workspaces, sessions, slash commands, config options, and
       images in the GUI.
   - [x] [OX-0008](issues.csv:9): A session holding about 12 MB of images disconnects the GUI in a
         loop
