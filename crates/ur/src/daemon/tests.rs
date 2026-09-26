@@ -70,18 +70,7 @@ impl TestDaemon {
         history: SavedHistory,
     ) -> TestDaemon {
         let server = Arc::new(Mutex::new(None));
-        let launch: Launch = Box::new({
-            let hold = hold.clone();
-            let history = history.clone();
-            let server = server.clone();
-            move || {
-                let (client, agent) = Channel::duplex();
-                let task =
-                    tokio::spawn(fake_server(hold.clone(), history.clone()).connect_to(agent));
-                *server.lock().unwrap() = Some(task.abort_handle());
-                client
-            }
-        });
+        let launch = fake_launch(hold, &history, &server);
         TestDaemon::run_on(dir, state_file, history, server, Ok(launch))
     }
 
@@ -134,6 +123,24 @@ impl TestDaemon {
     }
 }
 
+/// Starts a fake server with `hold` and `history`, and keeps its task in
+/// `server`.
+fn fake_launch(
+    hold: &Hold,
+    history: &SavedHistory,
+    server: &Arc<Mutex<Option<AbortHandle>>>,
+) -> Launch {
+    let hold = hold.clone();
+    let history = history.clone();
+    let server = server.clone();
+    Box::new(move || {
+        let (client, agent) = Channel::duplex();
+        let task = tokio::spawn(fake_server(hold.clone(), history.clone()).connect_to(agent));
+        *server.lock().unwrap() = Some(task.abort_handle());
+        client
+    })
+}
+
 /// Two independent ACP connections whose fake servers both issue fake-1.
 fn two_servers() -> (TestDaemon, Arc<Mutex<Option<AbortHandle>>>) {
     let dir = tempfile::tempdir().unwrap();
@@ -144,28 +151,8 @@ fn two_servers() -> (TestDaemon, Arc<Mutex<Option<AbortHandle>>>) {
     let second = Arc::new(Mutex::new(None));
     let first_history = SavedHistory::default();
     let second_history = SavedHistory::default();
-    let first_launch = {
-        let handle = first.clone();
-        let history = first_history.clone();
-        move || {
-            let (client, agent) = Channel::duplex();
-            let task =
-                tokio::spawn(fake_server(Hold::default(), history.clone()).connect_to(agent));
-            *handle.lock().unwrap() = Some(task.abort_handle());
-            client
-        }
-    };
-    let second_launch = {
-        let handle = second.clone();
-        let history = second_history.clone();
-        move || {
-            let (client, agent) = Channel::duplex();
-            let task =
-                tokio::spawn(fake_server(Hold::default(), history.clone()).connect_to(agent));
-            *handle.lock().unwrap() = Some(task.abort_handle());
-            client
-        }
-    };
+    let first_launch = fake_launch(&Hold::default(), &first_history, &first);
+    let second_launch = fake_launch(&Hold::default(), &second_history, &second);
     let state_file_for_serve = state_file.clone();
     tokio::spawn(async move {
         let state = Arc::new(Mutex::new(super::state::State::new(Vec::new())));

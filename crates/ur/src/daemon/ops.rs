@@ -25,8 +25,8 @@ use super::state_file;
 use super::terminal::Terminals;
 
 /// Adds a workspace whose path is an absolute path to a directory, and saves
-/// it in the state file. When the server can list sessions, a spawned task
-/// adds the workspace's saved sessions.
+/// it in the state file. For each connected server that can list sessions, a
+/// spawned task adds the workspace's saved sessions.
 pub fn add_workspace(
     state: &Arc<Mutex<State>>,
     state_file: &Path,

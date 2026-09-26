@@ -63,9 +63,7 @@ mod session_key_tests {
 #[ts(export)]
 pub enum Request {
     /// Starts a login shell in the workspace path.
-    OpenTerminal {
-        workspace: String,
-    },
+    OpenTerminal { workspace: String },
     AttachTerminal {
         terminal: TerminalId,
         rows: u16,
@@ -78,32 +76,33 @@ pub enum Request {
     },
     /// Stops sending the terminal's output to this socket connection. The
     /// terminal keeps running.
-    DetachTerminal {
-        terminal: TerminalId,
-    },
+    DetachTerminal { terminal: TerminalId },
     /// Sends `SIGHUP` to the terminal's shell. The terminal is removed, and
     /// `terminal_exited` sent, when the shell exits.
-    CloseTerminal {
-        terminal: TerminalId,
-    },
-    /// Sends the watch snapshot, then every change to workspaces, sessions,
-    /// and terminals. Watching again from the same socket connection replaces
-    /// the earlier registration.
+    CloseTerminal { terminal: TerminalId },
+    /// Sends the watch snapshot, then every change to servers, workspaces,
+    /// sessions, and terminals. Watching again from the same socket
+    /// connection replaces the earlier registration.
     Watch,
+    /// Saves a new server with a generated ID, then starts it. `command` must
+    /// be an absolute path.
     AddServer {
         name: String,
         command: String,
         args: Vec<String>,
     },
+    /// Saves the server's name, executable, and arguments. `command` must be
+    /// an absolute path. A changed executable or argument restarts the
+    /// server.
     UpdateServer {
         server: String,
         name: String,
         command: String,
         args: Vec<String>,
     },
-    RemoveServer {
-        server: String,
-    },
+    /// Removes the server from the config file, stops it, and removes its
+    /// sessions from ur without deleting them from the server.
+    RemoveServer { server: String },
     /// Adds a workspace. `path` must be an absolute path to a directory, and is
     /// stored as is. `color` is the workspace color the tabs show.
     AddWorkspace {
@@ -113,14 +112,9 @@ pub enum Request {
     },
     /// Cancels the workspace's running prompts, then removes the workspace and
     /// its sessions, and stops its terminals.
-    RemoveWorkspace {
-        name: String,
-    },
+    RemoveWorkspace { name: String },
     /// Creates a session with the workspace path as its `cwd`.
-    NewSession {
-        server: String,
-        workspace: String,
-    },
+    NewSession { server: String, workspace: String },
     /// Deletes a session from the server, when it advertises `session/delete`.
     /// A running turn is cancelled first, and the response waits for
     /// `session/delete` to return.
@@ -187,6 +181,7 @@ pub enum Response {
         #[ts(type = "string")]
         session: SessionKey,
     },
+    /// The ID of the server `add_server` saved.
     ServerAdded {
         server: String,
     },
@@ -218,6 +213,8 @@ pub enum Event {
         servers: Vec<ServerState>,
         config_error: Option<String>,
     },
+    /// A server was added, changed, or removed, its connection changed, or the
+    /// config error changed. Carries every server, in config file order.
     ServersChanged {
         servers: Vec<ServerState>,
         config_error: Option<String>,

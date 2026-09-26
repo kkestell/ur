@@ -298,11 +298,12 @@ impl State {
         self.workspaces.clone()
     }
 
-    /// Records that the ACP connection ended. The new server process has
-    /// loaded no sessions, so every session becomes unloaded. Every running
-    /// turn fails with `reason` and its pending permission requests are
-    /// dropped. A running load ends with the unchanged transcript, and a
-    /// waiting delete answers an error. Every operation guard is released.
+    /// Records that the server's ACP connection ended. Its new process has
+    /// loaded no sessions, so each of its sessions becomes unloaded. Each of
+    /// its running turns fails with `reason`, and its pending permission
+    /// requests are answered `Cancelled`. A running load ends with the
+    /// unchanged transcript, and a waiting delete answers an error. The
+    /// operation guards of its sessions are released.
     pub fn server_exited(&mut self, id: &str, generation: u64, reason: String) {
         if !self.current(id, generation) {
             return;
@@ -703,8 +704,8 @@ impl State {
         Ok((!waits).then_some(Response::Done))
     }
 
-    /// Loads every unloaded session that has subscribers, calling `load` for
-    /// each, when the server can load them.
+    /// Loads each of the server's unloaded sessions that has subscribers,
+    /// calling `load` for each, when the server can load them.
     pub fn reload_subscribed(
         &mut self,
         server_id: &str,
