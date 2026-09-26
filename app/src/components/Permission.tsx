@@ -20,24 +20,24 @@ export function Permission({
   const shown = new Set<string>();
   return (
     <>
-      <div className="block permission">
-        <div className="permission-title">{title}</div>
-        <ToolCallContentView content={content} />
-        <div className="permission-options">
+      <div className="block permission mb-2 rounded border border-outline px-4 py-3 leading-relaxed">
+        <div className="permission-title mb-2">{title}</div>
+        <div className="mb-2 space-y-2 rounded bg-raised p-2 text-fg-muted"><ToolCallContentView content={content} /></div>
+        <div className="permission-options flex flex-col">
           {options.map((option) => {
             const first = !shown.has(option.kind);
             shown.add(option.kind);
             return (
-              <button key={option.optionId} className="option" onClick={() => onAnswer(option)}>
-                <span className="icon">{icon(option.kind)}</span>
-                <span className="label">{option.name}</span>
-                {first && <span className="shortcut">{shortcutLabel(option.kind)}</span>}
+              <button key={option.optionId} className="option flex min-h-7 items-center gap-2 rounded px-2 py-1 text-left hover:bg-control" onClick={() => onAnswer(option)}>
+                <span className="icon w-4 shrink-0 text-center text-fg-muted">{icon(option.kind)}</span>
+                <span className="label min-w-0 flex-1">{option.name}</span>
+                {first && <span className="shortcut text-fg-dim">{shortcutLabel(option.kind)}</span>}
               </button>
             );
           })}
         </div>
       </div>
-      <div className="block awaiting">Awaiting Confirmation.</div>
+      <div className="block awaiting mb-3 text-fg-dim last:mb-0">Awaiting Confirmation.</div>
     </>
   );
 }

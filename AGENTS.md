@@ -27,7 +27,8 @@ Map each file here as it is added, following the project layout in `docs/agents/
   `SavedHistory`, and `main.rs` serves it over stdin and stdout, keeping its saved history in the
   file its argument names, if any. It advertises image prompts and, with saved history,
   `session/delete`, gives every session the `pace` config option, and answers
-  `session/set_config_option` and `session/delete`.
+  `session/set_config_option` and `session/delete`. The `options` script sends several config
+  options, with a model that accepts images, to check the editor layout.
 - `crates/ur/src/main.rs` — the `ur` command line: `daemon`, `agent-run`, `workspace add|rm`, `ls`,
   `new`, `prompt`, `read`, `cancel`, `approve`, `deny`, and `wait`.
 - `crates/ur/src/cli/` — `connect()`, `watch()`, and one file per CLI subcommand: `workspace.rs`,
@@ -113,7 +114,7 @@ Map each file here as it is added, following the project layout in `docs/agents/
   editor, and the permission shortcuts for the selection), `TerminalPanel`, `PaneActions` (the
   pane's `+`), and the watermark with the empty states; restoring and saving the layout, closing
   tabs whose session or terminal is gone, and `setVisible()` for the visible sessions.
-- `app/src/components/Tab.tsx` — `Tab`: the tab's kind, title, status mark, and Close Tab.
+- `app/src/components/Tab.tsx` — `Tab`: the tab's title, terminal icon, status mark, and Close Tab.
 - `app/src/components/Thread.tsx` — the items of the selected session, with user message thumbnails,
   and `Thought`, the Thinking row.
 - `app/src/components/AgentMessage.tsx` — `AgentMessage`: an agent message rendered as Markdown,
@@ -126,13 +127,19 @@ Map each file here as it is added, following the project layout in `docs/agents/
   content through `ToolCallContentView`, one row per option, and "Awaiting Confirmation."
 - `app/src/components/Editor.tsx` — `Editor` and `ImageAttachment`: the command list, image
   attachment chips, the prompt textarea, and the bottom row of the usage indicator, config pickers,
-  and Send or Stop.
+  and Send or Stop; narrow panes show extra config pickers in a menu.
 - `app/src/components/ConfigPicker.tsx` — `ConfigPicker`, the list or toggle for one config option.
+- `app/src/components/Popover.tsx` — `Popover`, a popup above its anchor, rendered into the document
+  body and kept inside the window, and `useClickOutside()`.
 - `app/src/components/UsageIndicator.tsx` — `UsageIndicator`, the ring and its popover.
 - `app/src/components/TerminalPane.tsx` — `TerminalPane`: the xterm.js view of one terminal, which
   attaches on mount, detaches on unmount, and fits only while shown.
 - `app/src/main.tsx` — renders `App`, and stops files dropped outside the editor from navigating the
   webview.
+- `app/src/styles.css` — imports Tailwind CSS and its Typography plugin; the `@theme` block, which
+  defines the app's colors and type sizes; and dockview's pane and tab styling, which uses them.
+- `app/vite.config.ts` — configures Vite with React and Tailwind CSS.
+- `app/index.html` — the webview document and root element.
 - `app/src/App.tsx` — the window: the saved layout, read on each connect, the `DockviewApi` and the
   selection, the sidebar, whose choices open tabs, and `Layout` once the watch snapshot arrives.
 - `app/e2e/harness.ts` — `TestEnvironment`, `Gui`, and `e2eTest`, used by the end-to-end suite and

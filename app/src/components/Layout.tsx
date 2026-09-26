@@ -8,6 +8,7 @@ import {
   themeDark,
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
+import { Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addWorkspace, showNewMenu } from "../actions";
 import { request, saveLayout, setVisible } from "../ipc";
@@ -72,13 +73,33 @@ export function Layout({
       update();
     });
     const activating = api.onDidActivePanelChange(update);
+    const frame = requestAnimationFrame(() => {
+      for (const tab of document.querySelectorAll<HTMLElement>(
+        ".panes .dv-tabs-container .dv-tab.dv-active-tab",
+      )) {
+        tab.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    });
     return () => {
+      cancelAnimationFrame(frame);
       saving.dispose();
       activating.dispose();
       onReady(null);
       onSelection(null);
     };
   }, [api]);
+
+  // Dockview resizes panes on a sash press without stopping the press's
+  // default action, which starts a text selection.
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if ((event.target as Element).closest(".dv-sash") !== null) {
+        event.preventDefault();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
 
   useEffect(() => {
     if (api !== undefined) {
@@ -99,14 +120,16 @@ export function Layout({
 
   return (
     <DockviewReact
-      className="panes"
+      className="panes min-h-0 min-w-0 flex-1 overflow-hidden"
       theme={themeDark}
       components={components}
       defaultTabComponent={Tab}
       rightHeaderActionsComponent={PaneActions}
       watermarkComponent={Watermark}
       defaultRenderer="always"
+      singleTabMode="default"
       disableFloatingGroups
+      disableTabsOverflowList
       onReady={ready}
     />
   );
@@ -131,13 +154,13 @@ function PaneActions({ activePanel, group, containerApi }: IDockviewHeaderAction
     return null;
   }
   return (
-    <div className="pane-actions">
+    <div className="pane-actions flex h-full items-center px-2">
       <button
-        className="icon-button"
+        className="icon-button flex size-7 items-center justify-center rounded text-fg-muted hover:bg-control hover:text-fg"
         title="New"
         onClick={() => void showNewMenu(workspace, (item) => openTab(containerApi, item, group))}
       >
-        +
+        <Plus size={16} strokeWidth={1.75} />
       </button>
     </div>
   );
@@ -154,15 +177,15 @@ function Watermark() {
   const watch = useWatch();
   if (watch.workspaces.length === 0) {
     return (
-      <div className="empty">
+      <div className="empty flex h-full flex-col items-center justify-center gap-2 text-sm">
         <div>No workspaces</div>
-        <button className="button" onClick={() => void addWorkspace()}>
+        <button className="button rounded border border-control-edge bg-control px-3 py-1 hover:bg-control-hover" onClick={() => void addWorkspace()}>
           Add Workspace
         </button>
       </div>
     );
   }
-  return <div className="empty hint">Select a session</div>;
+  return <div className="empty hint flex h-full flex-col items-center justify-center text-center text-sm text-fg-dim">Select a session</div>;
 }
 
 function SessionPanel({ api, params }: IDockviewPanelProps<TabItem>) {
@@ -212,7 +235,7 @@ function SessionPanel({ api, params }: IDockviewPanelProps<TabItem>) {
   }, [id, requests, active]);
 
   return (
-    <div className="session">
+    <div className="session flex h-full min-h-0 flex-col">
       <Thread items={items} onAnswer={(request, option) => answer(request, option.optionId)} />
       <Editor
         session={id}

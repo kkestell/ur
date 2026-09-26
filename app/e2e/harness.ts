@@ -227,6 +227,64 @@ export class Gui {
   }
 
   /**
+   * Whether the editor's bottom row fits its controls on one line. The row
+   * keeps hidden copies of its config pickers to measure them.
+   */
+  async editorControlsFit(): Promise<boolean> {
+    return this.#session().execute(() => {
+      const actions = (window as unknown as ShownWindow).shown(".editor-actions")[0];
+      const controls = (window as unknown as ShownWindow)
+        .shown(".editor-actions .picker, .editor-actions .more-options, .editor-actions .usage, .editor-actions > button")
+        .filter((element) => element.getClientRects().length > 0);
+      const centers = controls.map((element) => {
+        const box = element.getBoundingClientRect();
+        return box.top + box.height / 2;
+      });
+      return actions.scrollWidth <= actions.clientWidth + 1 &&
+        Math.max(...centers) - Math.min(...centers) < 2;
+    });
+  }
+
+  /** Whether every shown element matching `selector` lies inside the window. */
+  async insideWindow(selector: string): Promise<boolean> {
+    return this.#session().execute(
+      (selector) =>
+        (window as unknown as ShownWindow).shown(selector).every((element) => {
+          const box = element.getBoundingClientRect();
+          return box.left >= 0 && box.top >= 0 && box.right <= window.innerWidth &&
+            box.bottom <= window.innerHeight;
+        }),
+      selector,
+    );
+  }
+
+  /** How many shown elements match `selector` and take up space on the page. */
+  async displayedCount(selector: string): Promise<number> {
+    return this.#session().execute(
+      (selector) =>
+        (window as unknown as ShownWindow)
+          .shown(selector)
+          .filter((element) => element.getClientRects().length > 0).length,
+      selector,
+    );
+  }
+
+  /** Whether every active tab is fully visible in its pane header. */
+  async activeTabsVisible(): Promise<boolean> {
+    return this.#session().execute(() => {
+      const tabs = document.querySelectorAll<HTMLElement>(
+        ".panes .dv-tabs-container .dv-tab.dv-active-tab",
+      );
+      return Array.from(tabs).every((tab) => {
+        const container = tab.closest<HTMLElement>(".dv-tabs-container")!;
+        const bounds = tab.getBoundingClientRect();
+        const viewport = container.getBoundingClientRect();
+        return bounds.left >= viewport.left - 1 && bounds.right <= viewport.right + 1;
+      });
+    });
+  }
+
+  /**
    * Opens a terminal in the `home` workspace and opens its tab by clicking its
    * terminal row, unless a reopened GUI restored the tab from the layout, and
    * waits for the terminal to render.
@@ -463,6 +521,43 @@ export class Gui {
       pane,
       where,
     );
+  }
+
+  /** Each pane's width, left to right. */
+  async paneWidths(): Promise<number[]> {
+    return this.#session().execute(() =>
+      Array.from(document.querySelectorAll(".dv-groupview")).map(
+        (pane) => pane.getBoundingClientRect().width,
+      ),
+    );
+  }
+
+  /**
+   * Drags the divider between two side-by-side panes `dx` pixels, with the
+   * pointer events dockview listens for, and answers whether the webview
+   * canceled the press. Script-dispatched events never start a text
+   * selection, so the canceled press stands in for the one a real press would
+   * start.
+   */
+  async dragPaneDivider(dx: number): Promise<boolean> {
+    return this.#session().execute(async (dx) => {
+      const divider = Array.from(document.querySelectorAll(".panes .dv-sash")).find(
+        (sash) => sash.getBoundingClientRect().height > 0,
+      )!;
+      const box = divider.getBoundingClientRect();
+      const x = box.left + box.width / 2;
+      const y = box.top + box.height / 2;
+      const init = { bubbles: true, cancelable: true, pointerId: 1, isPrimary: true, clientY: y };
+      const pressed = divider.dispatchEvent(
+        new PointerEvent("pointerdown", { ...init, clientX: x, button: 0, buttons: 1 }),
+      );
+      for (const step of [dx / 2, dx]) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        document.dispatchEvent(new PointerEvent("pointermove", { ...init, clientX: x + step, buttons: 1 }));
+      }
+      document.dispatchEvent(new PointerEvent("pointerup", { ...init, clientX: x + dx, button: 0 }));
+      return !pressed;
+    }, dx);
   }
 
   /** The webview's URL. */

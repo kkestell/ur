@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { type Gui, type TestEnvironment, e2eTest } from "./harness.ts";
+import { type Gui, type TestEnvironment, e2eTest, waitFor } from "./harness.ts";
 
 // A 1×1 PNG.
 const PNG =
@@ -39,6 +39,50 @@ e2eTest("a config option the server changes updates its picker", async (environm
   await gui.waitForText(".picker", "Steady");
   await gui.sendPrompt("pace");
   await gui.waitForText(".picker", "Brisk");
+});
+
+e2eTest("config pickers that do not fit the editor's row move to the More menu", async (environment) => {
+  const session = await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.setWindowSize(900, 600);
+  await gui.showTerminal();
+  await gui.click(".sidebar .row", "New session");
+  await gui.dragTab("New session", 0, "right");
+  await environment.ur("prompt", session, "options");
+  await waitFor("the More button", async () => (await gui.displayedCount(".more-options")) === 1);
+  assert.ok(await gui.editorControlsFit(), "the editor controls wrap or overflow");
+
+  const inline = await gui.texts(".editor-options .picker");
+  await gui.click(".more-options button");
+  await gui.waitForText(".more-options-list .picker", "");
+  assert.deepEqual(
+    [...inline, ...(await gui.texts(".more-options-list .picker"))],
+    ["DeepSeek: DeepSeek Reasoner", "Steady", "Auto"],
+  );
+  assert.ok(await gui.insideWindow(".more-options-list"), "the More menu is cut off");
+
+  await gui.setWindowSize(1600, 900);
+  await gui.waitForNone(".more-options");
+  assert.deepEqual(await gui.texts(".editor-options .picker"), [
+    "DeepSeek: DeepSeek Reasoner",
+    "Steady",
+    "Auto",
+  ]);
+});
+
+e2eTest("a model that accepts images shows the image icon in its list", async (environment) => {
+  const gui = await openSession(environment);
+  await gui.setWindowSize(1600, 900);
+  await gui.sendPrompt("options");
+  await gui.click(".picker", "DeepSeek");
+  await gui.waitForText(".picker-value", "Google: Gemma Vision");
+  assert.deepEqual(await gui.texts(".picker-value"), [
+    "DeepSeek: DeepSeek Reasoner",
+    "Google: Gemma Vision",
+  ]);
+  assert.deepEqual(await gui.texts(".picker-value:has(.accepts-images)"), [
+    "Google: Gemma Vision",
+  ]);
 });
 
 e2eTest("usage the server reports shows in the usage indicator", async (environment) => {

@@ -24,9 +24,11 @@ export const AgentMessage = memo(function AgentMessage({ text }: { text: string 
     navigator.clipboard.writeText(text).catch(console.error);
   };
   return (
-    <div className="block agent">
-      <Markdown remarkPlugins={[remarkGfm]} components={components}>{text}</Markdown>
-      <button className="copy" title="Copy" onClick={copy}>
+    <div className="block agent mb-3 leading-relaxed last:mb-0">
+      <div className="prose prose-sm prose-invert max-w-none prose-a:text-link prose-p:my-2 prose-pre:my-2 prose-pre:bg-raised prose-ul:my-2 prose-ol:my-2 prose-code:before:content-none prose-code:after:content-none">
+        <Markdown remarkPlugins={[remarkGfm]} components={components}>{text}</Markdown>
+      </div>
+      <button className="copy ml-auto flex size-6 items-center justify-center rounded text-fg-dim hover:bg-control hover:text-fg" title="Copy" onClick={copy}>
         ⧉
       </button>
     </div>

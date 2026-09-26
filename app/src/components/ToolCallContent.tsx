@@ -10,13 +10,13 @@ export function ToolCallContentView({ content }: { content: ToolCallContent[] })
     switch (item.type) {
       case "content":
         return item.content.type === "text" ? (
-          <pre key={index} className="tool-call-content">
+          <pre key={index} className="tool-call-content m-0 whitespace-pre-wrap wrap-break-word font-mono text-xs">
             {item.content.text}
           </pre>
         ) : null;
       case "diff":
         return (
-          <pre key={index} className="tool-call-content">
+          <pre key={index} className="tool-call-content m-0 whitespace-pre-wrap wrap-break-word font-mono text-xs">
             {item.path}
             {"\n"}
             {item.newText}

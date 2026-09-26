@@ -92,9 +92,14 @@ documentation, give agent session tests replies, permission requests, and errors
 - A tool call row shows its content when clicked.
 - Clicking a link in an agent message leaves the app in place.
 - Dragging a tab to a pane's edge makes a new pane, and to a pane's center moves the tab there.
+- Tabs do not show a hidden-tab counter.
+- Every tab shows Close Tab without hovering.
+- Dragging the divider between panes resizes them, and the divider press cannot start a text
+  selection.
 - Choosing a session or terminal with a tab activates that tab in its pane.
 - A session chosen in the sidebar opens in the active pane.
-- The layout and each pane's active tab survive closing and reopening the GUI.
+- The layout and each pane's active tab survive closing and reopening the GUI, and each restored
+  active tab is fully visible in its pane's tab bar.
 - Close Tab leaves its terminal running.
 - A terminal tab keeps its size while another tab is shown.
 - A session's tab shows its status mark.
@@ -103,6 +108,9 @@ documentation, give agent session tests replies, permission requests, and errors
 - Typing / lists the server's slash commands, and Enter inserts one.
 - Choosing a config option value sets it on the server.
 - A config option the server changes updates its picker.
+- Config pickers that do not fit the editor's row move to the More menu, which stays inside the
+  window, and come back when the pane widens.
+- A model that accepts images shows the image icon in its list.
 - Usage the server reports shows in the usage indicator.
 - An image dropped on the editor is sent with the prompt.
 - A dropped file that is not an image is refused.

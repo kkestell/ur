@@ -32,11 +32,11 @@ export default function App() {
 
   if (!watch.connected) {
     return (
-      <div className="empty connecting">
-        <div className="spinner" />
+      <div className="empty connecting flex h-full flex-col items-center justify-center gap-2 text-sm">
+        <div className="spinner size-4 animate-spin rounded-full border-2 border-fg-dim border-t-transparent" />
         <div>Connecting to {watch.socket}</div>
-        <div className="hint">
-          Start the daemon with <code>ur daemon</code>
+        <div className="hint text-center text-fg-dim">
+          Start the daemon with <code className="font-mono">ur daemon</code>
         </div>
       </div>
     );
@@ -54,9 +54,9 @@ export default function App() {
   // `Layout` restores the saved layout against the watch snapshot, and a
   // disconnect unmounts it, so reconnecting restores it against the new one.
   return (
-    <div className="layout">
+    <div className="layout flex h-full min-w-0 overflow-hidden border-t border-divider">
       <Sidebar watch={watch} selection={selection} onOpen={onOpen} />
-      <div className="main">
+      <div className="main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {watch.hasSnapshot && (
           <Layout saved={saved} onReady={setApi} onSelection={setSelection} />
         )}

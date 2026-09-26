@@ -13,7 +13,16 @@ export function TerminalPane({ terminal }: { terminal: number }) {
   const [error, setError] = useState<string>();
 
   useEffect(() => {
-    const xterm = new Terminal({ fontFamily: "Menlo, monospace", fontSize: 13 });
+    // xterm.js draws on a canvas, so it takes the theme's colors as values.
+    const theme = getComputedStyle(document.documentElement);
+    const xterm = new Terminal({
+      fontFamily: "Menlo, monospace",
+      fontSize: 13,
+      theme: {
+        background: theme.getPropertyValue("--color-surface"),
+        foreground: theme.getPropertyValue("--color-fg"),
+      },
+    });
     const fit = new FitAddon();
     xterm.loadAddon(fit);
     const element = container.current!;
@@ -67,9 +76,9 @@ export function TerminalPane({ terminal }: { terminal: number }) {
   }, [terminal]);
 
   return (
-    <div className="terminal">
-      {error !== undefined && <pre className="error">{error}</pre>}
-      <div ref={container} className="terminal-view" hidden={error !== undefined} />
+    <div className="terminal flex h-full min-h-0 flex-col p-3">
+      {error !== undefined && <pre className="error m-0 whitespace-pre-wrap p-3 font-mono text-danger">{error}</pre>}
+      <div ref={container} className="terminal-view min-h-0 flex-1" hidden={error !== undefined} />
     </div>
   );
 }

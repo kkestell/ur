@@ -34,6 +34,34 @@ e2eTest("dragging a tab to a pane's edge makes a new pane", async (environment) 
   await twoPanes(environment);
 });
 
+e2eTest("tabs do not show a hidden-tab counter", async (environment) => {
+  for (let index = 0; index < 5; index++) {
+    await environment.newSession();
+  }
+  const gui = await environment.openGui();
+  for (let index = 1; index <= 5; index++) {
+    await gui.click(`.workspace-sessions .row:nth-child(${index})`);
+  }
+  assert.equal((await gui.panes())[0].match(/New session/g)?.length, 5);
+  await gui.waitForNone(".dv-tabs-overflow-dropdown-default");
+});
+
+e2eTest("every tab shows Close Tab without hovering", async (environment) => {
+  await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.showTerminal();
+  await gui.click(".sidebar .row", "New session");
+  await waitForPanes(gui, ["*[sh, *New session]"]);
+  assert.equal(await gui.displayedCount(".tab .tab-close"), 2);
+});
+
+e2eTest("dragging the divider between panes resizes them without starting a text selection", async (environment) => {
+  const { gui } = await twoPanes(environment);
+  const [left] = await gui.paneWidths();
+  assert.ok(await gui.dragPaneDivider(150), "the divider press can start a text selection");
+  await waitFor("the left pane to widen", async () => (await gui.paneWidths())[0] > left + 100);
+});
+
 e2eTest("dragging a tab to a pane's center moves the tab there", async (environment) => {
   const { gui } = await twoPanes(environment);
   await gui.dragTab("tallies", 0, "center");
@@ -68,6 +96,7 @@ e2eTest("the layout and each pane's active tab survive closing and reopening the
 
   const reopened = await environment.openGui();
   await waitForPanes(reopened, ["*[sh, *New session]", "[*tallies]"]);
+  assert.ok(await reopened.activeTabsVisible(), "a restored active tab is clipped");
 });
 
 e2eTest("Close Tab leaves its terminal running", async (environment) => {

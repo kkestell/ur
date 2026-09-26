@@ -26,6 +26,14 @@ unneeded case is better than hardening around a design that is still moving.
   single caller.
 - Keep dependencies few. Do not add a crate for one use.
 
+## Webview styling
+
+- Style components with Tailwind classes named after the theme in `app/src/styles.css`, such as
+  `bg-panel`, `border-outline`, and `text-fg-dim`. A new color or type size goes into the `@theme`
+  block first, under a name for its role.
+- CSS rules for elements that dockview creates use the theme's variables, such as
+  `var(--color-divider)`.
+
 ## Structure and configuration
 
 - Keep one module focused on one concern, with shallow trees and clear boundaries. Cohesion matters

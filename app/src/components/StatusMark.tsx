@@ -6,10 +6,10 @@ export function StatusMark({ status }: { status: SessionSummary["status"] }) {
     case "idle":
       return null;
     case "working":
-      return <span className="status spinner" />;
+      return <span className="status spinner size-2 shrink-0 animate-spin rounded-full border-[1.5px] border-fg-muted border-t-transparent" />;
     case "needs_permission":
-      return <span className="status dot" />;
+      return <span className="status dot size-2 shrink-0 rounded-full bg-warning" />;
     case "failed":
-      return <span className="status failed">!</span>;
+      return <span className="status failed shrink-0 font-bold text-danger">!</span>;
   }
 }

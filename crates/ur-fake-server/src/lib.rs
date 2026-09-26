@@ -163,7 +163,7 @@ impl SavedHistory {
 /// per page. `session/prompt` answers an error for a session not created or
 /// loaded during this ACP connection, and otherwise runs the script its text
 /// blocks name: `hold`, `tool`, `tools`, `reject`, `fail`, `title`,
-/// `unloadable`, `pace`, `usage`, `render`, or anything else for a reply.
+/// `unloadable`, `pace`, `options`, `usage`, `render`, or anything else for a reply.
 pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> {
     // The sessions created or loaded during this ACP connection.
     let loaded = Arc::new(Mutex::new(HashSet::<SessionId>::new()));
@@ -409,6 +409,7 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                             "unloadable" => script.unloadable()?,
                             "render" => script.render()?,
                             "pace" => script.pace()?,
+                            "options" => script.options()?,
                             "usage" => script.usage()?,
                             _ => script.reply(&text, images)?,
                         };
@@ -528,6 +529,33 @@ impl Script {
             .with_session(&self.session, |saved| saved.pace = "brisk".to_string());
         self.update(SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
             config_options("brisk"),
+        )))?;
+        Ok(StopReason::EndTurn)
+    }
+
+    /// Sends several options with a long selected value for editor layout
+    /// checks. The second model is described as accepting images, as Ox
+    /// describes such models.
+    fn options(&self) -> agent_client_protocol::Result<StopReason> {
+        let mut options = vec![SessionConfigOption::select(
+            "model",
+            "Model",
+            "deepseek".to_string(),
+            vec![
+                SessionConfigSelectOption::new("deepseek", "DeepSeek: DeepSeek Reasoner"),
+                SessionConfigSelectOption::new("gemma", "Google: Gemma Vision")
+                    .description("Accepts images"),
+            ],
+        )];
+        options.extend(config_options("steady"));
+        options.push(SessionConfigOption::select(
+            "approval",
+            "Approval",
+            "auto".to_string(),
+            vec![SessionConfigSelectOption::new("auto", "Auto")],
+        ));
+        self.update(SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
+            options,
         )))?;
         Ok(StopReason::EndTurn)
     }
