@@ -107,6 +107,7 @@ documentation, give agent session tests replies, permission requests, and errors
 - The permission shortcuts answer only the active tab's session.
 - Typing / lists the server's slash commands, and Enter inserts one.
 - Choosing a config option value sets it on the server.
+- A press outside a config picker closes it.
 - A config option the server changes updates its picker.
 - Config pickers that do not fit the editor's row move to the More menu, which stays inside the
   window, and come back when the pane widens.

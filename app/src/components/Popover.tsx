@@ -76,7 +76,11 @@ export function useClickOutside(open: boolean, close: () => void): { onMouseDown
   }, [open]);
   return {
     onMouseDown: () => {
-      inside.current = true;
+      // Only a press while open is one the window listener must ignore; the
+      // press that opened the popover happens before the listener is installed.
+      if (open) {
+        inside.current = true;
+      }
     },
   };
 }

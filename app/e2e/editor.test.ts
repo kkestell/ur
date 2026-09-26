@@ -35,6 +35,15 @@ e2eTest("choosing a config option value sets it on the server", async (environme
   await reopened.waitForText(".picker", "Brisk");
 });
 
+e2eTest("a press outside a config picker closes it", async (environment) => {
+  const gui = await openSession(environment);
+  await gui.waitForText(".picker", "Steady");
+  await gui.press(".picker", "Steady");
+  await gui.waitForText(".picker-list .picker-value", "Brisk");
+  await gui.press(".editor textarea");
+  await gui.waitForNone(".picker-list");
+});
+
 e2eTest("a config option the server changes updates its picker", async (environment) => {
   const gui = await openSession(environment);
   await gui.waitForText(".picker", "Steady");

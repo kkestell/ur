@@ -11,3 +11,4 @@ OX-0009,2026-09-25 21:03,A restored hidden terminal is sized to the whole dock a
 OX-0010,2026-09-26 06:33,Dropped images can be omitted or reordered in a prompt,high,correctness,fixed,reviews/2026-09-26-001-full-codebase.md
 OX-0011,2026-09-26 06:33,Followed CLI transcript misses replayed entries after a server restart,medium,correctness,scheduled,reviews/2026-09-26-001-full-codebase.md
 OX-0012,2026-09-26 06:33,The model picker interprets an Ox description as structured metadata,low,architecture,unscheduled,reviews/2026-09-26-001-full-codebase.md
+OX-0013,2026-09-26 07:30,A config picker reopens with its previous filter,low,correctness,unscheduled,reviews/2026-09-26-003-react-webview.md

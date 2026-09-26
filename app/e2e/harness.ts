@@ -320,6 +320,27 @@ export class Gui {
     );
   }
 
+  /**
+   * Presses the first element matching `selector` whose text contains `text`,
+   * as a mouse does: mousedown, mouseup, then click. `click()` alone sends no
+   * press, so it cannot exercise code that listens for one.
+   */
+  async press(selector: string, text = ""): Promise<void> {
+    await this.#session().execute(
+      (selector, text) => {
+        const element = Array.from((window as unknown as ShownWindow).shown(selector)).find(
+          (element) => element.textContent!.includes(text),
+        )!;
+        const init = { bubbles: true, cancelable: true };
+        element.dispatchEvent(new MouseEvent("mousedown", init));
+        element.dispatchEvent(new MouseEvent("mouseup", init));
+        element.click();
+      },
+      selector,
+      text,
+    );
+  }
+
   /** The text of each element matching `selector`. */
   async texts(selector: string): Promise<string[]> {
     return this.#session().execute(
