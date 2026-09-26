@@ -33,6 +33,8 @@ jobs:
           version: 12.4.1
       - name: Install app dependencies
         run: pnpm -C app install --frozen-lockfile
+      - name: Install dprint
+        run: npm install --global dprint@0.57.4
       - name: Check code
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target/e2e
