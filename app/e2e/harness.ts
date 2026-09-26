@@ -20,7 +20,10 @@ type TauriWindow = {
 };
 
 /** The window with `shown()`, which `Gui.connect()` installs. */
-type ShownWindow = { shown(selector: string): HTMLElement[] };
+type ShownWindow = {
+  shown(selector: string): HTMLElement[];
+  pendingFileReads?: Array<(() => Promise<void>) | undefined>;
+};
 
 /**
  * One test's temporary directory and daemon, and the GUI launches made in it.
@@ -325,6 +328,16 @@ export class Gui {
     );
   }
 
+  /** The values of `attribute` on shown elements matching `selector`. */
+  async attributes(selector: string, attribute: string): Promise<(string | null)[]> {
+    return this.#session().execute(
+      (selector, attribute) =>
+        (window as unknown as ShownWindow).shown(selector).map((element) => element.getAttribute(attribute)),
+      selector,
+      attribute,
+    );
+  }
+
   /** Waits until an element matching `selector` has text containing `text`. */
   async waitForText(selector: string, text: string): Promise<void> {
     let texts: string[] = [];
@@ -445,26 +458,60 @@ export class Gui {
     );
   }
 
-  /**
-   * Drops a file named `name` with type `type` and base64 `data` on the first
-   * element matching `selector`, as dragging it from Finder would.
-   */
-  async dropFile(selector: string, name: string, type: string, data: string): Promise<void> {
+  /** Holds subsequent file reads until `releaseFileRead` starts each one. */
+  async holdFileReads(): Promise<void> {
+    await this.#session().execute(() => {
+      const pending: Array<(() => Promise<void>) | undefined> = [];
+      const read = FileReader.prototype.readAsDataURL;
+      FileReader.prototype.readAsDataURL = function (blob) {
+        const reader = this;
+        pending.push(() => new Promise((resolve) => {
+          reader.addEventListener("loadend", () => resolve(), { once: true });
+          read.call(reader, blob);
+        }));
+      };
+      (window as unknown as ShownWindow).pendingFileReads = pending;
+    });
+  }
+
+  /** Starts one held file read by its zero-based drop order. */
+  async releaseFileRead(index: number): Promise<void> {
+    await this.#session().execute((index) => {
+      const pending = (window as unknown as ShownWindow).pendingFileReads!;
+      const read = pending[index];
+      if (read === undefined) {
+        throw new Error(`no held file read at ${index}`);
+      }
+      pending[index] = undefined;
+      return read();
+    }, index);
+  }
+
+  /** Drops files on the first shown element matching `selector`, in their given order. */
+  async dropFiles(
+    selector: string,
+    files: Array<{ name: string; type: string; data: string }>,
+  ): Promise<void> {
     await this.#session().execute(
-      (selector, name, type, data) => {
-        const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
+      (selector, files) => {
         const transfer = new DataTransfer();
-        transfer.items.add(new File([bytes], name, { type }));
+        for (const { name, type, data } of files) {
+          const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
+          transfer.items.add(new File([bytes], name, { type }));
+        }
         const target = (window as unknown as ShownWindow).shown(selector)[0];
         const init = { bubbles: true, cancelable: true, dataTransfer: transfer };
         target.dispatchEvent(new DragEvent("dragover", init));
         target.dispatchEvent(new DragEvent("drop", init));
       },
       selector,
-      name,
-      type,
-      data,
+      files,
     );
+  }
+
+  /** Drops one base64-encoded file on the first shown element matching `selector`. */
+  async dropFile(selector: string, name: string, type: string, data: string): Promise<void> {
+    await this.dropFiles(selector, [{ name, type, data }]);
   }
 
   /**

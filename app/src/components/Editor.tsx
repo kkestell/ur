@@ -23,8 +23,8 @@ import { UsageIndicator } from "./UsageIndicator";
 /** The space between config pickers, Tailwind's `gap-1`. */
 const PICKER_GAP = 4;
 
-/** An image file dropped on the editor, sent with the next prompt. */
-export type ImageAttachment = { name: string; mimeType: string; data: string };
+/** An image file dropped on the editor, sent with the next prompt once read. */
+export type ImageAttachment = { id: number; name: string; mimeType: string; data: string | null };
 
 export function Editor({
   session,
@@ -39,6 +39,7 @@ export function Editor({
 }) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const nextAttachmentId = useRef(0);
   const [message, setMessage] = useState<string>();
   // The command list's highlighted row, and whether Escape or an insertion
   // closed the list until the text changes.
@@ -64,7 +65,7 @@ export function Editor({
   };
 
   const send = () => {
-    if (text === "" && attachments.length === 0) {
+    if ((text === "" && attachments.length === 0) || attachments.some((image) => image.data === null)) {
       return;
     }
     const sent = { text, attachments };
@@ -73,7 +74,7 @@ export function Editor({
       content.push({ type: "text", text });
     }
     for (const image of attachments) {
-      content.push({ type: "image", mimeType: image.mimeType, data: image.data });
+      content.push({ type: "image", mimeType: image.mimeType, data: image.data! });
     }
     setMessage(undefined);
     setText("");
@@ -172,9 +173,14 @@ export function Editor({
         setMessage(`${file.name} is not an image.`);
         continue;
       }
+      const id = nextAttachmentId.current++;
+      setAttachments((current) => [...current, { id, name: file.name, mimeType: file.type, data: null }]);
       readImage(file)
-        .then((image) => setAttachments((current) => [...current, image]))
-        .catch((error) => setMessage(`${file.name}: ${error}`));
+        .then((data) => setAttachments((current) => current.map((image) => image.id === id ? { ...image, data } : image)))
+        .catch((error) => {
+          setAttachments((current) => current.filter((image) => image.id !== id));
+          setMessage(`${file.name}: ${error}`);
+        });
     }
   };
 
@@ -221,14 +227,15 @@ export function Editor({
       )}
       {attachments.length > 0 && (
         <div className="attachments mb-2 flex flex-wrap gap-2">
-          {attachments.map((image, index) => (
-            <div key={index} className="chip flex max-w-60 items-center gap-1.5 rounded bg-raised py-1 pr-1 pl-2">
+          {attachments.map((image) => (
+            <div key={image.id} className="chip flex max-w-60 items-center gap-1.5 rounded bg-raised py-1 pr-1 pl-2">
               <ImageGlyph />
               <span className="label min-w-0 truncate">{image.name}</span>
+              {image.data === null && <span className="loading text-fg-dim">Loading…</span>}
               <button
                 className="remove flex size-5 shrink-0 items-center justify-center rounded text-fg-dim hover:bg-control-hover hover:text-fg"
                 title="Remove"
-                onClick={() => setAttachments((current) => current.filter((_, i) => i !== index))}
+                onClick={() => setAttachments((current) => current.filter((attachment) => attachment.id !== image.id))}
               >
                 ×
               </button>
@@ -270,7 +277,7 @@ export function Editor({
         {running ? (
           <button className="shrink-0 whitespace-nowrap rounded border border-control-edge bg-control px-3 py-1 hover:bg-control-hover" onClick={stop}>Stop</button>
         ) : (
-          <button className="shrink-0 whitespace-nowrap rounded border border-control-edge bg-control px-3 py-1 hover:bg-control-hover" onClick={send}>Send</button>
+          <button className="shrink-0 whitespace-nowrap rounded border border-control-edge bg-control px-3 py-1 hover:bg-control-hover disabled:opacity-50" disabled={attachments.some((image) => image.data === null)} onClick={send}>Send</button>
         )}
       </div>
     </div>
@@ -334,12 +341,12 @@ function MoreOptions({
 }
 
 /** Reads the file as base64 image content. */
-function readImage(file: File): Promise<ImageAttachment> {
+function readImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const url = reader.result as string;
-      resolve({ name: file.name, mimeType: file.type, data: url.slice(url.indexOf(",") + 1) });
+      resolve(url.slice(url.indexOf(",") + 1));
     };
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);

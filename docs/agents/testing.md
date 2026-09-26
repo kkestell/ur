@@ -113,6 +113,8 @@ documentation, give agent session tests replies, permission requests, and errors
 - A model that accepts images shows the image icon in its list.
 - Usage the server reports shows in the usage indicator.
 - An image dropped on the editor is sent with the prompt.
+- A pending image blocks sending until it is read or removed.
+- Images dropped together reach the prompt in drop order.
 - A dropped file that is not an image is refused.
 
 ### Admission

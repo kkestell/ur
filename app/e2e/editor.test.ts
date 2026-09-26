@@ -4,6 +4,7 @@ import { type Gui, type TestEnvironment, e2eTest, waitFor } from "./harness.ts";
 // A 1×1 PNG.
 const PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const OTHER_PNG = Buffer.concat([Buffer.from(PNG, "base64"), Buffer.from([0])]).toString("base64");
 
 /** Opens the GUI on a new session. */
 async function openSession(environment: TestEnvironment): Promise<Gui> {
@@ -98,10 +99,60 @@ e2eTest("an image dropped on the editor is sent with the prompt", async (environ
   const gui = await openSession(environment);
   await gui.dropFile(".editor", "dot.png", "image/png", PNG);
   await gui.waitForText(".attachments .chip", "dot.png");
+  await gui.waitForNone(".attachments .loading");
   await gui.sendPrompt("look");
   await gui.waitForText(".block.agent", "you said: look (1 image)");
   await gui.waitForNone(".attachments");
   assert.ok(await gui.hasElement(".block.user .thumbnails img"), "no thumbnail");
+});
+
+e2eTest("a pending image blocks sending until it is read or removed", async (environment) => {
+  const gui = await openSession(environment);
+  await gui.holdFileReads();
+  await gui.dropFile(".editor", "dot.png", "image/png", PNG);
+  await gui.waitForText(".attachments .chip", "dot.png");
+  await gui.sendPrompt("look");
+  assert.ok(await gui.hasElement(".editor-actions button:disabled"), "Send is enabled during a read");
+  assert.equal(await gui.promptText(), "look");
+  assert.equal(await gui.hasElement(".block.user"), false, "prompt sent during a read");
+
+  await gui.releaseFileRead(0);
+  await gui.waitForNone(".attachments .loading");
+  await gui.pressKey(".editor textarea", "Enter");
+  await gui.waitForText(".block.agent", "you said: look (1 image)");
+  assert.deepEqual(await gui.attributes(".block.user .thumbnails img", "src"), [
+    `data:image/png;base64,${PNG}`,
+  ]);
+
+  await gui.dropFile(".editor", "removed.png", "image/png", OTHER_PNG);
+  await gui.waitForText(".attachments .chip", "removed.png");
+  await gui.click(".attachments .chip .remove");
+  await gui.releaseFileRead(1);
+  await gui.waitForNone(".attachments");
+  await gui.sendPrompt("without");
+  await gui.waitForText(".block.agent", "you said: without");
+  assert.deepEqual(await gui.attributes(".block.user .thumbnails img", "src"), [
+    `data:image/png;base64,${PNG}`,
+  ]);
+});
+
+e2eTest("images dropped together reach the prompt in drop order", async (environment) => {
+  const gui = await openSession(environment);
+  await gui.holdFileReads();
+  await gui.dropFiles(".editor", [
+    { name: "first.png", type: "image/png", data: PNG },
+    { name: "second.png", type: "image/png", data: OTHER_PNG },
+  ]);
+  await gui.releaseFileRead(1);
+  await gui.releaseFileRead(0);
+  await gui.waitForNone(".attachments .loading");
+  assert.deepEqual(await gui.texts(".attachments .chip .label"), ["first.png", "second.png"]);
+  await gui.sendPrompt("order");
+  await gui.waitForText(".block.agent", "you said: order (2 images)");
+  assert.deepEqual(await gui.attributes(".block.user .thumbnails img", "src"), [
+    `data:image/png;base64,${PNG}`,
+    `data:image/png;base64,${OTHER_PNG}`,
+  ]);
 });
 
 e2eTest("a dropped file that is not an image is refused", async (environment) => {
