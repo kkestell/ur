@@ -19,6 +19,9 @@ type TauriWindow = {
   __TAURI_INTERNALS__: { invoke(command: string, args: unknown): Promise<unknown> };
 };
 
+/** The window with `shown()`, which `Gui.connect()` installs. */
+type ShownWindow = { shown(selector: string): HTMLElement[] };
+
 /**
  * One test's temporary directory and daemon, and the GUI launches made in it.
  * The daemon's config file launches the fake server, which keeps its saved
@@ -181,6 +184,14 @@ export class Gui {
     await waitFor("the webview to load the app", async () => {
       return (await this.#session().getUrl()) !== "about:blank";
     });
+    // Every helper looks only at shown elements. A tab that is not active
+    // stays mounted, hidden with `visibility: hidden`.
+    await this.#session().execute(() => {
+      (window as unknown as ShownWindow).shown = (selector) =>
+        Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(
+          (element) => getComputedStyle(element).visibility !== "hidden",
+        );
+    });
   }
 
   /**
@@ -203,22 +214,22 @@ export class Gui {
    */
   async type(text: string): Promise<void> {
     await this.#session().execute((text) => {
-      const textarea = document.querySelector(".xterm-helper-textarea")!;
+      const textarea = (window as unknown as ShownWindow).shown(".xterm-helper-textarea")[0];
       textarea.dispatchEvent(new InputEvent("input", { data: text, inputType: "insertText" }));
     }, text);
   }
 
   async hasElement(selector: string): Promise<boolean> {
     return this.#session().execute(
-      (selector) => document.querySelector(selector) !== null,
+      (selector) => (window as unknown as ShownWindow).shown(selector).length > 0,
       selector,
     );
   }
 
   /**
-   * Opens a terminal in the `home` workspace and selects its terminal row,
-   * unless a reopened GUI restored the terminal selection, and waits for the
-   * terminal to render.
+   * Opens a terminal in the `home` workspace and opens its tab by clicking its
+   * terminal row, unless a reopened GUI restored the tab from the layout, and
+   * waits for the terminal to render.
    */
   async showTerminal(): Promise<void> {
     if (!(await this.hasElement(".xterm"))) {
@@ -236,7 +247,7 @@ export class Gui {
     await waitFor(`${selector} with ${JSON.stringify(text)}`, () =>
       this.#session().execute(
         (selector, text) => {
-          const element = Array.from(document.querySelectorAll<HTMLElement>(selector)).find(
+          const element = Array.from((window as unknown as ShownWindow).shown(selector)).find(
             (element) => element.textContent!.includes(text),
           );
           element?.click();
@@ -251,7 +262,7 @@ export class Gui {
   /** The text of each element matching `selector`. */
   async texts(selector: string): Promise<string[]> {
     return this.#session().execute(
-      (selector) => Array.from(document.querySelectorAll(selector), (element) => element.textContent!),
+      (selector) => (window as unknown as ShownWindow).shown(selector).map((element) => element.textContent!),
       selector,
     );
   }
@@ -293,7 +304,8 @@ export class Gui {
   /** Replaces the editor's text with `text`, as typing it would. */
   async typePrompt(text: string): Promise<void> {
     await this.#session().execute((text) => {
-      const textarea = document.querySelector<HTMLTextAreaElement>(".editor textarea")!;
+      const shown = (window as unknown as ShownWindow).shown;
+      const textarea = shown(".editor textarea")[0] as HTMLTextAreaElement;
       // React tracks the value it set, so set it the way typing does.
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
       setter.call(textarea, text);
@@ -306,7 +318,7 @@ export class Gui {
     await this.#session().execute(
       (selector, key) => {
         const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
-        document.querySelector(selector)!.dispatchEvent(event);
+        (window as unknown as ShownWindow).shown(selector)[0].dispatchEvent(event);
       },
       selector,
       key,
@@ -316,7 +328,9 @@ export class Gui {
   /** The editor's text. */
   async promptText(): Promise<string> {
     return this.#session().execute(
-      () => document.querySelector<HTMLTextAreaElement>(".editor textarea")!.value,
+      () =>
+        ((window as unknown as ShownWindow).shown(".editor textarea")[0] as HTMLTextAreaElement)
+          .value,
     );
   }
 
@@ -352,7 +366,7 @@ export class Gui {
       (selector) =>
         new Promise<string>((resolve) => {
           navigator.clipboard.writeText = async (text) => resolve(text);
-          document.querySelector<HTMLElement>(selector)!.click();
+          (window as unknown as ShownWindow).shown(selector)[0].click();
         }),
       selector,
     );
@@ -365,10 +379,10 @@ export class Gui {
   async hover(selector: string): Promise<void> {
     await waitFor(`${selector} to hover`, () =>
       this.#session().execute((selector) => {
-        const element = document.querySelector(selector);
+        const element = (window as unknown as ShownWindow).shown(selector).at(0);
         const init = { bubbles: true, relatedTarget: document.body };
         element?.dispatchEvent(new MouseEvent("mouseover", init));
-        return element !== null;
+        return element !== undefined;
       }, selector),
     );
   }
@@ -383,7 +397,7 @@ export class Gui {
         const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
         const transfer = new DataTransfer();
         transfer.items.add(new File([bytes], name, { type }));
-        const target = document.querySelector(selector)!;
+        const target = (window as unknown as ShownWindow).shown(selector)[0];
         const init = { bubbles: true, cancelable: true, dataTransfer: transfer };
         target.dispatchEvent(new DragEvent("dragover", init));
         target.dispatchEvent(new DragEvent("drop", init));
@@ -395,6 +409,62 @@ export class Gui {
     );
   }
 
+  /**
+   * The tab labels of each pane, in order, with `*` before each pane's active
+   * tab, and `*` before the active pane's list.
+   */
+  async panes(): Promise<string[]> {
+    return this.#session().execute(() =>
+      Array.from(document.querySelectorAll(".dv-groupview"), (pane) => {
+        const tabs = Array.from(pane.querySelectorAll(".dv-tab"), (tab) => {
+          const label = tab.querySelector(".tab .label")!.textContent!;
+          return tab.classList.contains("dv-active-tab") ? `*${label}` : label;
+        });
+        const active = pane.classList.contains("dv-active-group") ? "*" : "";
+        return `${active}[${tabs.join(", ")}]`;
+      }),
+    );
+  }
+
+  /**
+   * Drags the tab whose label contains `label` onto pane `pane`, counted from
+   * zero: its right edge, which makes a new pane, or its center, which moves
+   * the tab there. WebDriver cannot drive native drag and drop, so this sends
+   * the drag events dockview listens for.
+   */
+  async dragTab(label: string, pane: number, where: "right" | "center"): Promise<void> {
+    await this.#session().execute(
+      async (label, pane, where) => {
+        const tab = Array.from(document.querySelectorAll(".dv-tab")).find((tab) =>
+          tab.querySelector(".tab .label")!.textContent!.includes(label),
+        )!;
+        const transfer = new DataTransfer();
+        tab.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const content = document.querySelectorAll(".dv-groupview .dv-content-container")[pane];
+        const box = content.getBoundingClientRect();
+        const x = where === "right" ? box.right - 5 : box.left + box.width / 2;
+        const y = box.top + box.height / 2;
+        const init = {
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+          dataTransfer: transfer,
+        };
+        for (const type of ["dragenter", "dragover"]) {
+          document.elementFromPoint(x, y)!.dispatchEvent(new DragEvent(type, init));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        document.elementFromPoint(x, y)!.dispatchEvent(new DragEvent("drop", init));
+        tab.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: transfer }));
+      },
+      label,
+      pane,
+      where,
+    );
+  }
+
   /** The webview's URL. */
   async url(): Promise<string> {
     return this.#session().getUrl();
@@ -403,13 +473,15 @@ export class Gui {
   /** Scrolls the thread to `top` pixels. */
   async scrollThread(top: number): Promise<void> {
     await this.#session().execute((top) => {
-      document.querySelector(".thread")!.scrollTop = top;
+      (window as unknown as ShownWindow).shown(".thread")[0].scrollTop = top;
     }, top);
   }
 
   /** The thread's scroll position in pixels. */
   async threadScrollTop(): Promise<number> {
-    return this.#session().execute(() => document.querySelector(".thread")!.scrollTop);
+    return this.#session().execute(() =>
+      (window as unknown as ShownWindow).shown(".thread")[0].scrollTop,
+    );
   }
 
   /**
@@ -452,7 +524,9 @@ export class Gui {
   /** The terminal's rows as rendered, with trailing spaces removed. */
   async lines(): Promise<string[]> {
     const rows = await this.#session().execute(() =>
-      Array.from(document.querySelectorAll(".xterm-rows > div"), (row) => row.textContent ?? ""),
+      (window as unknown as ShownWindow)
+        .shown(".xterm-rows > div")
+        .map((row) => row.textContent ?? ""),
     );
     return rows.map((row) => row.replaceAll("\u00a0", " ").trimEnd());
   }

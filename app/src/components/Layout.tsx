@@ -1,0 +1,250 @@
+import {
+  type DockviewApi,
+  type DockviewReadyEvent,
+  DockviewReact,
+  type IDockviewHeaderActionsProps,
+  type IDockviewPanelProps,
+  type SerializedDockview,
+  themeDark,
+} from "dockview-react";
+import "dockview-react/dist/styles/dockview.css";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { addWorkspace, showNewMenu } from "../actions";
+import { request, saveLayout, setVisible } from "../ipc";
+import type { PendingPermission } from "../ipc/bindings/PendingPermission";
+import { shortcutKind } from "../keys";
+import { type TabItem, goneTabs, openTab, tabId, visibleSessions } from "../layout";
+import { useSession } from "../store/sessions";
+import { type WatchState, useWatch } from "../store/watch";
+import { withPermissions } from "../transcript/permissions";
+import { Editor } from "./Editor";
+import { Tab } from "./Tab";
+import { TerminalPane } from "./TerminalPane";
+import { Thread } from "./Thread";
+
+// One array for every render without pending requests, so nothing depending on
+// `requests` re-runs for it.
+const noRequests: PendingPermission[] = [];
+
+const components = { session: SessionPanel, terminal: TerminalPanel };
+
+/**
+ * The panes and their tabs. Restores `saved`, less the tabs whose session or
+ * terminal is gone, and saves the layout on every change. Render it only with
+ * the watch snapshot, which the restore checks the tabs against.
+ */
+export function Layout({
+  saved,
+  onReady,
+  onSelection,
+}: {
+  saved: SerializedDockview | null;
+  onReady: (api: DockviewApi | null) => void;
+  onSelection: (selection: TabItem | null) => void;
+}) {
+  const watch = useWatch();
+  const [api, setApi] = useState<DockviewApi>();
+  const [visible, setVisibleSessions] = useState<string[]>([]);
+  const previous = useRef(watch);
+
+  const ready = ({ api }: DockviewReadyEvent) => {
+    if (saved !== null) {
+      api.fromJSON(saved);
+      closeTabs(api, goneTabs(tabItems(api), previous.current));
+    }
+    setApi(api);
+  };
+
+  // Registered after the restore, so a partial layout is not saved, and
+  // disposed before dockview is torn down, so an empty one is not either.
+  useEffect(() => {
+    if (api === undefined) {
+      return;
+    }
+    const update = () => {
+      setVisibleSessions(visibleSessions(api));
+      onSelection((api.activePanel?.params as TabItem | undefined) ?? null);
+    };
+    update();
+    onReady(api);
+    const saving = api.onDidLayoutChange(() => {
+      saveLayout(api.toJSON()).catch(console.error);
+      update();
+    });
+    const activating = api.onDidActivePanelChange(update);
+    return () => {
+      saving.dispose();
+      activating.dispose();
+      onReady(null);
+      onSelection(null);
+    };
+  }, [api]);
+
+  useEffect(() => {
+    if (api !== undefined) {
+      closeTabs(api, goneTabs(tabItems(api), watch, previous.current));
+    }
+    previous.current = watch;
+  }, [api, watch]);
+
+  // Only sessions in the watch state, so the daemon is never asked to focus a
+  // session the sidebar does not show. Joined, so watch events that change
+  // nothing do not resend it.
+  const shown = JSON.stringify(
+    visible.filter((id) => watch.sessions.some((session) => session.session === id)),
+  );
+  useEffect(() => {
+    setVisible(JSON.parse(shown)).catch(console.error);
+  }, [shown]);
+
+  return (
+    <DockviewReact
+      className="panes"
+      theme={themeDark}
+      components={components}
+      defaultTabComponent={Tab}
+      rightHeaderActionsComponent={PaneActions}
+      watermarkComponent={Watermark}
+      defaultRenderer="always"
+      disableFloatingGroups
+      onReady={ready}
+    />
+  );
+}
+
+function tabItems(api: DockviewApi): TabItem[] {
+  return api.panels.map((panel) => panel.params as TabItem);
+}
+
+function closeTabs(api: DockviewApi, items: TabItem[]) {
+  for (const item of items) {
+    api.removePanel(api.getPanel(tabId(item))!);
+  }
+}
+
+/** The pane header's `+`, which opens the new menu in the active tab's workspace. */
+function PaneActions({ activePanel, group, containerApi }: IDockviewHeaderActionsProps) {
+  const watch = useWatch();
+  const item = activePanel?.params as TabItem | undefined;
+  const workspace = item === undefined ? undefined : tabWorkspace(watch, item);
+  if (workspace === undefined) {
+    return null;
+  }
+  return (
+    <div className="pane-actions">
+      <button
+        className="icon-button"
+        title="New"
+        onClick={() => void showNewMenu(workspace, (item) => openTab(containerApi, item, group))}
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+function tabWorkspace(watch: WatchState, item: TabItem): string | undefined {
+  return item.type === "session"
+    ? watch.sessions.find((session) => session.session === item.session)?.workspace
+    : watch.terminals.find((terminal) => terminal.terminal === item.terminal)?.workspace;
+}
+
+/** The empty states, shown when no tab is open. */
+function Watermark() {
+  const watch = useWatch();
+  if (watch.workspaces.length === 0) {
+    return (
+      <div className="empty">
+        <div>No workspaces</div>
+        <button className="button" onClick={() => void addWorkspace()}>
+          Add Workspace
+        </button>
+      </div>
+    );
+  }
+  return <div className="empty hint">Select a session</div>;
+}
+
+function SessionPanel({ api, params }: IDockviewPanelProps<TabItem>) {
+  const id = (params as Extract<TabItem, { type: "session" }>).session;
+  const watch = useWatch();
+  const thread = useSession(id);
+  const status = watch.sessions.find((session) => session.session === id)?.status;
+  const requests = status?.type === "needs_permission" ? status.requests : noRequests;
+  // Memoized: `SessionPanel` renders on every watch event, and a fresh array
+  // each time would scroll the thread to the bottom.
+  const items = useMemo(() => withPermissions(thread?.blocks ?? [], requests), [thread, requests]);
+
+  // Whether this is the selection, whose pending requests the permission
+  // shortcuts answer.
+  const [active, setActive] = useState(api.isActive);
+  useEffect(() => {
+    setActive(api.isActive);
+    const listener = api.onDidActiveChange((event) => setActive(event.isActive));
+    return () => listener.dispose();
+  }, [api]);
+
+  const answer = (request: PendingPermission, optionId: string) => {
+    answerPermission(id, request.request_id, optionId);
+  };
+
+  // On `window`, so the shortcuts work with the editor focused. A shortcut
+  // answers the oldest request with its first option of that kind, like
+  // `ur approve` and `ur deny`.
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      const kind = shortcutKind(event);
+      const oldest = requests[0];
+      if (kind === undefined || oldest === undefined) {
+        return;
+      }
+      const option = oldest.request.options.find((option) => option.kind === kind);
+      if (option !== undefined) {
+        event.preventDefault();
+        answer(oldest, option.optionId);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [id, requests, active]);
+
+  return (
+    <div className="session">
+      <Thread items={items} onAnswer={(request, option) => answer(request, option.optionId)} />
+      <Editor
+        session={id}
+        status={status}
+        thread={thread}
+        capabilities={watch.capabilities}
+      />
+    </div>
+  );
+}
+
+/** The terminal's view, once its `terminal_changed` has arrived. */
+function TerminalPanel({ params }: IDockviewPanelProps<TabItem>) {
+  const id = (params as Extract<TabItem, { type: "terminal" }>).terminal;
+  const watch = useWatch();
+  if (!watch.terminals.some((terminal) => terminal.terminal === id)) {
+    return null;
+  }
+  return <TerminalPane terminal={id} />;
+}
+
+/**
+ * Answers the request. An error, such as "permission request N is resolved"
+ * when another daemon client answered first, is only logged: the daemon's
+ * next `session_changed` removes the request from the thread anyway.
+ */
+function answerPermission(session: string, request_id: number, option_id: string) {
+  request({ type: "answer_permission", session, request_id, option_id })
+    .then((response) => {
+      if (response.type === "error") {
+        console.error(`answer_permission: ${response.message}`);
+      }
+    })
+    .catch(console.error);
+}

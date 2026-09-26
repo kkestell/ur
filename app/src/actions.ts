@@ -1,11 +1,12 @@
 import { Menu } from "@tauri-apps/api/menu";
 import { ask, message, open } from "@tauri-apps/plugin-dialog";
-import { type Selection, request } from "./ipc";
+import { request } from "./ipc";
 import type { Request } from "./ipc/bindings/Request";
 import type { Response } from "./ipc/bindings/Response";
 import type { SessionSummary } from "./ipc/bindings/SessionSummary";
 import type { Status } from "./ipc/bindings/Status";
 import type { TerminalSummary } from "./ipc/bindings/TerminalSummary";
+import type { TabItem } from "./layout";
 import type { WatchState } from "./store/watch";
 
 /**
@@ -21,25 +22,25 @@ export async function addWorkspace(): Promise<void> {
   await send({ type: "add_workspace", name, path });
 }
 
-/** Creates a session in the workspace, then selects it. */
+/** Creates a session in the workspace, then opens its tab. */
 export async function newSession(
   workspace: string,
-  onSelect: (selection: Selection) => void,
+  onOpen: (item: TabItem) => void,
 ): Promise<void> {
   const response = await send({ type: "new_session", workspace });
   if (response?.type === "session_created") {
-    onSelect({ type: "session", session: response.session });
+    onOpen({ type: "session", session: response.session });
   }
 }
 
-/** Opens a terminal in the workspace, then selects it. */
+/** Opens a terminal in the workspace, then opens its tab. */
 export async function newTerminal(
   workspace: string,
-  onSelect: (selection: Selection) => void,
+  onOpen: (item: TabItem) => void,
 ): Promise<void> {
   const response = await send({ type: "open_terminal", workspace });
   if (response?.type === "opened") {
-    onSelect({ type: "terminal", terminal: response.terminal });
+    onOpen({ type: "terminal", terminal: response.terminal });
   }
 }
 
@@ -86,14 +87,28 @@ export async function deleteSession(summary: SessionSummary): Promise<void> {
 export async function showWorkspaceMenu(
   watch: WatchState,
   workspace: string,
-  onSelect: (selection: Selection) => void,
+  onOpen: (item: TabItem) => void,
 ): Promise<void> {
   const menu = await Menu.new({
     items: [
-      { text: "New Session", action: () => void newSession(workspace, onSelect) },
-      { text: "New Terminal", action: () => void newTerminal(workspace, onSelect) },
+      { text: "New Session", action: () => void newSession(workspace, onOpen) },
+      { text: "New Terminal", action: () => void newTerminal(workspace, onOpen) },
       { item: "Separator" },
       { text: "Remove Workspace…", action: () => void removeWorkspace(watch, workspace) },
+    ],
+  });
+  await menu.popup();
+}
+
+/** The new menu: New Session and New Terminal. */
+export async function showNewMenu(
+  workspace: string,
+  onOpen: (item: TabItem) => void,
+): Promise<void> {
+  const menu = await Menu.new({
+    items: [
+      { text: "New Session", action: () => void newSession(workspace, onOpen) },
+      { text: "New Terminal", action: () => void newTerminal(workspace, onOpen) },
     ],
   });
   await menu.popup();

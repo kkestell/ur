@@ -169,8 +169,9 @@ impl Link {
 
     /// Sends `focus` in a spawned task. A failure, such as naming a session
     /// the daemon no longer has, changes nothing in the daemon and the next
-    /// selection change sends a fresh one, so it is only logged. Spawned on
-    /// Tauri's runtime, since the window event handler runs outside Tokio.
+    /// change to the visible sessions sends a fresh one, so it is only
+    /// logged. Spawned on Tauri's runtime, since the window event handler runs
+    /// outside Tokio.
     fn send_focus(client: Client, sessions: Vec<String>) {
         tauri::async_runtime::spawn(async move {
             let request = Request::Focus {

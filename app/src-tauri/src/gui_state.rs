@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use ur_client::TerminalId;
 
 /// The GUI state file, keyed by socket path.
 #[derive(Default, Serialize, Deserialize)]
@@ -12,19 +11,11 @@ pub struct GuiState {
     saved: HashMap<String, Saved>,
 }
 
-/// One socket path's record: the selection.
+/// One socket path's record: the layout, dockview's serialized layout as the
+/// webview gave it.
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Saved {
-    pub selection: Option<Selection>,
-}
-
-/// The session or terminal chosen in the sidebar.
-#[derive(Clone, Debug, Serialize, Deserialize, TS)]
-#[serde(tag = "type", rename_all = "snake_case")]
-#[ts(export)]
-pub enum Selection {
-    Terminal { terminal: TerminalId },
-    Session { session: String },
+    pub layout: Option<serde_json::Value>,
 }
 
 /// The payload of the `connection` event and command.

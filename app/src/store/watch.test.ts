@@ -208,3 +208,20 @@ test("workspace_terminals_keep_their_opening_order", () => {
   });
   expect(workspaceTerminals(state, "a").map((summary) => summary.terminal)).toEqual([1, 3]);
 });
+
+test("has_snapshot_follows_the_connection", () => {
+  expect(connected.hasSnapshot).toBe(false);
+  let state = reduceWatch(connected, {
+    type: "watch_snapshot",
+    terminals: [],
+    capabilities: null,
+    workspaces: [],
+    sessions: [],
+  });
+  expect(state.hasSnapshot).toBe(true);
+  state = reduceWatch(state, { type: "connection", connected: false, socket: "/tmp/ur.sock" });
+  expect(state.hasSnapshot).toBe(false);
+  // Reconnecting waits for the new connection's snapshot.
+  state = reduceWatch(state, { type: "connection", connected: true, socket: "/tmp/ur.sock" });
+  expect(state.hasSnapshot).toBe(false);
+});

@@ -1,12 +1,12 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { SerializedDockview } from "dockview-react";
 import type { Connection } from "./bindings/Connection";
 import type { Event } from "./bindings/Event";
 import type { Request } from "./bindings/Request";
 import type { Response } from "./bindings/Response";
-import type { Selection } from "./bindings/Selection";
 
-export type { Connection, Selection };
+export type { Connection };
 
 /** The events the core forwards under the `watch` event name. */
 export type WatchEvent = Extract<
@@ -60,12 +60,13 @@ export function connection(): Promise<Connection> {
   return invoke("connection");
 }
 
-export function selection(): Promise<Selection | null> {
-  return invoke("selection");
+/** The saved layout, or `null` when none is saved. */
+export function layout(): Promise<SerializedDockview | null> {
+  return invoke("layout");
 }
 
-export function select(selection: Selection): Promise<void> {
-  return invoke("select", { selection });
+export function saveLayout(layout: SerializedDockview): Promise<void> {
+  return invoke("save_layout", { layout });
 }
 
 /** Reports the sessions shown in the window; the core sends `focus` from them. */

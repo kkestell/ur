@@ -3,14 +3,12 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { attachTerminal, detachTerminal, request, terminalInput } from "../ipc";
-import type { TerminalSummary } from "../ipc/bindings/TerminalSummary";
 
 /**
- * The terminal header above the terminal's xterm.js view. Attaches on mount
- * and detaches on unmount, so render it keyed by terminal ID.
+ * The terminal's xterm.js view. Attaches on mount and detaches on unmount, so
+ * render it keyed by terminal ID.
  */
-export function TerminalPane({ summary }: { summary: TerminalSummary }) {
-  const terminal = summary.terminal;
+export function TerminalPane({ terminal }: { terminal: number }) {
   const container = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string>();
 
@@ -18,8 +16,16 @@ export function TerminalPane({ summary }: { summary: TerminalSummary }) {
     const xterm = new Terminal({ fontFamily: "Menlo, monospace", fontSize: 13 });
     const fit = new FitAddon();
     xterm.loadAddon(fit);
-    xterm.open(container.current!);
-    fit.fit();
+    const element = container.current!;
+    xterm.open(element);
+    // A tab that is not active has no size, and fitting it would shrink the
+    // terminal to one row and resize the PTY.
+    const fitIfShown = () => {
+      if (element.clientWidth > 0 && element.clientHeight > 0) {
+        fit.fit();
+      }
+    };
+    fitIfShown();
 
     let attached = false;
     const resize = () => {
@@ -44,8 +50,8 @@ export function TerminalPane({ summary }: { summary: TerminalSummary }) {
       terminalInput(terminal, data).catch(console.error);
     });
     xterm.onResize(resize);
-    const observer = new ResizeObserver(() => fit.fit());
-    observer.observe(container.current!);
+    const observer = new ResizeObserver(fitIfShown);
+    observer.observe(element);
 
     return () => {
       observer.disconnect();
@@ -62,10 +68,6 @@ export function TerminalPane({ summary }: { summary: TerminalSummary }) {
 
   return (
     <div className="terminal">
-      <div className="terminal-header">
-        <span className="terminal-icon">&gt;_</span>
-        <span className="label">{summary.title}</span>
-      </div>
       {error !== undefined && <pre className="error">{error}</pre>}
       <div ref={container} className="terminal-view" hidden={error !== undefined} />
     </div>

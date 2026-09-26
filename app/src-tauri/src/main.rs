@@ -28,8 +28,8 @@ fn main() {
             commands::detach_terminal,
             commands::terminal_input,
             commands::connection,
-            commands::selection,
-            commands::select,
+            commands::layout,
+            commands::save_layout,
             commands::set_visible,
         ])
         .run(tauri::generate_context!())

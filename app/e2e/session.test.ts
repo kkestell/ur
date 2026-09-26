@@ -70,7 +70,7 @@ e2eTest("a prompt the daemon answers busy comes back to the editor", async (envi
   assert.equal(await gui.promptText(), "second");
 });
 
-e2eTest("an editor draft does not follow the selection to another session", async (environment) => {
+e2eTest("each session's tab keeps its own editor draft", async (environment) => {
   await environment.newSession();
   await environment.ur("new", "home");
   const gui = await environment.openGui();
@@ -79,6 +79,9 @@ e2eTest("an editor draft does not follow the selection to another session", asyn
   await gui.click(".sidebar .row:nth-child(2)");
   await gui.waitForText(".sidebar .row.selected:nth-child(2)", "New session");
   assert.equal(await gui.promptText(), "");
+  await gui.click(".sidebar .row:nth-child(1)");
+  await gui.waitForText(".sidebar .row.selected:nth-child(1)", "New session");
+  assert.equal(await gui.promptText(), "first draft");
 });
 
 e2eTest("a session that comes back with its workspace shows its thread", async (environment) => {
@@ -111,34 +114,24 @@ e2eTest("another session's activity leaves the thread's scroll position alone", 
   assert.equal(await gui.threadScrollTop(), 0);
 });
 
-e2eTest("the session header shows the session title", async (environment) => {
+e2eTest("a session's tab shows the session title", async (environment) => {
   const session = await environment.newSession();
   const gui = await environment.openGui();
   await gui.click(".sidebar .row", "New session");
-  await gui.waitForText(".session-header .label", "New session");
+  await gui.waitForText(".tab .label", "New session");
   await environment.ur("prompt", session, "title");
-  await gui.waitForText(".session-header .label", "tallies");
+  await gui.waitForText(".tab .label", "tallies");
   await gui.waitForText(".sidebar .row", "tallies");
 });
 
-e2eTest("the session header's + creates a session in its workspace and selects it", async (environment) => {
-  const session = await environment.newSession();
-  await environment.ur("prompt", session, "title");
-  const gui = await environment.openGui();
-  await gui.click(".sidebar .row", "tallies");
-  await gui.click(".session-header .icon-button", "+");
-  await gui.waitForText(".sidebar .row.selected", "New session");
-  await gui.waitForText(".session-header .label", "New session");
-  assert.equal((await gui.texts(".workspace .row")).length, 2);
-});
-
-e2eTest("deleting a session removes it from the sidebar", async (environment) => {
+e2eTest("deleting a session removes it from the sidebar and closes its tab", async (environment) => {
   const session = await environment.newSession();
   const gui = await environment.openGui();
   await gui.click(".sidebar .row", "New session");
   // Delete… is a native menu and confirmation, which WebDriver cannot drive.
   await gui.request({ type: "delete_session", session });
   await gui.waitForNone(".workspace .row");
+  await gui.waitForNone(".tab");
   await gui.waitForText(".empty", "Select a session");
 });
 

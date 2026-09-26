@@ -46,11 +46,12 @@ through native dialogs or menus, which WebDriver cannot drive, and `Gui.request(
 through the core's `request` command for the same reason. `openGui()` makes `ur-app` the frontmost
 application with `Gui.focusWindow()`, since the GUI focuses its visible sessions only while its
 window has focus and WebDriver cannot focus the window; a test that depends on focus calls it again
-before that step. `Gui.showTerminal()` opens a terminal in `home` and selects its terminal row, so
-its view is the only xterm.js on the page. Terminal tests assert on terminal text, read from the
-xterm.js rows, and type through `Gui.type`, not WebDriver key actions. The fake server's prompt
-scripts, named in `fake_server()`'s documentation, give agent session tests replies, permission
-requests, and errors.
+before that step. A tab that is not active stays mounted but hidden, so the helpers look only at
+shown elements. `Gui.showTerminal()` opens a terminal in `home` and opens its tab by clicking its
+terminal row, so its view is the only xterm.js on the page; a reopened GUI restores the tab from the
+layout. Terminal tests assert on terminal text, read from the xterm.js rows, and type through
+`Gui.type`, not WebDriver key actions. The fake server's prompt scripts, named in `fake_server()`'s
+documentation, give agent session tests replies, permission requests, and errors.
 
 ### End-to-end guarantee list
 
@@ -59,10 +60,10 @@ requests, and errors.
   input.
 - Quitting a restored full-screen application returns to the shell, and none of its last screen is
   left behind.
-- A terminal row shows the shell's name until a program sets a title.
+- A terminal's row and tab show the shell's name until a program sets a title.
 - A terminal starts in its workspace's directory.
 - Close Terminal removes the terminal's row.
-- A terminal whose shell exits leaves the sidebar.
+- A terminal whose shell exits leaves the sidebar and closes its tab.
 - Removing a workspace stops its terminals.
 - The empty states follow the workspaces and the selection.
 - A session created from the command line answers a prompt sent from the editor.
@@ -70,12 +71,11 @@ requests, and errors.
 - The selected session and its transcript survive closing and reopening the GUI.
 - The GUI reconnects after a daemon restart without duplicating the thread, and a new prompt works.
 - A prompt the daemon answers busy comes back to the editor.
-- An editor draft does not follow the selection to another session.
+- Each session's tab keeps its own editor draft.
 - A session that comes back with its workspace shows its thread.
 - Another session's activity leaves the thread's scroll position alone.
-- The session header shows the session title.
-- The session header's + creates a session in its workspace and selects it.
-- Deleting a session removes it from the sidebar.
+- A session's tab shows the session title.
+- Deleting a session removes it from the sidebar and closes its tab.
 - A session holding 20 MB of images loads after reopening the GUI.
 - A working session shows the spinner.
 - A session waiting for permission shows its mark and its workspace's count.
@@ -91,6 +91,15 @@ requests, and errors.
 - A Run Command block shows its output when clicked.
 - A tool call row shows its content when clicked.
 - Clicking a link in an agent message leaves the app in place.
+- Dragging a tab to a pane's edge makes a new pane, and to a pane's center moves the tab there.
+- Choosing a session or terminal with a tab activates that tab in its pane.
+- A session chosen in the sidebar opens in the active pane.
+- The layout and each pane's active tab survive closing and reopening the GUI.
+- Close Tab leaves its terminal running.
+- A terminal tab keeps its size while another tab is shown.
+- A session's tab shows its status mark.
+- A session shown in a pane that is not active does not become unread.
+- The permission shortcuts answer only the active tab's session.
 - Typing / lists the server's slash commands, and Enter inserts one.
 - Choosing a config option value sets it on the server.
 - A config option the server changes updates its picker.

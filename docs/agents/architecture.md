@@ -114,10 +114,10 @@ the session focused, and turns off when a client focuses it or sends it a prompt
 attention** when it is `NeedsPermission`, `Failed`, or unread. The sidebar sorts workspaces and
 sessions by this.
 
-A client focuses the set of sessions it is showing. The GUI focuses every session visible in a pane
-while its window has focus, and focuses nothing when the window loses focus. `ur read` focuses the
-session it reads, so reading a session clears its unread flag, and a session followed with
-`--follow` does not become unread. A client's focus clears when it disconnects.
+A client focuses the set of sessions it is showing. The GUI focuses every session shown as the
+active tab of a pane while its window has focus, and focuses nothing when the window loses focus.
+`ur read` focuses the session it reads, so reading a session clears its unread flag, and a session
+followed with `--follow` does not become unread. A client's focus clears when it disconnects.
 
 ### Permissions
 
@@ -140,8 +140,9 @@ option. The GUI's shortcuts do the same by option kind: âŒ˜Y for `allow_once`, â
 
 Sessions appear automatically under their workspace. New Session creates one; Delete, when
 supported, removes it from the server after confirmation. If a turn is running, Delete cancels it,
-waits for the prompt to return, then calls `session/delete`. Selecting a session displays it, and
-closing its tab only changes the layout.
+waits for the prompt to return, then calls `session/delete`. Choosing a session or terminal in the
+sidebar activates its tab if it has one, wherever it is, and otherwise opens it in the active pane.
+Closing a tab only changes the layout.
 
 Remove Workspace cancels its running turns and stops its terminals after confirmation, then removes
 the workspace from the sidebar. Saved history and the lifecycle of agent tools and background jobs
@@ -267,7 +268,8 @@ app/src-tauri/src/
                   subscribed, attached, focus }; forwards events to app.emit
                   and PTY bytes to the terminal Channel
   commands.rs     request(req: Request) -> Response, attach_terminal,
-                  detach_terminal, terminal_input, set_visible
+                  detach_terminal, terminal_input, set_visible, layout,
+                  save_layout
   terminal.rs     terminal ID to Channel<tauri::ipc::Response>
   gui_state.rs    gui.json
 
@@ -279,8 +281,9 @@ app/src/
   transcript/     reduce.ts: (ThreadState, Event) -> ThreadState, pure and
                   unit tested; blocks.ts display types
   components/     Sidebar, Thread, Editor, ConfigPicker, UsageIndicator,
-                  Permission, TerminalPane, Layout, Tab
+                  Permission, TerminalPane, Layout, Tab, StatusMark
   hooks/          useTerminal(id)
+  layout.ts       TabItem, openTab(), goneTabs(), visibleSessions()
   actions.ts      folder picker, confirmations, native menus
   slash.ts        command list matching
   usage.ts        usage indicator text
@@ -346,7 +349,7 @@ webview never touches the socket.
 - One Tauri command, `request`, takes a wire-protocol `Request` and returns the daemon's `Response`.
   The tagged `Request` enum carries the name and arguments, so adding a request touches
   `protocol.rs` and the daemon only. The other commands are `attach_terminal`, `detach_terminal`,
-  `terminal_input`, `selection`, `select`, `connection`, and `set_visible`. `attach_terminal` is
+  `terminal_input`, `layout`, `save_layout`, `connection`, and `set_visible`. `attach_terminal` is
   separate because it takes the terminal's `Channel`, which `request` cannot carry. `connection`
   gives the webview the current connection when it starts, since a `connection` event emitted before
   its listener is installed is lost.
@@ -375,8 +378,8 @@ webview never touches the socket.
   the place of the tool call block with its tool call ID, or follows the last block.
 - Native pieces come from Tauri and are used from the webview: the dialog plugin for the folder
   picker, confirmations, and error messages, the opener plugin, which opens links in agent messages
-  in the default browser, and the menu API's `Menu.popup()` for the workspace, session, and terminal
-  menus. Image files are dropped on the editor as HTML drop events, since the window's
+  in the default browser, and the menu API's `Menu.popup()` for the workspace, session, terminal,
+  and new menus. Image files are dropped on the editor as HTML drop events, since the window's
   `dragDropEnabled` is off, and the webview reads them into image content. Keyboard shortcuts are
   handled in the webview.
 - The core writes the GUI state file described below.
@@ -436,14 +439,12 @@ foreground process group when the shell exits. The terminal ends when its PTY cl
 as a shell that ran `exit`. A program that ignores `SIGHUP` and keeps the PTY open keeps its
 terminal listed.
 
-Selecting a terminal that already has a tab activates that tab.
-
 ### GUI state
 
-The core keeps the GUI's layout in `$XDG_STATE_HOME/ur/gui.json`, keyed by socket path: the selected
-session or terminal and, from milestone 10, the pane layout as dockview's serialized layout. Panes
-refer to sessions and terminals by ID. When the GUI opens, it drops panes whose session or terminal
-no longer exists.
+The core keeps the GUI's layout in `$XDG_STATE_HOME/ur/gui.json`, keyed by socket path, as
+dockview's serialized layout, which includes each pane's active tab and the active pane. The webview
+saves it on every layout change. Tabs refer to sessions and terminals by ID. When the GUI restores
+the layout, it drops tabs whose session or terminal no longer exists.
 
 ### Transport
 

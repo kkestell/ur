@@ -85,7 +85,7 @@
 - **State file**: `$XDG_STATE_HOME/ur/state.json`, under `~/.local/state` when the variable is
   unset. It holds workspace names and paths, and nothing about sessions.
 - **GUI state file**: `$XDG_STATE_HOME/ur/gui.json`, written by the core and keyed by socket path.
-  It holds the selected session or terminal and, from milestone 10, the layout.
+  It holds the layout.
 - **Capabilities**: What the server advertised during `initialize`. ur calls an optional method only
   when it is advertised and advertises only client capabilities it implements.
 - **History capabilities**: The server's `session/list` and `session/load` support. Without them, ur
@@ -185,8 +185,8 @@
 - **Focus**: The set of sessions a daemon client is showing, sent with `focus(sessions)`. The GUI
   focuses every visible session while its window has focus and nothing otherwise. A daemon client's
   focus clears when it disconnects.
-- **Visible session**: A session shown in a pane of the GUI, reported by the webview through
-  `set_visible`. Until Pane grid, it is the selected session.
+- **Visible session**: A session shown as the active tab of a pane, reported by the webview through
+  `set_visible`.
 
 ### Permissions
 
@@ -266,17 +266,20 @@
   advertises `session/delete`.
 - **Terminal menu**: The native context menu of a terminal row: Close Terminal. It is
   `showTerminalMenu()` in code.
-- **Session header**: The row above the thread with the session title and `+`, which creates a
-  session in the same workspace.
-- **Terminal header**: The row above a terminal's xterm.js view with the terminal icon and terminal
-  title. It is `terminal-header` in CSS.
 - **Command list**: The list of matching slash commands above the editor while typing `/`.
 - **Config picker**: The editor control for one config option: a list of a select option's values,
   or a toggle for a boolean option. It is `ConfigPicker` in code.
-- **Pane**: A dockview group holding tabs. The active pane receives sidebar selections.
+- **Pane**: A dockview group holding tabs. The active pane receives sidebar choices.
 - **Tab**: A dockview panel for one agent session or terminal. Closing it changes only the layout.
-- **Layout**: The dockview arrangement of panes and tabs, saved in the GUI state file.
-- **Selection**: The session or terminal chosen in the sidebar, saved in the GUI state file.
+  `Tab` is also its tab component.
+- **`TabItem`**: The session or terminal one tab shows: `{ type: "session", session }` or
+  `{ type: "terminal", terminal }`. It is the panel's params.
+- **Close Tab**: The button a tab shows on hover.
+- **New menu**: The native menu from a pane's `+`: New Session and New Terminal, in the workspace of
+  the pane's active tab. It is `showNewMenu()` in code.
+- **Layout**: The dockview arrangement of panes and tabs, saved in the GUI state file. `Layout` is
+  the component that holds `DockviewReact`.
+- **Selection**: The session or terminal of the active tab, highlighted in the sidebar.
 - **Terminal row**: A sidebar row for one terminal, listed under its workspace after the sessions,
   showing the terminal icon and terminal title.
 

@@ -131,24 +131,25 @@ code,
   font-weight: bold;
 }
 
-.row .status {
+/* The status mark, in session rows and tabs. */
+.status {
   flex: none;
 }
 
-.row .status.spinner {
+.status.spinner {
   width: 8px;
   height: 8px;
   border-width: 1.5px;
 }
 
-.row .status.dot {
+.status.dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: #e5c07b;
 }
 
-.row .status.failed {
+.status.failed {
   color: #e06c75;
   font-weight: bold;
 }
@@ -157,6 +158,101 @@ code,
   flex: none;
   font-family: Menlo, monospace;
   font-size: 11px;
+}
+
+/* Panes and tabs */
+
+.panes {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Two classes, so these win over dockview's own theme rules. */
+.main .dockview-theme-dark {
+  --dv-group-view-background-color: #1e1e1e;
+  --dv-tabs-and-actions-container-background-color: #1e1e1e;
+  --dv-tabs-and-actions-container-font-size: 13px;
+  --dv-activegroup-visiblepanel-tab-background-color: #2a2a2a;
+  --dv-activegroup-hiddenpanel-tab-background-color: #1e1e1e;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #252525;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #1e1e1e;
+  --dv-activegroup-visiblepanel-tab-color: #ddd;
+  --dv-activegroup-hiddenpanel-tab-color: #888;
+  --dv-inactivegroup-visiblepanel-tab-color: #aaa;
+  --dv-inactivegroup-hiddenpanel-tab-color: #888;
+  --dv-tab-divider-color: #3a3a3a;
+  --dv-separator-border: #3a3a3a;
+  --dv-paneview-header-border-color: #3a3a3a;
+  --dv-drag-over-background-color: rgba(116, 173, 232, 0.2);
+}
+
+.main .dockview-theme-dark .dv-tabs-and-actions-container {
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.tab {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  max-width: 240px;
+  cursor: default;
+}
+
+.tab-kind {
+  flex: none;
+  color: #aaa;
+}
+
+.tab .label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The status mark and Close Tab share one place at the tab's end. */
+.tab-end {
+  flex: none;
+  width: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab-close {
+  display: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: #aaa;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.tab-close:hover {
+  background: #333;
+  color: #ddd;
+}
+
+.tab:hover .tab-close {
+  display: block;
+}
+
+.tab:hover .status {
+  display: none;
+}
+
+.pane-actions {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
 }
 
 /* Empty states */
@@ -173,6 +269,11 @@ code,
 
 /* The whole window, not a pane. */
 .connecting {
+  height: 100%;
+}
+
+/* Dockview's watermark container. */
+.dv-watermark-container .empty {
   height: 100%;
 }
 
@@ -220,8 +321,7 @@ code,
 
 .session,
 .terminal {
-  flex: 1;
-  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -229,25 +329,6 @@ code,
 .terminal-view {
   flex: 1;
   min-height: 0;
-}
-
-.session-header,
-.terminal-header {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px 6px 24px;
-  border-bottom: 1px solid #3a3a3a;
-}
-
-.session-header .label,
-.terminal-header .label {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .thread {

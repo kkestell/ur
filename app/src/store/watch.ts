@@ -7,6 +7,8 @@ import type { Workspace } from "../ipc/bindings/Workspace";
 
 export type WatchState = {
   connected: boolean;
+  /** Whether the watch snapshot of the current connection has arrived. */
+  hasSnapshot: boolean;
   socket: string;
   workspaces: Workspace[];
   sessions: SessionSummary[];
@@ -20,6 +22,7 @@ export type ConnectionEvent = { type: "connection" } & Connection;
 
 export const initialWatch: WatchState = {
   connected: false,
+  hasSnapshot: false,
   socket: "",
   workspaces: [],
   sessions: [],
@@ -29,8 +32,8 @@ export const initialWatch: WatchState = {
 
 /**
  * Applies one watch or connection event. A disconnect clears the workspaces,
- * sessions, terminals, and capabilities; the next watch snapshot fills them
- * again.
+ * sessions, terminals, capabilities, and `hasSnapshot`; the next watch
+ * snapshot fills them again.
  */
 export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEvent): WatchState {
   switch (event.type) {
@@ -38,6 +41,7 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
       return {
         ...state,
         connected: event.connected,
+        hasSnapshot: event.connected && state.hasSnapshot,
         socket: event.socket,
         workspaces: event.connected ? state.workspaces : [],
         sessions: event.connected ? state.sessions : [],
@@ -47,6 +51,7 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
     case "watch_snapshot":
       return {
         ...state,
+        hasSnapshot: true,
         workspaces: event.workspaces,
         sessions: event.sessions,
         terminals: event.terminals,

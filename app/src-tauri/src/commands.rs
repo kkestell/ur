@@ -2,7 +2,7 @@ use tauri::State;
 use tauri::ipc::{Channel, Response as ChannelBytes};
 use ur_client::{Request, Response, TerminalId};
 
-use crate::gui_state::{Connection, GuiState, Selection};
+use crate::gui_state::{Connection, GuiState};
 use crate::link::Link;
 
 #[tauri::command]
@@ -55,17 +55,17 @@ pub fn connection(link: State<'_, Link>) -> Connection {
     link.connection()
 }
 
-/// The saved selection.
+/// The saved layout.
 #[tauri::command]
-pub fn selection(link: State<'_, Link>) -> Result<Option<Selection>, String> {
+pub fn layout(link: State<'_, Link>) -> Result<Option<serde_json::Value>, String> {
     let gui_state = GuiState::load().map_err(|error| error.to_string())?;
-    Ok(gui_state.saved(link.socket()).selection)
+    Ok(gui_state.saved(link.socket()).layout)
 }
 
-/// Saves the selection.
+/// Saves the layout.
 #[tauri::command]
-pub fn select(link: State<'_, Link>, selection: Selection) -> Result<(), String> {
+pub fn save_layout(link: State<'_, Link>, layout: serde_json::Value) -> Result<(), String> {
     let mut gui_state = GuiState::load().map_err(|error| error.to_string())?;
-    gui_state.saved_mut(link.socket()).selection = Some(selection);
+    gui_state.saved_mut(link.socket()).layout = Some(layout);
     gui_state.save().map_err(|error| error.to_string())
 }

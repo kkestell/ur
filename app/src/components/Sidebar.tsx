@@ -1,6 +1,5 @@
 import { addWorkspace, showSessionMenu, showTerminalMenu, showWorkspaceMenu } from "../actions";
-import type { Selection } from "../ipc";
-import type { SessionSummary } from "../ipc/bindings/SessionSummary";
+import type { TabItem } from "../layout";
 import {
   type WatchState,
   attentionCount,
@@ -8,15 +7,16 @@ import {
   workspaceSessions,
   workspaceTerminals,
 } from "../store/watch";
+import { StatusMark } from "./StatusMark";
 
 export function Sidebar({
   watch,
   selection,
-  onSelect,
+  onOpen,
 }: {
   watch: WatchState;
-  selection: Selection | null;
-  onSelect: (selection: Selection) => void;
+  selection: TabItem | null;
+  onOpen: (item: TabItem) => void;
 }) {
   const canDelete = watch.capabilities?.sessionCapabilities?.delete != null;
   return (
@@ -35,7 +35,7 @@ export function Sidebar({
               className="workspace-name"
               onContextMenu={(event) => {
                 event.preventDefault();
-                void showWorkspaceMenu(watch, workspace.name, onSelect);
+                void showWorkspaceMenu(watch, workspace.name, onOpen);
               }}
             >
               <span className="label">{workspace.name}</span>
@@ -52,7 +52,7 @@ export function Sidebar({
                       : "") +
                     (session.unread ? " unread" : "")
                   }
-                  onClick={() => onSelect({ type: "session", session: session.session })}
+                  onClick={() => onOpen({ type: "session", session: session.session })}
                   onContextMenu={(event) => {
                     if (canDelete) {
                       event.preventDefault();
@@ -73,7 +73,7 @@ export function Sidebar({
                       ? " selected"
                       : "")
                   }
-                  onClick={() => onSelect({ type: "terminal", terminal: terminal.terminal })}
+                  onClick={() => onOpen({ type: "terminal", terminal: terminal.terminal })}
                   onContextMenu={(event) => {
                     event.preventDefault();
                     void showTerminalMenu(terminal);
@@ -89,18 +89,4 @@ export function Sidebar({
       })}
     </nav>
   );
-}
-
-/** The mark at the right edge of a session row: nothing when idle. */
-function StatusMark({ status }: { status: SessionSummary["status"] }) {
-  switch (status.type) {
-    case "idle":
-      return null;
-    case "working":
-      return <span className="status spinner" />;
-    case "needs_permission":
-      return <span className="status dot" />;
-    case "failed":
-      return <span className="status failed">!</span>;
-  }
 }

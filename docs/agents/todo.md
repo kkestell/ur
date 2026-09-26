@@ -16,7 +16,7 @@
   - [x] [OX-0008](issues.csv:9): A session holding about 12 MB of images disconnects the GUI in a
         loop
 - [x] Workspace terminal controls: terminals listed and managed under their workspace.
-- [ ] Pane grid: agent sessions and terminals side by side in tabs and panes.
+- [x] Pane grid: agent sessions and terminals side by side in tabs and panes.
 - [ ] Notifications and hooks: macOS notifications and an `on_event` command.
 
 Each item has a section below with its details and a check you can run. The early agent GUI and
@@ -237,24 +237,25 @@ the GUI. Selecting its terminal restores the view; Close Terminal stops it.
 The session area becomes a dockview layout that holds agent sessions and terminals side by side.
 Each dockview group is a pane, and each panel is a tab.
 
-A tab is a custom tab component that shows its kind (agent or terminal) and, for an agent, its
-status; hovering a tab shows its Close Tab button, which leaves its session or terminal running. The
-group's header actions hold `+`, which opens New Session and New Terminal in the active tab's
-workspace (or the selected sidebar workspace if the pane is empty), and the split button, which
-opens Split Right, Left, Up, and Down, each with a shortcut. Dragging a tab is dockview's own:
-dropping it on a pane's edge splits, and dropping it on a pane's center moves the tab there.
-Choosing a session or terminal in the sidebar opens it in the active pane; a terminal with an
-existing tab activates that tab. The GUI focuses every session visible in a pane and saves the
-layout as described under GUI state in `architecture.md`.
+A tab is a custom tab component that shows its kind (agent or terminal), its title, and, for an
+agent, its status; hovering a tab shows its Close Tab button, which leaves its session or terminal
+running. The group's header actions hold `+`, which opens New Session and New Terminal in the active
+tab's workspace. Dragging a tab is dockview's own: dropping it on a pane's edge makes a new pane on
+that side, and dropping it on a pane's center moves the tab there. This is the only way to make a
+pane. Choosing a session or terminal in the sidebar activates its tab if it has one, and otherwise
+opens it in the active pane. The GUI focuses every session visible in a pane and saves the layout as
+described under GUI state in `architecture.md`.
 
 - Replace the single session area with dockview groups and panels for agent sessions and terminals.
-  Add custom tabs with kind, agent status, and Close Tab; closing a tab leaves its session or
+  Add custom tabs with kind, title, agent status, and Close Tab; closing a tab leaves its session or
   terminal running.
-- Add group header actions for New Session, New Terminal, and splits in four directions with
-  shortcuts. Use dockview's tab dragging to split or move tabs between panes.
-- Open a sidebar selection in the active pane; activate an existing terminal tab instead of opening
-  a duplicate. Report focus for every visible session and save and restore the dockview layout,
-  dropping references to sessions or terminals that no longer exist.
+- Add the group header's `+` for New Session and New Terminal. Use dockview's tab dragging to make
+  panes and move tabs between them.
+- Open a sidebar choice in the active pane, or activate its existing tab instead of opening a
+  duplicate. Report focus for every visible session and save and restore the dockview layout,
+  dropping tabs whose session or terminal no longer exists.
+
+The wireframe's split button and split menu are not built.
 
 ![Panes](wireframes/panes.png)
 

@@ -50,14 +50,14 @@ e2eTest("quitting a restored full-screen application returns to the shell", asyn
   );
 });
 
-e2eTest("a terminal row shows the shell's name until a program sets a title", async (environment) => {
+e2eTest("a terminal's row and tab show the shell's name until a program sets a title", async (environment) => {
   const gui = await environment.openGui();
   await gui.showTerminal();
   await gui.waitForText(".sidebar .row:has(.terminal-icon) .label", "sh");
-  await gui.waitForText(".terminal-header .label", "sh");
+  await gui.waitForText(".tab .label", "sh");
   await gui.type("printf '\\033]0;tallying\\007'\r");
   await gui.waitForText(".sidebar .row:has(.terminal-icon) .label", "tallying");
-  await gui.waitForText(".terminal-header .label", "tallying");
+  await gui.waitForText(".tab .label", "tallying");
 });
 
 e2eTest("a terminal starts in its workspace's directory", async (environment) => {
@@ -89,11 +89,12 @@ e2eTest("Close Terminal removes the terminal's row", async (environment) => {
   await gui.waitForLine("still here");
 });
 
-e2eTest("a terminal whose shell exits leaves the sidebar", async (environment) => {
+e2eTest("a terminal whose shell exits leaves the sidebar and closes its tab", async (environment) => {
   const gui = await environment.openGui();
   await gui.showTerminal();
   await gui.type("exit\r");
   await gui.waitForNone(".sidebar .row:has(.terminal-icon)");
+  await gui.waitForNone(".tab");
   await gui.waitForText(".empty", "Select a session");
 });
 
