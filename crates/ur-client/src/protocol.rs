@@ -35,9 +35,8 @@ pub enum Request {
     /// `terminal_exited` sent, when the shell exits.
     CloseTerminal { terminal: TerminalId },
     /// Sends the watch snapshot, then every change to workspaces, sessions,
-    /// and terminals.
-    /// Watching again from the same socket connection replaces the earlier
-    /// registration.
+    /// and terminals. Watching again from the same socket connection replaces
+    /// the earlier registration.
     Watch,
     /// Adds a workspace. `path` must be an absolute path to a directory, and is
     /// stored as is.

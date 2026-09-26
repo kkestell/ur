@@ -17,9 +17,9 @@ use ur_client::{
 use super::server::Outbox;
 
 /// The daemon's ACP connection, workspaces, sessions, and terminal summaries,
-/// behind one std mutex. `Terminals` holds the PTYs and reports to it. Methods queue their events on outboxes while the lock is held, which
-/// keeps each daemon client's events in order. They never wait and never
-/// await.
+/// behind one std mutex. `Terminals` holds the PTYs and reports to it.
+/// Methods queue their events on outboxes while the lock is held, which keeps
+/// each daemon client's events in order. They never wait and never await.
 pub struct State {
     /// The ACP connection, or why there is none.
     server: Result<Server, String>,
