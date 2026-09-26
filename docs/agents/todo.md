@@ -18,6 +18,9 @@
 - [x] Workspace terminal controls: terminals listed and managed under their workspace.
 - [x] Pane grid: agent sessions and terminals side by side in tabs and panes.
 - [ ] Notifications and hooks: macOS notifications and an `on_event` command.
+- [ ] [OX-0010](issues.csv:11): Dropped images can be omitted or reordered in a prompt
+- [ ] [OX-0011](issues.csv:12): Followed CLI transcript misses replayed entries after a server
+      restart
 
 Each item has a section below with its details and a check you can run. The early agent GUI and
 empty-state wireframes show Agent GUI. The other wireframes include controls from later items; each

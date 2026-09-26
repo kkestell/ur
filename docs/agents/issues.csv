@@ -8,3 +8,6 @@ OX-0006,2026-09-25 18:18,An interrupted turn reloaded from the server reads as a
 OX-0007,2026-09-25 18:46,Agent message links replace the app with a web page,high,correctness,fixed,reviews/2026-09-25-010-thread-rendering.md
 OX-0008,2026-09-25 19:38,A session holding about 12 MB of images disconnects the GUI in a loop,high,correctness,fixed,reviews/2026-09-25-012-session-management-and-editor.md
 OX-0009,2026-09-25 21:03,A restored hidden terminal is sized to the whole dock area,low,correctness,unplanned,reviews/2026-09-25-015-pane-grid.md
+OX-0010,2026-09-26 06:33,Dropped images can be omitted or reordered in a prompt,high,correctness,scheduled,reviews/2026-09-26-001-full-codebase.md
+OX-0011,2026-09-26 06:33,Followed CLI transcript misses replayed entries after a server restart,medium,correctness,scheduled,reviews/2026-09-26-001-full-codebase.md
+OX-0012,2026-09-26 06:33,The model picker interprets an Ox description as structured metadata,low,architecture,unscheduled,reviews/2026-09-26-001-full-codebase.md
