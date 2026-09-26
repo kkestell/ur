@@ -15,9 +15,18 @@ const shortcuts: { kind: PermissionOptionKind; key: string; shift: boolean; alt:
 /** The parts of a keyboard event a shortcut reads. */
 export type Keys = Pick<KeyboardEvent, "code" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">;
 
+/** macOS uses Command; other platforms use Ctrl for app shortcuts. */
+export function isMacPlatform(): boolean {
+  return navigator.platform.startsWith("Mac");
+}
+
+function primaryModifier(event: Keys, mac: boolean): boolean {
+  return event.metaKey === mac && event.ctrlKey !== mac;
+}
+
 /** The option kind the keyboard event's shortcut answers with, if any. */
-export function shortcutKind(event: Keys): PermissionOptionKind | undefined {
-  if (!event.metaKey || event.ctrlKey) {
+export function shortcutKind(event: Keys, mac: boolean): PermissionOptionKind | undefined {
+  if (!primaryModifier(event, mac)) {
     return undefined;
   }
   // `code` names the physical key, since ⌥ changes `key` on macOS.
@@ -29,14 +38,16 @@ export function shortcutKind(event: Keys): PermissionOptionKind | undefined {
 }
 
 /** The shortcut a permission option row shows for its kind. */
-export function shortcutLabel(kind: PermissionOptionKind): string {
+export function shortcutLabel(kind: PermissionOptionKind, mac: boolean): string {
   const shortcut = shortcuts.find((shortcut) => shortcut.kind === kind)!;
-  return (shortcut.shift ? "⇧" : "") + (shortcut.alt ? "⌥" : "") + "⌘" + shortcut.key.toUpperCase();
+  return mac
+    ? (shortcut.shift ? "⇧" : "") + (shortcut.alt ? "⌥" : "") + "⌘" + shortcut.key.toUpperCase()
+    : "Ctrl+" + (shortcut.shift ? "Shift+" : "") + (shortcut.alt ? "Alt+" : "") + shortcut.key.toUpperCase();
 }
 
-/** What ⌘N or ⇧⌘N opens: a new session or a new terminal. */
-export function newShortcut(event: Keys): "session" | "terminal" | undefined {
-  if (!event.metaKey || event.ctrlKey || event.altKey || event.code !== "KeyN") {
+/** What the platform's New Session or New Terminal shortcut opens. */
+export function newShortcut(event: Keys, mac: boolean): "session" | "terminal" | undefined {
+  if (!primaryModifier(event, mac) || event.altKey || event.code !== "KeyN") {
     return undefined;
   }
   return event.shiftKey ? "terminal" : "session";
@@ -44,7 +55,7 @@ export function newShortcut(event: Keys): "session" | "terminal" | undefined {
 
 /** The tab action for the platform's Command or Ctrl shortcut. */
 export function tabShortcut(event: Keys, mac: boolean): "close" | "reopen" | undefined {
-  if (event.metaKey !== mac || event.ctrlKey === mac || event.altKey) {
+  if (!primaryModifier(event, mac) || event.altKey) {
     return undefined;
   }
   if (event.code === "KeyW" && !event.shiftKey) {

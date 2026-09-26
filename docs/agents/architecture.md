@@ -133,8 +133,9 @@ remaining pending requests and tells clients they are resolved.
 
 The GUI draws one button per option, using the label and kind in the request. The CLI's `approve`
 and `deny` answer the session's oldest pending request with its first `allow_*` or `reject_*`
-option. The GUI's shortcuts do the same by option kind: ⌘Y for `allow_once`, ⇧⌘Y for `allow_always`,
-⌥⌘Z for `reject_once`, and ⇧⌥⌘Z for `reject_always`.
+option. The GUI's shortcuts do the same by option kind: Command+Y for `allow_once`, Command+Shift+Y
+for `allow_always`, Command+Option+Z for `reject_once`, and Command+Shift+Option+Z for
+`reject_always` on macOS. Other platforms use Ctrl in place of Command and Alt in place of Option.
 
 ### Sessions, tabs, and workspaces
 
@@ -144,11 +145,12 @@ waits for the prompt to return, then calls `session/delete`. Choosing a session 
 sidebar activates its tab if it has one, wherever it is, and otherwise opens it in the active pane.
 Closing a tab only changes the layout.
 
-⌘N opens a new session and ⇧⌘N a new terminal in the active pane. Each opens in the workspace of the
-active tab, or in the first workspace in the sidebar when no tab is open. ⌘W on macOS or Ctrl+W on
-other platforms closes the active tab. ⇧⌘T or Ctrl+Shift+T reopens the most recently closed tab in
-the active pane. The GUI keeps closed tabs only in memory for its current run; it skips tabs whose
-session or terminal is gone or whose tab was opened again from the sidebar.
+Command+N opens a new session and Command+Shift+N a new terminal on macOS. Other platforms use Ctrl
+in place of Command. Each opens in the workspace of the active tab, or in the first workspace in the
+sidebar when no tab is open. Command+W on macOS or Ctrl+W on other platforms closes the active tab.
+Command+Shift+T or Ctrl+Shift+T reopens the most recently closed tab in the active pane. The GUI
+keeps closed tabs only in memory for its current run; it skips tabs whose session or terminal is
+gone or whose tab was opened again from the sidebar.
 
 Remove Workspace cancels its running turns and stops its terminals after confirmation, then removes
 the workspace from the sidebar. Saved history and the lifecycle of agent tools and background jobs

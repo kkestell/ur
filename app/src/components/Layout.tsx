@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { addWorkspace, showNewMenu } from "../actions";
 import { request, saveLayout, setVisible } from "../ipc";
 import type { PendingPermission } from "../ipc/bindings/PendingPermission";
-import { shortcutKind } from "../keys";
+import { isMacPlatform, shortcutKind } from "../keys";
 import { type TabItem, goneTabs, openTab, tabId, tabWorkspace, visibleSessions } from "../layout";
 import { useSession } from "../store/sessions";
 import { useWatch } from "../store/watch";
@@ -253,7 +253,7 @@ function SessionPanel({ api, params }: IDockviewPanelProps<TabItem>) {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      const kind = shortcutKind(event);
+      const kind = shortcutKind(event, isMacPlatform());
       const oldest = requests[0];
       if (kind === undefined || oldest === undefined) {
         return;

@@ -5,7 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { SidebarHandle, defaultSidebarWidth } from "./components/SidebarHandle";
 import { connection, layout as loadLayout, request, saveSidebarWidth, sidebarWidth } from "./ipc";
 import { newSession, newTerminal } from "./actions";
-import { newShortcut, tabShortcut } from "./keys";
+import { isMacPlatform, newShortcut, tabShortcut } from "./keys";
 import { type TabItem, openTab, tabId, tabWorkspace } from "./layout";
 import { apply as applyWatch, orderedWorkspaces, useWatch } from "./store/watch";
 
@@ -48,8 +48,9 @@ export default function App() {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      const opens = newShortcut(event);
-      const action = tabShortcut(event, navigator.platform.startsWith("Mac"));
+      const mac = isMacPlatform();
+      const opens = newShortcut(event, mac);
+      const action = tabShortcut(event, mac);
       if (opens === undefined && action === undefined) {
         return;
       }

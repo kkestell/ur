@@ -75,6 +75,19 @@ e2eTest("⌘N opens a new session and ⇧⌘N a new terminal in the active pane"
   await gui.waitForText(".sidebar .row:has(.terminal-icon) .label", "sh");
 });
 
+e2eTest("Ctrl opens, closes, and reopens tabs on other platforms", async (environment) => {
+  const gui = await environment.openGui();
+  await gui.setPlatform("Linux");
+  await gui.pressShortcut("KeyN", { ctrl: true });
+  await waitForPanes(gui, ["*[*New session]"]);
+  await gui.pressShortcut("KeyN", { ctrl: true, shift: true });
+  await waitForPanes(gui, ["*[New session, *sh]"]);
+  await gui.pressShortcut("KeyW", { ctrl: true });
+  await waitForPanes(gui, ["*[*New session]"]);
+  await gui.pressShortcut("KeyT", { ctrl: true, shift: true });
+  await waitForPanes(gui, ["*[New session, *sh]"]);
+});
+
 e2eTest("the close shortcut removes only the active tab, even with the editor or terminal focused", async (environment) => {
   const gui = await environment.openGui();
   await gui.showTerminal();

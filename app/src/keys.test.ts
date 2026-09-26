@@ -7,35 +7,48 @@ function keys(init: Partial<Keys>): Keys {
 
 test("shortcuts_map_to_option_kinds", () => {
   const cases = [
-    { init: { code: "KeyY", metaKey: true }, kind: "allow_once", label: "⌘Y" },
-    { init: { code: "KeyY", metaKey: true, shiftKey: true }, kind: "allow_always", label: "⇧⌘Y" },
-    { init: { code: "KeyZ", metaKey: true, altKey: true }, kind: "reject_once", label: "⌥⌘Z" },
+    { init: { code: "KeyY", metaKey: true }, mac: true, kind: "allow_once", label: "⌘Y" },
+    { init: { code: "KeyY", metaKey: true, shiftKey: true }, mac: true, kind: "allow_always", label: "⇧⌘Y" },
+    { init: { code: "KeyZ", metaKey: true, altKey: true }, mac: true, kind: "reject_once", label: "⌥⌘Z" },
     {
       init: { code: "KeyZ", metaKey: true, altKey: true, shiftKey: true },
+      mac: true,
       kind: "reject_always",
       label: "⇧⌥⌘Z",
     },
-    { init: { code: "KeyY" }, kind: undefined, label: undefined },
+    { init: { code: "KeyY", ctrlKey: true }, mac: false, kind: "allow_once", label: "Ctrl+Y" },
+    { init: { code: "KeyY", ctrlKey: true, shiftKey: true }, mac: false, kind: "allow_always", label: "Ctrl+Shift+Y" },
+    { init: { code: "KeyZ", ctrlKey: true, altKey: true }, mac: false, kind: "reject_once", label: "Ctrl+Alt+Z" },
+    { init: { code: "KeyZ", ctrlKey: true, altKey: true, shiftKey: true }, mac: false, kind: "reject_always", label: "Ctrl+Shift+Alt+Z" },
+    { init: { code: "KeyY", ctrlKey: true }, mac: true, kind: undefined, label: undefined },
+    { init: { code: "KeyY", metaKey: true }, mac: false, kind: undefined, label: undefined },
+    { init: { code: "KeyY", ctrlKey: true, metaKey: true }, mac: false, kind: undefined, label: undefined },
+    { init: { code: "KeyY" }, mac: true, kind: undefined, label: undefined },
   ] as const;
-  for (const { init, kind, label } of cases) {
-    expect(shortcutKind(keys(init)), JSON.stringify(init)).toBe(kind);
+  for (const { init, mac, kind, label } of cases) {
+    expect(shortcutKind(keys(init), mac), JSON.stringify({ init, mac })).toBe(kind);
     if (kind !== undefined) {
-      expect(shortcutLabel(kind), kind).toBe(label);
+      expect(shortcutLabel(kind, mac), kind).toBe(label);
     }
   }
 });
 
 test("new_shortcuts_map_to_sessions_and_terminals", () => {
   const cases = [
-    { init: { code: "KeyN", metaKey: true }, opens: "session" },
-    { init: { code: "KeyN", metaKey: true, shiftKey: true }, opens: "terminal" },
-    { init: { code: "KeyT", metaKey: true }, opens: undefined },
-    { init: { code: "KeyT", metaKey: true, shiftKey: true }, opens: undefined },
-    { init: { code: "KeyN", metaKey: true, altKey: true }, opens: undefined },
-    { init: { code: "KeyN" }, opens: undefined },
+    { init: { code: "KeyN", metaKey: true }, mac: true, opens: "session" },
+    { init: { code: "KeyN", metaKey: true, shiftKey: true }, mac: true, opens: "terminal" },
+    { init: { code: "KeyN", ctrlKey: true }, mac: false, opens: "session" },
+    { init: { code: "KeyN", ctrlKey: true, shiftKey: true }, mac: false, opens: "terminal" },
+    { init: { code: "KeyT", metaKey: true }, mac: true, opens: undefined },
+    { init: { code: "KeyT", metaKey: true, shiftKey: true }, mac: true, opens: undefined },
+    { init: { code: "KeyN", metaKey: true, altKey: true }, mac: true, opens: undefined },
+    { init: { code: "KeyN", ctrlKey: true }, mac: true, opens: undefined },
+    { init: { code: "KeyN", metaKey: true }, mac: false, opens: undefined },
+    { init: { code: "KeyN", metaKey: true, ctrlKey: true }, mac: false, opens: undefined },
+    { init: { code: "KeyN" }, mac: true, opens: undefined },
   ] as const;
-  for (const { init, opens } of cases) {
-    expect(newShortcut(keys(init)), JSON.stringify(init)).toBe(opens);
+  for (const { init, mac, opens } of cases) {
+    expect(newShortcut(keys(init), mac), JSON.stringify({ init, mac })).toBe(opens);
   }
 });
 

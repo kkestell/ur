@@ -99,8 +99,9 @@ Map each file here as it is added, following the project layout in `docs/agents/
   webview code that reads `SessionUpdate` shapes.
 - `app/src/transcript/permissions.ts` — `withPermissions()` and `Item`: the pending permission
   requests placed among the blocks, each merged with the tool call block of the same ID.
-- `app/src/keys.ts` — `shortcutKind()` and `shortcutLabel()`, the shortcut for each permission
-  option kind, `newShortcut()` for ⌘N and ⇧⌘N, and `tabShortcut()` for close and reopen.
+- `app/src/keys.ts` — `isMacPlatform()` and platform-specific Command or Ctrl shortcuts:
+  `shortcutKind()` and `shortcutLabel()` for permission options, `newShortcut()` for new sessions
+  and terminals, and `tabShortcut()` for close and reopen.
 - `app/src/actions.ts` — `addWorkspace()`, `newSession()` and `newTerminal()`, which open the new
   tab through `onOpen`, `closeTerminal()`, `removeWorkspace()`, `deleteSession()`,
   `showWorkspaceMenu()`, `showNewMenu()`, `showSessionMenu()`, and `showTerminalMenu()`: the folder
@@ -133,7 +134,8 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `app/src/components/ToolCallContent.tsx` — `ToolCallContentView`: tool call content as
   preformatted text.
 - `app/src/components/Permission.tsx` — one pending permission request: its tool call title, its
-  content through `ToolCallContentView`, one row per option, and "Awaiting Confirmation."
+  content through `ToolCallContentView`, one row per option with its platform-specific shortcut, and
+  "Awaiting Confirmation."
 - `app/src/components/Editor.tsx` — `Editor` and `ImageAttachment`: the command list, image
   attachment chips, the prompt textarea, which grows with its text from one line to eight, and the
   bottom row of the usage indicator, config pickers, and Send or Stop; narrow panes show extra
@@ -159,6 +161,7 @@ Map each file here as it is added, following the project layout in `docs/agents/
   ad-hoc checks. `TestEnvironment` writes a config file that launches the fake server with its saved
   history file and adds the `home` workspace; `Gui.showTerminal()` opens a terminal in it and opens
   its tab by clicking its terminal row, or finds the tab restored from the layout.
+  `Gui.setPlatform()` simulates a different platform for shortcut tests.
 - `app/e2e/terminal.test.ts` — the end-to-end tests for terminals.
 - `app/e2e/session.test.ts` — the end-to-end tests for agent sessions against the fake server.
 - `app/e2e/attention.test.ts` — the end-to-end tests for session status, unread sessions, and

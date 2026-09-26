@@ -1,6 +1,6 @@
 import type { PermissionOption, ToolCallContent } from "@agentclientprotocol/sdk";
 import type { PendingPermission } from "../ipc/bindings/PendingPermission";
-import { shortcutLabel } from "../keys";
+import { isMacPlatform, shortcutLabel } from "../keys";
 import { ToolCallContentView } from "./ToolCallContent";
 
 /** One pending permission request: its tool call, its options, and "Awaiting Confirmation." */
@@ -31,7 +31,7 @@ export function Permission({
               <button key={option.optionId} className="option flex min-h-7 items-center gap-2 rounded px-2 py-1 text-left hover:bg-control" onClick={() => onAnswer(option)}>
                 <span className="icon w-4 shrink-0 text-center text-fg-muted">{icon(option.kind)}</span>
                 <span className="label min-w-0 flex-1">{option.name}</span>
-                {first && <span className="shortcut text-fg-dim">{shortcutLabel(option.kind)}</span>}
+                {first && <span className="shortcut text-fg-dim">{shortcutLabel(option.kind, isMacPlatform())}</span>}
               </button>
             );
           })}

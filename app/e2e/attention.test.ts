@@ -50,6 +50,19 @@ e2eTest("the permission shortcuts answer the oldest request", async (environment
   await gui.waitForText(".block.agent", "tally-1: go, tally-2: stop");
 });
 
+e2eTest("permission labels and shortcuts use Ctrl on other platforms", async (environment) => {
+  await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.setPlatform("Linux");
+  await gui.click(".sidebar .row", "New session");
+  await gui.sendPrompt("tools");
+  await gui.waitForText(".block.permission .shortcut", "Ctrl+Y");
+  await gui.waitForText(".block.permission .shortcut", "Ctrl+Alt+Z");
+  await gui.pressShortcut("KeyY", { ctrl: true });
+  await gui.pressShortcut("KeyZ", { ctrl: true, alt: true });
+  await gui.waitForText(".block.agent", "tally-1: go, tally-2: stop");
+});
+
 e2eTest("a session that finishes a turn while not shown is unread until it is shown", async (environment) => {
   const shown = await environment.newSession();
   const hidden = await environment.ur("new", "home");

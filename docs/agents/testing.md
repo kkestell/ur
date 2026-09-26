@@ -82,6 +82,7 @@ documentation, give agent session tests replies, permission requests, and errors
 - Clicking a permission option answers the request.
 - A permission request shows its tool call's content.
 - The permission shortcuts answer the oldest request.
+- Permission labels and shortcuts use Ctrl on platforms other than macOS.
 - A session that finishes a turn while not shown is unread until it is shown.
 - A failed turn shows its error and the failed mark.
 - A rejected prompt shows its error under the user message.
@@ -104,6 +105,7 @@ documentation, give agent session tests replies, permission requests, and errors
 - The close shortcut closes the active tab with the editor or terminal focused, leaving its session
   or terminal in the sidebar.
 - Closed tabs reopen newest first in the active pane, including tabs closed with Close Tab.
+- New, close, and reopen shortcuts use Ctrl on platforms other than macOS.
 - Recently closed tabs are forgotten after restarting the GUI.
 - Reopen skips a tab already opened from the sidebar and a terminal that has been removed.
 - Removing a session and moving a tab do not add tabs to reopen history.

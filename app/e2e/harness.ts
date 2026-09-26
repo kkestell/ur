@@ -477,6 +477,13 @@ export class Gui {
     );
   }
 
+  /** Sets the platform reported to shortcut handlers in this GUI. */
+  async setPlatform(platform: string): Promise<void> {
+    await this.#session().execute((platform) => {
+      Object.defineProperty(navigator, "platform", { configurable: true, value: platform });
+    }, platform);
+  }
+
   /**
    * Clicks the element matching `selector` and returns the text it writes to
    * the clipboard, which is recorded instead of written.
