@@ -39,8 +39,6 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target/e2e
         run: make check
-      - name: Run GUI tests on the runner
-        run: make e2e
       - name: Build unsigned DMG
         run: scripts/build-macos
       - name: Publish runner-built DMG

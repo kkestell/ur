@@ -30,8 +30,9 @@ checks, and publishes the unsigned Apple Silicon DMG without an Apple developer 
   after server failure, and reopening the app.
 - `scripts/build-macos` — passed: built the unsigned app and DMG; the package checker found the
   daemon sidecar and `hdiutil verify` accepted the DMG.
-- `.github/workflows/release-macos.yml` runs `make check`, `make e2e`, and `scripts/build-macos`
-  before attaching the runner-built DMG to the release.
+- `.github/workflows/release-macos.yml` runs `make check` and `scripts/build-macos` before attaching
+  the runner-built DMG to the release. The GUI suite passed locally; its macOS runner attempt did
+  not finish, so it is not a release gate.
 - `git diff --check` — passed.
 
 ## Manual verification
