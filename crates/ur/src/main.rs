@@ -17,7 +17,12 @@ enum Command {
     /// Run the daemon on `$UR_SOCKET`, else `$TMPDIR/ur.sock`.
     Daemon,
     /// Run one prompt against the configured server without a daemon.
-    AgentRun { workspace: PathBuf, prompt: String },
+    AgentRun {
+        #[arg(long)]
+        server: Option<String>,
+        workspace: PathBuf,
+        prompt: String,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -26,7 +31,11 @@ fn main() -> anyhow::Result<()> {
     let result = runtime.block_on(async {
         match command {
             Command::Daemon => daemon::start(&ur_client::socket_path()).await,
-            Command::AgentRun { workspace, prompt } => one_shot::start(&workspace, prompt).await,
+            Command::AgentRun {
+                server,
+                workspace,
+                prompt,
+            } => one_shot::start(&workspace, prompt, server.as_deref()).await,
         }
     });
     // Tokio reads stdin with a blocking read that cannot be cancelled. If

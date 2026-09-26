@@ -47,6 +47,8 @@ struct Saved {
     /// Whether the fake server advertises `loadSession`, `session/list`, and
     /// `session/delete`.
     advertised: bool,
+    image: bool,
+    delete: bool,
     /// The number of sessions created so far, so IDs are never reused.
     created: u32,
     sessions: Vec<SavedSession>,
@@ -106,6 +108,8 @@ impl SavedHistory {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Saved {
                 file: None,
                 advertised: true,
+                image: true,
+                delete: true,
                 created: 0,
                 sessions: Vec::new(),
             },
@@ -119,6 +123,8 @@ impl SavedHistory {
         SavedHistory(Arc::new(Mutex::new(Saved {
             file: None,
             advertised,
+            image: true,
+            delete: advertised,
             created: 0,
             sessions: Vec::new(),
         })))
@@ -126,6 +132,21 @@ impl SavedHistory {
 
     fn advertised(&self) -> bool {
         self.0.lock().unwrap().advertised
+    }
+
+    /// Selects independently advertised image and delete capabilities for tests.
+    pub fn capabilities(&self, image: bool, delete: bool) {
+        self.edit(|saved| {
+            saved.image = image;
+            saved.delete = delete;
+        });
+    }
+
+    fn image(&self) -> bool {
+        self.0.lock().unwrap().image
+    }
+    fn can_delete(&self) -> bool {
+        self.0.lock().unwrap().delete
     }
 
     /// Runs `f` on the saved history, then writes it to its file, if any.
@@ -175,13 +196,16 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                 let history = history.clone();
                 async move |_: InitializeRequest, responder, _connection| {
                     let mut capabilities = AgentCapabilities::new()
-                        .prompt_capabilities(PromptCapabilities::new().image(true));
+                        .prompt_capabilities(PromptCapabilities::new().image(history.image()));
                     if history.advertised() {
-                        capabilities = capabilities.load_session(true).session_capabilities(
-                            SessionCapabilities::new()
-                                .list(SessionListCapabilities::new())
-                                .delete(SessionDeleteCapabilities::new()),
-                        );
+                        let mut sessions =
+                            SessionCapabilities::new().list(SessionListCapabilities::new());
+                        if history.can_delete() {
+                            sessions = sessions.delete(SessionDeleteCapabilities::new());
+                        }
+                        capabilities = capabilities
+                            .load_session(true)
+                            .session_capabilities(sessions);
                     }
                     responder.respond(
                         InitializeResponse::new(ProtocolVersion::V1)

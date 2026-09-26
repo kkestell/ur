@@ -4838,6 +4838,7 @@ dependencies = [
  "tokio-util",
  "ur-client",
  "ur-fake-server",
+ "uuid",
  "vt100",
 ]
 

@@ -141,10 +141,11 @@ generation, and server state definitions changed from daemon-wide to per server.
 - End-to-end tests own choosing either server from both creation menus, opening the result in the
   correct pane, and the multiple-server Command+N/Ctrl+N chooser. Keep the single-server shortcut
   guarantees. Menu tests inspect the menu entries and execute their registered actions through a
-  test-only native-menu IPC interception in the harness: capture `plugin:menu|new` options and use
-  the selected item's channel handler when `plugin:menu|popup` is called. Keep real menu
-  construction and daemon requests; do not add production testing commands or a second menu
-  implementation.
+  test-only wrapper around Tauri's `Menu.new` in the end-to-end build. Construct the real native
+  menu, capture its registered item handlers, and invoke the selected handler in place of native
+  popup. Tauri freezes its IPC function, so the harness cannot intercept `plugin:menu|new` or
+  `plugin:menu|popup` directly. Keep daemon requests; do not add production testing commands or a
+  second menu implementation.
 - End-to-end tests own adding, renaming, correcting, and removing a server through settings;
   identifying each session's server; restoring two servers' tabs and transcripts after GUI and
   daemon restarts; and continuing another session and a terminal while one server is unavailable.
@@ -197,7 +198,7 @@ generation, and server state definitions changed from daemon-wide to per server.
    `components/Layout.tsx`, pass server choices to the pane menu and the session's own capabilities
    to `Editor`. The editor's existing capability input remains sufficient.
 9. In `app/e2e/harness.ts`, support several configurations, independent history files, selecting a
-   server for setup requests, waiting for a specific server, and the native-menu interception.
+   server for setup requests, waiting for a specific server, and the end-to-end-only menu wrapper.
    Update `app/e2e/server-setup.test.ts` and `panes.test.ts` for the changed settings and shortcut
    behavior. Add `app/e2e/multiple-servers.test.ts` for the new end-to-end guarantees.
 

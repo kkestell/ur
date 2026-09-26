@@ -10,8 +10,8 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::{Agent, ConnectionTo, Responder};
 use anyhow::{anyhow, bail};
 use ur_client::{
-    DaemonMessage, Entry, Event, Frame, PendingPermission, Response, ServerState, SessionSummary,
-    Status, TerminalId, TerminalSummary, Workspace,
+    DaemonMessage, Entry, Event, Frame, PendingPermission, Response, ServerState, SessionKey,
+    SessionSummary, Status, TerminalId, TerminalSummary, Workspace,
 };
 
 use super::server::Outbox;
@@ -21,12 +21,8 @@ use super::server::Outbox;
 /// Methods queue their events on outboxes while the lock is held, which keeps
 /// each daemon client's events in order. They never wait and never await.
 pub struct State {
-    /// The ACP connection, or why there is none.
-    server: Result<Server, String>,
-    server_state: ServerState,
-    /// The generation of the current or last ACP connection. Prompt and load
-    /// results from an earlier one are ignored.
-    generation: u64,
+    servers: Vec<ServerSlot>,
+    config_error: Option<String>,
     /// In the order they were added.
     workspaces: Vec<Workspace>,
     /// In creation order for live sessions and discovery order for saved sessions.
@@ -42,6 +38,12 @@ pub struct State {
 pub struct Server {
     pub connection: ConnectionTo<Agent>,
     pub capabilities: AgentCapabilities,
+}
+
+struct ServerSlot {
+    state: ServerState,
+    connection: Result<Server, String>,
+    generation: u64,
 }
 
 impl Server {
@@ -60,6 +62,8 @@ impl Server {
 
 struct Session {
     id: SessionId,
+    key: SessionKey,
+    server: String,
     workspace: String,
     transcript: Vec<Entry>,
     /// Whether the transcript came from `session/new` or `session/load` during
@@ -101,20 +105,14 @@ enum Op {
         waiting: Vec<(u64, Outbox)>,
     },
     /// `session/delete` is in flight.
-    Delete,
+    Delete { waiting: (u64, Outbox) },
 }
 
 impl State {
     pub fn new(workspaces: Vec<Workspace>) -> State {
         State {
-            server: Err("the server has not started".to_string()),
-            server_state: ServerState {
-                command: None,
-                args: Vec::new(),
-                connected: false,
-                error: None,
-            },
-            generation: 0,
+            servers: Vec::new(),
+            config_error: None,
             workspaces,
             sessions: Vec::new(),
             terminals: Vec::new(),
@@ -125,46 +123,171 @@ impl State {
 
     /// Sets the ACP connection, which starts a new generation and sends its
     /// capabilities to every watcher, or why there is none.
-    pub fn set_server(&mut self, server: Result<Server, String>) {
-        if let Ok(server) = &server {
-            self.generation += 1;
+    pub fn set_config_error(&mut self, error: Option<String>) {
+        self.config_error = error;
+        self.publish_servers();
+    }
+
+    pub fn configure_server(&mut self, config: &crate::config::ServerConfig) {
+        if let Some(slot) = self
+            .servers
+            .iter_mut()
+            .find(|slot| slot.state.id == config.id)
+        {
+            slot.state.name = config.name.clone();
+            slot.state.command = config.command.clone();
+            slot.state.args = config.args.clone();
+        } else {
+            self.servers.push(ServerSlot {
+                state: ServerState {
+                    id: config.id.clone(),
+                    name: config.name.clone(),
+                    command: config.command.clone(),
+                    args: config.args.clone(),
+                    connected: false,
+                    error: None,
+                    capabilities: None,
+                },
+                connection: Err("the server has not started".into()),
+                generation: 0,
+            });
+        }
+        self.publish_servers();
+    }
+
+    pub fn remove_server(&mut self, id: &str) {
+        if let Some(generation) = self.generation(id) {
+            self.server_exited(id, generation, "the server was removed".into());
+        }
+        self.servers.retain(|slot| slot.state.id != id);
+        for session in self.sessions.iter().filter(|session| session.server == id) {
+            for outbox in &session.subscribers {
+                outbox.send(event(Event::SessionRemoved {
+                    session: session.key.clone(),
+                }));
+            }
             broadcast(
                 &mut self.watchers,
-                Event::CapabilitiesChanged {
-                    capabilities: Box::new(server.capabilities.clone()),
+                Event::SessionDeleted {
+                    session: session.key.clone(),
                 },
             );
         }
-        self.server_state.connected = server.is_ok();
-        self.server_state.error = server.as_ref().err().cloned();
-        self.server = server;
+        self.sessions.retain(|session| session.server != id);
+        self.publish_servers();
+    }
+
+    fn publish_servers(&mut self) {
         broadcast(
             &mut self.watchers,
-            Event::ServerStateChanged {
-                server_state: self.server_state.clone(),
+            Event::ServersChanged {
+                servers: self.servers.iter().map(|slot| slot.state.clone()).collect(),
+                config_error: self.config_error.clone(),
             },
         );
     }
 
-    pub fn configure_server(&mut self, command: String, args: Vec<String>) {
-        self.server_state.command = Some(command);
-        self.server_state.args = args;
-        self.server_state.connected = false;
-        self.server_state.error = None;
-        broadcast(
-            &mut self.watchers,
-            Event::ServerStateChanged {
-                server_state: self.server_state.clone(),
-            },
-        );
+    pub fn reserve(&mut self, id: &str) -> anyhow::Result<u64> {
+        let slot = self.slot_mut(id)?;
+        slot.generation += 1;
+        Ok(slot.generation)
     }
 
-    pub fn server(&self) -> anyhow::Result<&Server> {
-        server(&self.server)
+    pub fn generation(&self, id: &str) -> Option<u64> {
+        self.servers
+            .iter()
+            .find(|slot| slot.state.id == id)
+            .map(|slot| slot.generation)
     }
 
-    pub fn connection(&self) -> anyhow::Result<ConnectionTo<Agent>> {
-        Ok(self.server()?.connection.clone())
+    pub fn current(&self, id: &str, generation: u64) -> bool {
+        self.generation(id) == Some(generation)
+    }
+
+    pub fn set_server(&mut self, id: &str, generation: u64, server: Result<Server, String>) {
+        if !self.current(id, generation) {
+            return;
+        }
+        let slot = self.slot_mut(id).expect("current server exists");
+        slot.state.connected = server.is_ok();
+        slot.state.error = server.as_ref().err().cloned();
+        slot.state.capabilities = server
+            .as_ref()
+            .ok()
+            .map(|server| Box::new(server.capabilities.clone()));
+        slot.connection = server;
+        self.publish_servers();
+    }
+
+    fn slot(&self, id: &str) -> anyhow::Result<&ServerSlot> {
+        self.servers
+            .iter()
+            .find(|slot| slot.state.id == id)
+            .ok_or_else(|| anyhow!("no server {id}"))
+    }
+
+    fn slot_mut(&mut self, id: &str) -> anyhow::Result<&mut ServerSlot> {
+        self.servers
+            .iter_mut()
+            .find(|slot| slot.state.id == id)
+            .ok_or_else(|| anyhow!("no server {id}"))
+    }
+
+    pub fn server(&self, id: &str) -> anyhow::Result<&Server> {
+        server(&self.slot(id)?.connection)
+    }
+
+    pub fn session_connection(
+        &self,
+        key: &SessionKey,
+    ) -> anyhow::Result<(String, u64, ConnectionTo<Agent>, SessionId)> {
+        let session = self
+            .sessions
+            .iter()
+            .find(|session| &session.key == key)
+            .ok_or_else(|| anyhow!("no session {key}"))?;
+        let slot = self.slot(&session.server)?;
+        Ok((
+            session.server.clone(),
+            slot.generation,
+            server(&slot.connection)?.connection.clone(),
+            session.id.clone(),
+        ))
+    }
+
+    pub fn session_owner(&self, key: &SessionKey) -> anyhow::Result<String> {
+        self.sessions
+            .iter()
+            .find(|session| &session.key == key)
+            .map(|session| session.server.clone())
+            .ok_or_else(|| anyhow!("no session {key}"))
+    }
+
+    pub fn list_connections(&self) -> Vec<(String, u64, ConnectionTo<Agent>)> {
+        self.servers
+            .iter()
+            .filter_map(|slot| {
+                slot.connection
+                    .as_ref()
+                    .ok()
+                    .filter(|server| server.can_list())
+                    .map(|server| {
+                        (
+                            slot.state.id.clone(),
+                            slot.generation,
+                            server.connection.clone(),
+                        )
+                    })
+            })
+            .collect()
+    }
+
+    pub fn server_connection(&self, id: &str) -> anyhow::Result<(u64, ConnectionTo<Agent>)> {
+        let slot = self.slot(id)?;
+        Ok((
+            slot.generation,
+            server(&slot.connection)?.connection.clone(),
+        ))
     }
 
     pub fn workspaces(&self) -> Vec<Workspace> {
@@ -176,8 +299,15 @@ impl State {
     /// turn fails with `reason` and its pending permission requests are
     /// dropped. A running load ends with the unchanged transcript, and a
     /// waiting delete answers an error. Every operation guard is released.
-    pub fn server_exited(&mut self, reason: String) {
-        for session in &mut self.sessions {
+    pub fn server_exited(&mut self, id: &str, generation: u64, reason: String) {
+        if !self.current(id, generation) {
+            return;
+        }
+        for session in self
+            .sessions
+            .iter_mut()
+            .filter(|session| session.server == id)
+        {
             session.loaded = false;
             match session.op.take() {
                 Some(Op::Load { waiting, .. }) => session.end_load(waiting),
@@ -192,9 +322,20 @@ impl State {
                         },
                     );
                 }
-                // A `session/delete` in flight answers from its callback.
-                Some(Op::Prompt { delete: None } | Op::Delete) | None => {}
+                Some(Op::Delete {
+                    waiting: (id, outbox),
+                }) => {
+                    respond(
+                        &outbox,
+                        id,
+                        Response::Error {
+                            message: reason.clone(),
+                        },
+                    );
+                }
+                Some(Op::Prompt { delete: None }) | None => {}
             }
+            session.answer_cancelled();
             // A prompt that starts with a load is `Working` during the load.
             if matches!(
                 session.status,
@@ -204,7 +345,8 @@ impl State {
                 publish(&mut self.watchers, session);
             }
         }
-        self.set_server(Err(reason));
+        self.set_server(id, generation, Err(reason));
+        self.slot_mut(id).expect("current server exists").generation += 1;
     }
 
     /// Queues the watch snapshot and registers the outbox for later changes.
@@ -215,12 +357,8 @@ impl State {
             workspaces: self.workspaces.clone(),
             sessions: self.sessions.iter().map(Session::summary).collect(),
             terminals: self.terminals.clone(),
-            capabilities: self
-                .server
-                .as_ref()
-                .ok()
-                .map(|server| Box::new(server.capabilities.clone())),
-            server_state: self.server_state.clone(),
+            servers: self.servers.iter().map(|slot| slot.state.clone()).collect(),
+            config_error: self.config_error.clone(),
         }));
         self.watchers
             .retain(|other| !other.same_connection(&outbox));
@@ -287,22 +425,39 @@ impl State {
             .collect();
         save(&workspaces)?;
         self.workspaces = workspaces;
+        let connections: HashMap<_, _> = self
+            .servers
+            .iter()
+            .filter_map(|slot| {
+                slot.connection
+                    .as_ref()
+                    .ok()
+                    .map(|server| (slot.state.id.clone(), server.connection.clone()))
+            })
+            .collect();
         for session in self.sessions.iter_mut().filter(|s| s.workspace == name) {
+            if matches!(session.op, Some(Op::Delete { .. }))
+                && let Some(Op::Delete {
+                    waiting: (id, outbox),
+                }) = session.op.take()
+            {
+                respond(&outbox, id, Response::Done);
+            }
             if let Some(Op::Prompt { delete }) = &mut session.op {
                 if let Some((id, outbox)) = delete.take() {
                     respond(&outbox, id, Response::Done);
                 }
                 // The removal is saved, so it goes ahead. Without an ACP
                 // connection, there is no prompt left to cancel.
-                if let Err(error) = connection(&self.server)
-                    .and_then(|connection| Ok(send_cancel(&connection, &session.id)?))
+                if let Some(connection) = connections.get(&session.server)
+                    && let Err(error) = send_cancel(connection, &session.id)
                 {
                     eprintln!("ur daemon: cancelling {}: {error:#}", session.id);
                 }
                 session.answer_cancelled();
             }
             let removed = event(Event::SessionRemoved {
-                session: session.id.clone(),
+                session: session.key.clone(),
             });
             for outbox in &session.subscribers {
                 outbox.send(removed.clone());
@@ -374,14 +529,19 @@ impl State {
     /// in flight.
     pub fn add_session(
         &mut self,
+        server: &str,
+        generation: u64,
         id: SessionId,
         workspace: String,
         config_options: Vec<SessionConfigOption>,
     ) -> anyhow::Result<()> {
+        if !self.current(server, generation) {
+            bail!("server connection changed");
+        }
         if !self.workspaces.iter().any(|other| other.name == workspace) {
             bail!("workspace {workspace} was removed");
         }
-        let mut session = Session::new(id, workspace);
+        let mut session = Session::new(server, id, workspace);
         session.loaded = true;
         session.config_options = config_options;
         publish(&mut self.watchers, &session);
@@ -392,12 +552,24 @@ impl State {
     /// Adds each saved session from `session/list` that is not in `State`,
     /// and updates the session title and last activity of the others. Does
     /// nothing if the workspace was removed while the list was in flight.
-    pub fn add_saved_sessions(&mut self, workspace: &str, sessions: Vec<SessionInfo>) {
+    pub fn add_saved_sessions(
+        &mut self,
+        server: &str,
+        generation: u64,
+        workspace: &str,
+        sessions: Vec<SessionInfo>,
+    ) {
+        if !self.current(server, generation) {
+            return;
+        }
         if !self.workspaces.iter().any(|other| other.name == workspace) {
             return;
         }
         for info in sessions {
-            match find(&mut self.sessions, &info.session_id) {
+            match find(
+                &mut self.sessions,
+                &SessionKey::new(server, &info.session_id),
+            ) {
                 Ok(session) => {
                     if session.title != info.title || session.updated_at != info.updated_at {
                         session.title = info.title;
@@ -406,7 +578,7 @@ impl State {
                     }
                 }
                 Err(_) => {
-                    let mut session = Session::new(info.session_id, workspace.to_string());
+                    let mut session = Session::new(server, info.session_id, workspace.to_string());
                     session.title = info.title;
                     session.updated_at = info.updated_at;
                     publish(&mut self.watchers, &session);
@@ -420,9 +592,17 @@ impl State {
     /// runs. A `session_info_update` also changes the session title and last
     /// activity, and a `config_option_update` the config options. An update
     /// for an unknown session is dropped.
-    pub fn apply_update(&mut self, notification: SessionNotification) {
+    pub fn apply_update(
+        &mut self,
+        server: &str,
+        generation: u64,
+        notification: SessionNotification,
+    ) {
+        if !self.current(server, generation) {
+            return;
+        }
         let id = notification.session_id;
-        let Ok(session) = find(&mut self.sessions, &id) else {
+        let Ok(session) = find(&mut self.sessions, &SessionKey::new(server, &id)) else {
             eprintln!("ur daemon: dropping an update for unknown session {id}");
             return;
         };
@@ -460,7 +640,7 @@ impl State {
     /// subscription.
     pub fn subscribe(
         &mut self,
-        id: &SessionId,
+        id: &SessionKey,
         request_id: u64,
         outbox: Outbox,
         load: impl FnOnce(
@@ -469,18 +649,31 @@ impl State {
             LoadSessionRequest,
         ) -> agent_client_protocol::Result<()>,
     ) -> anyhow::Result<Option<Response>> {
-        let generation = self.generation;
-        let can_load = self.server.as_ref().is_ok_and(Server::can_load);
+        let owner = self
+            .sessions
+            .iter()
+            .find(|session| &session.key == id)
+            .ok_or_else(|| anyhow!("no session {id}"))?
+            .server
+            .clone();
+        let slot = self.slot(&owner)?;
+        let generation = slot.generation;
+        let can_load = slot.connection.as_ref().is_ok_and(Server::can_load);
+        let connection = slot
+            .connection
+            .as_ref()
+            .ok()
+            .map(|server| server.connection.clone());
         let session = find(&mut self.sessions, id)?;
         let waits = match &mut session.op {
             Some(Op::Load { waiting, .. }) => {
                 waiting.push((request_id, outbox.clone()));
                 true
             }
-            Some(Op::Prompt { .. } | Op::Delete) => false,
+            Some(Op::Prompt { .. } | Op::Delete { .. }) => false,
             None => {
                 if !session.loaded && can_load && !matches!(session.status, Status::Failed { .. }) {
-                    let connection = connection(&self.server)?;
+                    let connection = connection.ok_or_else(|| anyhow!("no ACP connection"))?;
                     load(
                         &connection,
                         generation,
@@ -510,24 +703,34 @@ impl State {
     /// each, when the server can load them.
     pub fn reload_subscribed(
         &mut self,
+        server_id: &str,
         load: impl Fn(
             &ConnectionTo<Agent>,
             u64,
             LoadSessionRequest,
         ) -> agent_client_protocol::Result<()>,
     ) {
-        let Ok(server) = &self.server else {
+        let Ok(slot) = self.slot(server_id) else {
+            return;
+        };
+        let Ok(server) = &slot.connection else {
             return;
         };
         if !server.can_load() {
             return;
         }
+        let generation = slot.generation;
+        let connection = server.connection.clone();
         for session in &mut self.sessions {
-            if session.loaded || session.op.is_some() || session.subscribers.is_empty() {
+            if session.server != server_id
+                || session.loaded
+                || session.op.is_some()
+                || session.subscribers.is_empty()
+            {
                 continue;
             }
             let request = load_request(&self.workspaces, session);
-            if let Err(error) = load(&server.connection, self.generation, request) {
+            if let Err(error) = load(&connection, generation, request) {
                 eprintln!("ur daemon: loading {}: {error}", session.id);
                 continue;
             }
@@ -550,11 +753,12 @@ impl State {
     /// ignored.
     pub fn finish_load(
         &mut self,
-        id: &SessionId,
+        server_id: &str,
+        id: &SessionKey,
         generation: u64,
         result: Result<Option<Vec<SessionConfigOption>>, String>,
     ) -> bool {
-        if generation != self.generation {
+        if !self.current(server_id, generation) {
             return false;
         }
         let Ok(session) = find(&mut self.sessions, id) else {
@@ -593,13 +797,13 @@ impl State {
 
     /// Makes `sessions` the ones this socket connection focuses, and clears
     /// their unread flags. An unknown session changes nothing.
-    pub fn focus(&mut self, outbox: &Outbox, sessions: &[SessionId]) -> anyhow::Result<()> {
+    pub fn focus(&mut self, outbox: &Outbox, sessions: &[SessionKey]) -> anyhow::Result<()> {
         for id in sessions {
             find(&mut self.sessions, id)?;
         }
         for session in &mut self.sessions {
             session.focus.retain(|other| !other.same_connection(outbox));
-            if sessions.contains(&session.id) {
+            if sessions.contains(&session.key) {
                 session.focus.push(outbox.clone());
                 if session.unread {
                     session.unread = false;
@@ -624,7 +828,7 @@ impl State {
     /// the prompt when the load succeeds.
     pub fn prompt(
         &mut self,
-        id: &SessionId,
+        id: &SessionKey,
         content: Vec<ContentBlock>,
         send: impl FnOnce(&ConnectionTo<Agent>, u64, PromptRequest) -> agent_client_protocol::Result<()>,
         load: impl FnOnce(
@@ -633,8 +837,8 @@ impl State {
             LoadSessionRequest,
         ) -> agent_client_protocol::Result<()>,
     ) -> anyhow::Result<Response> {
-        let generation = self.generation;
-        let server = server(&self.server)?;
+        let (owner, generation, connection, _) = self.session_connection(id)?;
+        let can_load = self.server(&owner)?.can_load();
         let session = find(&mut self.sessions, id)?;
         if session.op.is_some() {
             return Ok(Response::Busy);
@@ -642,11 +846,11 @@ impl State {
         if session.loaded {
             return self.start_prompt(id, content, send);
         }
-        if !server.can_load() {
+        if !can_load {
             bail!("the server cannot load session {id}");
         }
         load(
-            &server.connection,
+            &connection,
             generation,
             load_request(&self.workspaces, session),
         )?;
@@ -668,12 +872,11 @@ impl State {
     /// the lock, so it follows the user prompt entry.
     pub fn start_prompt(
         &mut self,
-        id: &SessionId,
+        id: &SessionKey,
         content: Vec<ContentBlock>,
         send: impl FnOnce(&ConnectionTo<Agent>, u64, PromptRequest) -> agent_client_protocol::Result<()>,
     ) -> anyhow::Result<Response> {
-        let generation = self.generation;
-        let connection = self.connection()?;
+        let (_, generation, connection, _) = self.session_connection(id)?;
         let session = find(&mut self.sessions, id)?;
         if session.op.is_some() {
             return Ok(Response::Busy);
@@ -681,7 +884,7 @@ impl State {
         send(
             &connection,
             generation,
-            PromptRequest::new(id.clone(), content.clone()),
+            PromptRequest::new(session.id.clone(), content.clone()),
         )?;
         session.op = Some(Op::Prompt { delete: None });
         session.append(Entry::UserPrompt { content });
@@ -697,11 +900,12 @@ impl State {
     /// ignored.
     pub fn finish_prompt(
         &mut self,
-        id: &SessionId,
+        server_id: &str,
+        id: &SessionKey,
         generation: u64,
         result: Result<StopReason, String>,
     ) -> Option<(u64, Outbox)> {
-        if generation != self.generation {
+        if !self.current(server_id, generation) {
             return None;
         }
         let Ok(session) = find(&mut self.sessions, id) else {
@@ -724,7 +928,7 @@ impl State {
     /// when the request answers later.
     pub fn delete_session(
         &mut self,
-        id: &SessionId,
+        id: &SessionKey,
         request_id: u64,
         outbox: Outbox,
         send_cancel: impl FnOnce(&ConnectionTo<Agent>, &SessionId) -> agent_client_protocol::Result<()>,
@@ -734,8 +938,8 @@ impl State {
             DeleteSessionRequest,
         ) -> agent_client_protocol::Result<()>,
     ) -> anyhow::Result<Option<Response>> {
-        let generation = self.generation;
-        let server = server(&self.server)?;
+        let (owner, generation, connection, _) = self.session_connection(id)?;
+        let server = self.server(&owner)?;
         if !server.can_delete() {
             bail!("the server cannot delete sessions");
         }
@@ -743,19 +947,21 @@ impl State {
         match &mut session.op {
             None => {
                 send_delete(
-                    &server.connection,
+                    &connection,
                     generation,
-                    DeleteSessionRequest::new(id.clone()),
+                    DeleteSessionRequest::new(session.id.clone()),
                 )?;
-                session.op = Some(Op::Delete);
+                session.op = Some(Op::Delete {
+                    waiting: (request_id, outbox),
+                });
             }
             Some(Op::Prompt { delete: None }) => {
-                cancel_turn(&mut self.watchers, session, &server.connection, send_cancel)?;
+                cancel_turn(&mut self.watchers, session, &connection, send_cancel)?;
                 session.op = Some(Op::Prompt {
                     delete: Some((request_id, outbox)),
                 });
             }
-            Some(Op::Load { .. } | Op::Delete | Op::Prompt { delete: Some(_) }) => {
+            Some(Op::Load { .. } | Op::Delete { .. } | Op::Prompt { delete: Some(_) }) => {
                 return Ok(Some(Response::Busy));
             }
         }
@@ -766,22 +972,25 @@ impl State {
     /// its turn has ended, and holds the operation guard.
     pub fn start_delete(
         &mut self,
-        id: &SessionId,
+        id: &SessionKey,
+        request_id: u64,
+        outbox: Outbox,
         send_delete: impl FnOnce(
             &ConnectionTo<Agent>,
             u64,
             DeleteSessionRequest,
         ) -> agent_client_protocol::Result<()>,
     ) -> anyhow::Result<()> {
-        let generation = self.generation;
-        let connection = self.connection()?;
+        let (_, generation, connection, _) = self.session_connection(id)?;
         let session = find(&mut self.sessions, id)?;
         send_delete(
             &connection,
             generation,
-            DeleteSessionRequest::new(id.clone()),
+            DeleteSessionRequest::new(session.id.clone()),
         )?;
-        session.op = Some(Op::Delete);
+        session.op = Some(Op::Delete {
+            waiting: (request_id, outbox),
+        });
         Ok(())
     }
 
@@ -790,20 +999,26 @@ impl State {
     /// watcher. On failure, releases the operation guard and the session
     /// stays. A result from an earlier generation, or for a session that is
     /// gone, is ignored.
-    pub fn finish_delete(&mut self, id: &SessionId, generation: u64, result: Result<(), String>) {
-        if generation != self.generation {
-            return;
+    pub fn finish_delete(
+        &mut self,
+        server_id: &str,
+        id: &SessionKey,
+        generation: u64,
+        result: Result<(), String>,
+    ) -> bool {
+        if !self.current(server_id, generation) {
+            return false;
         }
-        let Some(position) = self.sessions.iter().position(|session| session.id == *id) else {
-            return;
+        let Some(position) = self.sessions.iter().position(|session| session.key == *id) else {
+            return false;
         };
         if result.is_err() {
             self.sessions[position].op = None;
-            return;
+            return true;
         }
         let session = self.sessions.remove(position);
         let removed = event(Event::SessionRemoved {
-            session: session.id.clone(),
+            session: session.key.clone(),
         });
         for outbox in &session.subscribers {
             outbox.send(removed.clone());
@@ -811,17 +1026,23 @@ impl State {
         broadcast(
             &mut self.watchers,
             Event::SessionDeleted {
-                session: session.id,
+                session: session.key,
             },
         );
+        true
     }
 
     /// Sets the config options from a `session/set_config_option` response.
     pub fn set_config_options(
         &mut self,
-        id: &SessionId,
+        server: &str,
+        generation: u64,
+        id: &SessionKey,
         config_options: Vec<SessionConfigOption>,
     ) -> anyhow::Result<()> {
+        if !self.current(server, generation) {
+            bail!("server connection changed");
+        }
         find(&mut self.sessions, id)?.set_config_options(config_options);
         Ok(())
     }
@@ -830,10 +1051,20 @@ impl State {
     /// cancellation, answers `Cancelled` at once instead.
     pub fn request_permission(
         &mut self,
+        server: &str,
+        generation: u64,
         request: RequestPermissionRequest,
         responder: Responder<RequestPermissionResponse>,
     ) -> agent_client_protocol::Result<()> {
-        let Ok(session) = find(&mut self.sessions, &request.session_id) else {
+        if !self.current(server, generation) {
+            return responder.respond(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Cancelled,
+            ));
+        }
+        let Ok(session) = find(
+            &mut self.sessions,
+            &SessionKey::new(server, &request.session_id),
+        ) else {
             return responder
                 .respond_with_internal_error(format!("no session {}", request.session_id));
         };
@@ -865,7 +1096,7 @@ impl State {
     /// first answer removes the request, so a later one finds it resolved.
     pub fn answer_permission(
         &mut self,
-        id: &SessionId,
+        id: &SessionKey,
         request_id: u32,
         option_id: PermissionOptionId,
     ) -> anyhow::Result<()> {
@@ -907,27 +1138,25 @@ impl State {
     /// the prompt returns. Without a running prompt, does nothing.
     pub fn cancel(
         &mut self,
-        id: &SessionId,
+        id: &SessionKey,
         send_cancel: impl FnOnce(&ConnectionTo<Agent>, &SessionId) -> agent_client_protocol::Result<()>,
     ) -> anyhow::Result<()> {
+        let (_, _, connection, _) = self.session_connection(id)?;
         let session = find(&mut self.sessions, id)?;
         // A load has no turn to cancel yet.
         if !matches!(session.op, Some(Op::Prompt { .. })) {
             return Ok(());
         }
-        cancel_turn(
-            &mut self.watchers,
-            session,
-            &connection(&self.server)?,
-            send_cancel,
-        )
+        cancel_turn(&mut self.watchers, session, &connection, send_cancel)
     }
 }
 
 impl Session {
     /// A saved session: `Idle`, not unread, and unloaded.
-    fn new(id: SessionId, workspace: String) -> Session {
+    fn new(server: &str, id: SessionId, workspace: String) -> Session {
         Session {
+            key: SessionKey::new(server, &id),
+            server: server.to_string(),
             id,
             workspace,
             transcript: Vec::new(),
@@ -983,7 +1212,7 @@ impl Session {
 
     fn snapshot(&self) -> Frame {
         event(Event::SessionSnapshot {
-            session: self.id.clone(),
+            session: self.key.clone(),
             transcript: self.transcript.clone(),
             config_options: self.config_options.clone(),
         })
@@ -997,7 +1226,7 @@ impl Session {
             return;
         }
         let frame = event(Event::ConfigOptionsChanged {
-            session: self.id.clone(),
+            session: self.key.clone(),
             config_options: self.config_options.clone(),
         });
         self.subscribers.retain(|outbox| outbox.send(frame.clone()));
@@ -1005,7 +1234,7 @@ impl Session {
 
     fn append(&mut self, entry: Entry) {
         let frame = event(Event::Entry {
-            session: self.id.clone(),
+            session: self.key.clone(),
             entry: entry.clone(),
         });
         self.subscribers.retain(|outbox| outbox.send(frame.clone()));
@@ -1025,7 +1254,8 @@ impl Session {
 
     fn summary(&self) -> SessionSummary {
         SessionSummary {
-            session: self.id.clone(),
+            server: self.server.clone(),
+            session: self.key.clone(),
             workspace: self.workspace.clone(),
             status: self.status.clone(),
             unread: self.unread,
@@ -1060,10 +1290,6 @@ fn server(server: &Result<Server, String>) -> anyhow::Result<&Server> {
         .map_err(|reason| anyhow!("no ACP connection: {reason}"))
 }
 
-fn connection(result: &Result<Server, String>) -> anyhow::Result<ConnectionTo<Agent>> {
-    Ok(server(result)?.connection.clone())
-}
-
 /// `session/load` for the session, with its workspace path as `cwd`.
 fn load_request(workspaces: &[Workspace], session: &Session) -> LoadSessionRequest {
     let workspace = workspaces
@@ -1080,10 +1306,10 @@ fn replace(field: &mut Option<String>, value: Option<String>) -> bool {
     changed
 }
 
-fn find<'a>(sessions: &'a mut [Session], id: &SessionId) -> anyhow::Result<&'a mut Session> {
+fn find<'a>(sessions: &'a mut [Session], id: &SessionKey) -> anyhow::Result<&'a mut Session> {
     sessions
         .iter_mut()
-        .find(|session| session.id == *id)
+        .find(|session| session.key == *id)
         .ok_or_else(|| anyhow!("no session {id}"))
 }
 

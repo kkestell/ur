@@ -164,9 +164,26 @@ fn handle(
             state.lock().unwrap().watch(outbox.clone());
             Ok(Response::Done)
         }
-        Request::SetServer { command, args } => control
+        Request::AddServer {
+            name,
+            command,
+            args,
+        } => control
             .ok_or_else(|| anyhow::anyhow!("server setup is unavailable"))
-            .and_then(|control| control.configure(command, args))
+            .and_then(|control| control.add(name, command, args))
+            .map(|server| Response::ServerAdded { server }),
+        Request::UpdateServer {
+            server,
+            name,
+            command,
+            args,
+        } => control
+            .ok_or_else(|| anyhow::anyhow!("server setup is unavailable"))
+            .and_then(|control| control.update(&server, name, command, args))
+            .map(|()| Response::Done),
+        Request::RemoveServer { server } => control
+            .ok_or_else(|| anyhow::anyhow!("server setup is unavailable"))
+            .and_then(|control| control.remove(&server))
             .map(|()| Response::Done),
         Request::AddWorkspace { name, path } => {
             ops::add_workspace(state, state_file, Workspace { name, path }).map(|()| Response::Done)
@@ -174,8 +191,8 @@ fn handle(
         Request::RemoveWorkspace { name } => {
             ops::remove_workspace(state, terminals, state_file, &name).map(|()| Response::Done)
         }
-        Request::NewSession { workspace } => {
-            match ops::new_session(state, workspace, id, outbox.clone()) {
+        Request::NewSession { server, workspace } => {
+            match ops::new_session(state, server, workspace, id, outbox.clone()) {
                 Ok(()) => return None,
                 Err(error) => Err(error),
             }

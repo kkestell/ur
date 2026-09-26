@@ -2,6 +2,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { fileURLToPath } from "node:url";
 // @ts-expect-error type error without @types/node package
 import process from "node:process";
 const host = process.env.TAURI_DEV_HOST;
@@ -9,6 +10,14 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: process.env.UR_E2E_MENU_SHIM === "1"
+      ? [
+          { find: /^@tauri-apps\/api\/menu$/, replacement: fileURLToPath(new URL("./e2e/menu-shim.ts", import.meta.url)) },
+          { find: /^@tauri-apps\/plugin-dialog$/, replacement: fileURLToPath(new URL("./e2e/dialog-shim.ts", import.meta.url)) },
+        ]
+      : [],
+  },
 
   // The end-to-end suite in `e2e/` runs under `node --test`, not vitest.
   test: {

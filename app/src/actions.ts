@@ -24,10 +24,11 @@ export async function addWorkspace(): Promise<void> {
 
 /** Creates a session in the workspace, then opens its tab. */
 export async function newSession(
+  server: string,
   workspace: string,
   onOpen: (item: TabItem) => void,
 ): Promise<void> {
-  const response = await send({ type: "new_session", workspace });
+  const response = await send({ type: "new_session", server, workspace });
   if (response?.type === "session_created") {
     onOpen({ type: "session", session: response.session });
   }
@@ -83,7 +84,15 @@ export async function deleteSession(summary: SessionSummary): Promise<void> {
   }
 }
 
-/** The workspace menu: New Session, New Terminal, and Remove Workspace…. */
+function serverChoices(watch: WatchState, workspace: string, onOpen: (item: TabItem) => void) {
+  return watch.servers.map((server) => ({
+    text: `New Session — ${server.name}`,
+    enabled: server.connected,
+    action: () => void newSession(server.id, workspace, onOpen),
+  }));
+}
+
+/** The workspace menu: one choice per server, New Terminal, and Remove Workspace…. */
 export async function showWorkspaceMenu(
   watch: WatchState,
   workspace: string,
@@ -91,7 +100,7 @@ export async function showWorkspaceMenu(
 ): Promise<void> {
   const menu = await Menu.new({
     items: [
-      { text: "New Session", action: () => void newSession(workspace, onOpen) },
+      ...serverChoices(watch, workspace, onOpen),
       { text: "New Terminal", action: () => void newTerminal(workspace, onOpen) },
       { item: "Separator" },
       { text: "Remove Workspace…", action: () => void removeWorkspace(watch, workspace) },
@@ -102,12 +111,13 @@ export async function showWorkspaceMenu(
 
 /** The new menu: New Session and New Terminal. */
 export async function showNewMenu(
+  watch: WatchState,
   workspace: string,
   onOpen: (item: TabItem) => void,
 ): Promise<void> {
   const menu = await Menu.new({
     items: [
-      { text: "New Session", action: () => void newSession(workspace, onOpen) },
+      ...serverChoices(watch, workspace, onOpen),
       { text: "New Terminal", action: () => void newTerminal(workspace, onOpen) },
     ],
   });

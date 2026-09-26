@@ -4,7 +4,7 @@ import type { Status } from "./Status";
 /**
  * One session as watch shows it.
  */
-export type SessionSummary = { session: string, workspace: string, status: Status, unread: boolean, 
+export type SessionSummary = { server: string, session: string, workspace: string, status: Status, unread: boolean, 
 /**
  * The session title, from `session/list` or `session_info_update`.
  */

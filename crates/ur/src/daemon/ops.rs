@@ -16,7 +16,7 @@ use agent_client_protocol::schema::v1::{
 };
 use agent_client_protocol::{Agent, ConnectionTo, is_incoming_transport_closed};
 use anyhow::bail;
-use ur_client::{Response, Workspace};
+use ur_client::{Response, SessionKey, Workspace};
 
 use super::acp;
 use super::server::Outbox;
@@ -39,25 +39,24 @@ pub fn add_workspace(
     if !path.is_dir() {
         bail!("workspace path {} is not a directory", path.display());
     }
-    let connection = {
+    let connections = {
         let mut locked = state.lock().unwrap();
         locked.add_workspace(workspace.clone(), |workspaces| {
             state_file::write(state_file, workspaces)
         })?;
-        locked
-            .server()
-            .ok()
-            .filter(|server| server.can_list())
-            .map(|server| server.connection.clone())
+        locked.list_connections()
     };
-    if let Some(connection) = connection {
+    for (server, generation, connection) in connections {
         let state = state.clone();
+        let workspace = workspace.clone();
         tokio::spawn(async move {
             match acp::list_sessions(&connection, workspace.path).await {
-                Ok(sessions) => state
-                    .lock()
-                    .unwrap()
-                    .add_saved_sessions(&workspace.name, sessions),
+                Ok(sessions) => state.lock().unwrap().add_saved_sessions(
+                    &server,
+                    generation,
+                    &workspace.name,
+                    sessions,
+                ),
                 Err(error) => eprintln!(
                     "ur daemon: listing the sessions of {}: {error:#}",
                     workspace.name
@@ -95,13 +94,15 @@ pub fn remove_workspace(
 /// is handled, so an update sent right after the response is kept.
 pub fn new_session(
     state: &Arc<Mutex<State>>,
+    server: String,
     workspace: String,
     id: u64,
     outbox: Outbox,
 ) -> anyhow::Result<()> {
-    let (connection, path) = {
+    let (generation, connection, path) = {
         let state = state.lock().unwrap();
-        (state.connection()?, state.workspace_path(&workspace)?)
+        let (generation, connection) = state.server_connection(&server)?;
+        (generation, connection, state.workspace_path(&workspace)?)
     };
     let state = state.clone();
     connection
@@ -111,11 +112,15 @@ pub fn new_session(
                 Ok(response) => {
                     let session = response.session_id;
                     match state.lock().unwrap().add_session(
+                        &server,
+                        generation,
                         session.clone(),
                         workspace,
                         response.config_options.unwrap_or_default(),
                     ) {
-                        Ok(()) => Response::SessionCreated { session },
+                        Ok(()) => Response::SessionCreated {
+                            session: SessionKey::new(&server, &session),
+                        },
                         Err(error) => Response::Error {
                             message: format!("{error:#}"),
                         },
@@ -136,14 +141,15 @@ pub fn new_session(
 /// response, or `None` when the load answers it later.
 pub fn subscribe(
     state: &Arc<Mutex<State>>,
-    session: &SessionId,
+    session: &SessionKey,
     id: u64,
     outbox: Outbox,
 ) -> anyhow::Result<Option<Response>> {
+    let owner = state.lock().unwrap().session_owner(session)?;
     state
         .lock()
         .unwrap()
-        .subscribe(session, id, outbox, load(state, None))
+        .subscribe(session, id, outbox, load(state, None, owner))
 }
 
 /// Sends `session/prompt` and answers once it is sent, or answers busy. A
@@ -151,14 +157,15 @@ pub fn subscribe(
 /// after the turn's last update is in the transcript.
 pub fn prompt(
     state: &Arc<Mutex<State>>,
-    session: SessionId,
+    session: SessionKey,
     content: Vec<ContentBlock>,
 ) -> anyhow::Result<Response> {
-    let load = load(state, Some(content.clone()));
+    let owner = state.lock().unwrap().session_owner(&session)?;
+    let load = load(state, Some(content.clone()), owner.clone());
     state
         .lock()
         .unwrap()
-        .prompt(&session, content, send_prompt(state), load)
+        .prompt(&session, content, send_prompt(state, owner), load)
 }
 
 /// Builds the function that sends `session/load`. Its callback ends the load
@@ -168,11 +175,13 @@ pub fn prompt(
 pub fn load(
     state: &Arc<Mutex<State>>,
     prompt: Option<Vec<ContentBlock>>,
+    server: String,
 ) -> impl FnOnce(&ConnectionTo<Agent>, u64, LoadSessionRequest) -> agent_client_protocol::Result<()>
 {
     let state = state.clone();
     move |connection, generation, request| {
-        let session = request.session_id.clone();
+        let owner = server;
+        let session = SessionKey::new(&owner, &request.session_id);
         connection
             .send_request(request)
             .on_receiving_result(move |result| async move {
@@ -185,9 +194,10 @@ pub fn load(
                     .map(|response| response.config_options)
                     .map_err(|error| acp::describe(&error));
                 let mut locked = state.lock().unwrap();
-                if locked.finish_load(&session, generation, result)
+                if locked.finish_load(&owner, &session, generation, result)
                     && let Some(content) = prompt
-                    && let Err(error) = locked.start_prompt(&session, content, send_prompt(&state))
+                    && let Err(error) =
+                        locked.start_prompt(&session, content, send_prompt(&state, owner.clone()))
                 {
                     eprintln!("ur daemon: prompting {session} after its load: {error:#}");
                 }
@@ -202,10 +212,11 @@ pub fn load(
 /// between.
 fn send_prompt(
     state: &Arc<Mutex<State>>,
+    owner: String,
 ) -> impl FnOnce(&ConnectionTo<Agent>, u64, PromptRequest) -> agent_client_protocol::Result<()> {
     let state = state.clone();
     move |connection, generation, request| {
-        let session = request.session_id.clone();
+        let session = SessionKey::new(&owner, &request.session_id);
         connection
             .send_request(request)
             .on_receiving_result(move |result| async move {
@@ -218,9 +229,14 @@ fn send_prompt(
                     .map(|response| response.stop_reason)
                     .map_err(|error| acp::describe(&error));
                 let mut locked = state.lock().unwrap();
-                if let Some((id, outbox)) = locked.finish_prompt(&session, generation, result)
-                    && let Err(error) =
-                        locked.start_delete(&session, send_delete(&state, id, outbox.clone()))
+                if let Some((id, outbox)) =
+                    locked.finish_prompt(&owner, &session, generation, result)
+                    && let Err(error) = locked.start_delete(
+                        &session,
+                        id,
+                        outbox.clone(),
+                        send_delete(&state, owner.clone(), id, outbox.clone()),
+                    )
                 {
                     respond(
                         &outbox,
@@ -240,11 +256,12 @@ fn send_prompt(
 /// ends. Returns the response, or `None` when the delete answers it later.
 pub fn delete_session(
     state: &Arc<Mutex<State>>,
-    session: &SessionId,
+    session: &SessionKey,
     id: u64,
     outbox: Outbox,
 ) -> anyhow::Result<Option<Response>> {
-    let send_delete = send_delete(state, id, outbox.clone());
+    let owner = state.lock().unwrap().session_owner(session)?;
+    let send_delete = send_delete(state, owner, id, outbox.clone());
     state
         .lock()
         .unwrap()
@@ -255,28 +272,33 @@ pub fn delete_session(
 /// delete and answers request `id`.
 fn send_delete(
     state: &Arc<Mutex<State>>,
+    owner: String,
     id: u64,
     outbox: Outbox,
 ) -> impl FnOnce(&ConnectionTo<Agent>, u64, DeleteSessionRequest) -> agent_client_protocol::Result<()>
 {
     let state = state.clone();
     move |connection, generation, request| {
-        let session = request.session_id.clone();
+        let session = SessionKey::new(&owner, &request.session_id);
         connection
             .send_request(request)
             .on_receiving_result(move |result| async move {
                 let result = result
                     .map(|_| ())
                     .map_err(|error| format!("session/delete failed: {}", acp::describe(&error)));
-                state
-                    .lock()
-                    .unwrap()
-                    .finish_delete(&session, generation, result.clone());
-                let response = match result {
-                    Ok(()) => Response::Done,
-                    Err(message) => Response::Error { message },
-                };
-                respond(&outbox, id, response);
+                let handled = state.lock().unwrap().finish_delete(
+                    &owner,
+                    &session,
+                    generation,
+                    result.clone(),
+                );
+                if handled {
+                    let response = match result {
+                        Ok(()) => Response::Done,
+                        Err(message) => Response::Error { message },
+                    };
+                    respond(&outbox, id, response);
+                }
                 Ok(())
             })
     }
@@ -286,27 +308,25 @@ fn send_delete(
 /// responds, with the new config options applied.
 pub fn set_config_option(
     state: &Arc<Mutex<State>>,
-    session: SessionId,
+    session: SessionKey,
     config_id: SessionConfigId,
     value: SessionConfigOptionValue,
     id: u64,
     outbox: Outbox,
 ) -> anyhow::Result<()> {
-    let connection = state.lock().unwrap().connection()?;
+    let (owner, generation, connection, acp_id) =
+        state.lock().unwrap().session_connection(&session)?;
     let state = state.clone();
     connection
-        .send_request(SetSessionConfigOptionRequest::new(
-            session.clone(),
-            config_id,
-            value,
-        ))
+        .send_request(SetSessionConfigOptionRequest::new(acp_id, config_id, value))
         .on_receiving_result(move |result| async move {
             let response = match result {
-                Ok(response) => match state
-                    .lock()
-                    .unwrap()
-                    .set_config_options(&session, response.config_options)
-                {
+                Ok(response) => match state.lock().unwrap().set_config_options(
+                    &owner,
+                    generation,
+                    &session,
+                    response.config_options,
+                ) {
                     Ok(()) => Response::Done,
                     Err(error) => Response::Error {
                         message: format!("{error:#}"),
@@ -325,7 +345,7 @@ pub fn set_config_option(
     Ok(())
 }
 
-pub fn cancel(state: &Arc<Mutex<State>>, session: &SessionId) -> anyhow::Result<()> {
+pub fn cancel(state: &Arc<Mutex<State>>, session: &SessionKey) -> anyhow::Result<()> {
     state.lock().unwrap().cancel(session, send_cancel)
 }
 

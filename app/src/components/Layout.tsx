@@ -198,7 +198,7 @@ function PaneActions({ activePanel, group, containerApi }: IDockviewHeaderAction
       <button
         className="icon-button flex size-7 items-center justify-center rounded text-fg-muted hover:bg-control hover:text-fg"
         title="New"
-        onClick={() => void showNewMenu(workspace, (item) => openTab(containerApi, item, group))}
+        onClick={() => void showNewMenu(watch, workspace, (item) => openTab(containerApi, item, group))}
       >
         <Plus size={16} strokeWidth={1.75} />
       </button>
@@ -274,7 +274,7 @@ function SessionPanel({ api, params }: IDockviewPanelProps<TabItem>) {
         session={id}
         status={status}
         thread={thread}
-        capabilities={watch.capabilities}
+        capabilities={watch.servers.find((server) => server.id === watch.sessions.find((session) => session.session === id)?.server)?.capabilities ?? null}
       />
     </div>
   );

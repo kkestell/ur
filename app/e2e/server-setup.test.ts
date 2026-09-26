@@ -7,13 +7,14 @@ test("the app starts its daemon and saves a working server after a failed choice
   const environment = await TestEnvironment.startManaged();
   try {
     let gui = await environment.openGui(false);
-    await gui.waitForText(".server-setup", "Connect an ACP server");
+    await gui.waitForText(".server-setup", "ACP servers");
     await waitFor("the bundled daemon to listen", async () => {
       try { await environment.watch(); return true; } catch { return false; }
     });
-    assert.equal((await environment.watch()).server_state.error, null);
+    assert.equal((await environment.watch()).config_error, null);
     assert.equal(await gui.hasElement(".server-error"), false);
 
+    await gui.setInput(".server-name", "Test");
     await gui.setInput(".server-command", "/no/such/server");
     await gui.click(".server-save");
     await gui.waitForText(".server-error", "/no/such/server");
@@ -22,13 +23,12 @@ test("the app starts its daemon and saves a working server after a failed choice
     await gui.click(".server-setup button", "Add argument");
     await gui.setInput(".server-argument", environment.historyFile);
     await gui.click(".server-save");
-    await waitFor("the server to connect", async () => (await environment.watch()).server_state.connected);
-    assert.deepEqual(JSON.parse(readFileSync(environment.configFile, "utf8")), {
-      server: { command: environment.fakeServer, args: [environment.historyFile] },
-    });
+    await waitFor("the server to connect", async () => (await environment.watch()).servers[0]?.connected);
+    const saved = JSON.parse(readFileSync(environment.configFile, "utf8"));
+    assert.deepEqual(saved, { servers: [{ id: saved.servers[0].id, name: "Test", command: environment.fakeServer, args: [environment.historyFile] }] });
     await environment.addWorkspace("home", environment.home);
     await gui.waitForText(".workspace-name", "home");
-    const session = await environment.newSession();
+    const session = await environment.newSession(saved.servers[0].id);
     await gui.click(".sidebar .row", "New session");
     await gui.sendPrompt("hello");
     await gui.waitForText(".block.agent", "you said: hello");
@@ -36,7 +36,7 @@ test("the app starts its daemon and saves a working server after a failed choice
 
     gui = await environment.openGui();
     await gui.waitForText(".block.agent", "you said: hello");
-    assert.equal((await environment.watch()).server_state.connected, true);
+    assert.equal((await environment.watch()).servers[0].connected, true);
     assert.ok(session);
   } finally {
     await environment.stop();

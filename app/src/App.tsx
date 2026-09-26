@@ -5,7 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { SidebarHandle, defaultSidebarWidth } from "./components/SidebarHandle";
 import { ServerSetup } from "./components/ServerSetup";
 import { connection, layout as loadLayout, request, saveSidebarWidth, sidebarWidth } from "./ipc";
-import { newSession, newTerminal } from "./actions";
+import { newSession, newTerminal, showNewMenu } from "./actions";
 import { isMacPlatform, newShortcut, tabShortcut } from "./keys";
 import { type TabItem, openTab, tabId, tabWorkspace } from "./layout";
 import { apply as applyWatch, orderedWorkspaces, useWatch } from "./store/watch";
@@ -22,11 +22,12 @@ export default function App() {
   // `undefined` until the saved sidebar width is read.
   const [width, setWidth] = useState<number>();
   const [editingServer, setEditingServer] = useState(false);
-  const showSetup = watch.hasSnapshot && (watch.serverState.command === null || editingServer);
+  const [settingsServer, setSettingsServer] = useState<string>();
+  const showSetup = watch.hasSnapshot && editingServer;
 
   useEffect(() => {
-    if (watch.hasSnapshot && watch.serverState.command === null) setEditingServer(true);
-  }, [watch.hasSnapshot, watch.serverState.command]);
+    if (watch.hasSnapshot && watch.servers.length === 0) setEditingServer(true);
+  }, [watch.hasSnapshot]);
 
   useEffect(() => {
     sidebarWidth()
@@ -82,6 +83,10 @@ export default function App() {
         }
         return;
       }
+      if (opens === "session" && watch.servers.length === 0) {
+        setEditingServer(true);
+        return;
+      }
       const workspace =
         (selection === null ? undefined : tabWorkspace(watch, selection)) ??
         orderedWorkspaces(watch)[0]?.name;
@@ -89,7 +94,12 @@ export default function App() {
         return;
       }
       const onOpen = (item: TabItem) => openTab(api, item);
-      void (opens === "session" ? newSession(workspace, onOpen) : newTerminal(workspace, onOpen));
+      if (opens === "terminal") { void newTerminal(workspace, onOpen); return; }
+      if (watch.servers.length === 1 && watch.servers[0].connected) {
+        void newSession(watch.servers[0].id, workspace, onOpen);
+      } else {
+        void showNewMenu(watch, workspace, onOpen);
+      }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
@@ -120,7 +130,7 @@ export default function App() {
     <div className="relative h-full">
       <div className="layout flex h-full min-w-0 overflow-hidden border-t border-divider">
         <div className="relative flex shrink-0" style={{ width }}>
-          <Sidebar watch={watch} selection={selection} onOpen={onOpen} onConfigureServer={() => setEditingServer(true)} />
+          <Sidebar watch={watch} selection={selection} onOpen={onOpen} onConfigureServer={() => { setSettingsServer(undefined); setEditingServer(true); }} />
           <SidebarHandle
             width={width}
             onResize={setWidth}
@@ -131,11 +141,11 @@ export default function App() {
           />
         </div>
         <div className="main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          {!watch.serverState.connected && watch.serverState.error && (
-            <button className="server-banner bg-control px-3 py-2 text-left text-sm" onClick={() => setEditingServer(true)}>
-              Server: {watch.serverState.error} · Change server
+          {watch.servers.filter((server) => !server.connected && server.error).map((server) => (
+            <button key={server.id} className="server-banner bg-control px-3 py-2 text-left text-sm" onClick={() => { setSettingsServer(server.id); setEditingServer(true); }}>
+              {server.name}: {server.error} · Server settings
             </button>
-          )}
+          ))}
           {watch.hasSnapshot && (
             <Layout
               saved={saved}
@@ -148,7 +158,7 @@ export default function App() {
       </div>
       {showSetup && (
         <div className="absolute inset-0 z-50 bg-panel">
-          <ServerSetup state={watch.serverState} onSaved={() => setEditingServer(false)} onCancel={watch.serverState.command === null ? undefined : () => setEditingServer(false)} />
+          <ServerSetup servers={watch.servers} configError={watch.configError} initialServer={settingsServer} onSaved={() => setEditingServer(false)} onCancel={() => setEditingServer(false)} />
         </div>
       )}
     </div>

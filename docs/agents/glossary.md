@@ -47,9 +47,12 @@
 - **ur**: The ACP client this project builds: a daemon and a GUI.
 - **ACP**: Agent Client Protocol, the JSON-RPC interface between ur and a server. It is the
   contract; server-specific names have no special meaning to ur.
-- **Server**: The ACP agent process the daemon launches from the config file. There is one per
-  daemon. Ox is the server used for development and end-to-end checks, not part of ur's
-  architecture.
+- **Server**: One ACP agent process the daemon launches from the config file. Several named servers
+  can run in one daemon and share workspaces. Ox is the server used for development and end-to-end
+  checks, not part of ur's architecture.
+- **Server ID**: The immutable identifier of one configured server, persisted in `ServerConfig.id`
+  and carried in server state and session summaries. It is independent of the editable server name.
+- **Server name**: The user-chosen label shown in settings and creation menus.
 - **Ox**: The ACP server at `~/projects/ox` that ur is developed and tested against. Its tools,
   limits, database, and notification timing are not client requirements.
 - **Test agent**: A server built with the SDK's `Agent.builder()` inside a test process. It
@@ -63,8 +66,9 @@
 - **Daemon**: The long-running `ur daemon` process. It owns the ACP connection, session statuses,
   in-memory transcripts, pending permission requests, and terminals, and serves daemon clients on
   the socket. The GUI starts its bundled daemon sidecar when no daemon is listening.
-- **Server state**: The configured ACP server executable and arguments, whether its connection is
-  ready, and its latest connection error. Watch sends it in the snapshot and on each change.
+- **Server state**: One configured server's ID, name, executable, arguments, connection status,
+  latest error, and current capabilities. Watch sends the complete ordered list in the snapshot and
+  on each change.
 - **One-shot client**: `ur agent-run`, which launches the server and speaks ACP directly for one
   prompt without a daemon.
 - **Daemon client**: The GUI or a test client connected to the daemon socket. Every daemon client
@@ -80,8 +84,8 @@
   attachments with their sizes, and focus, which is the visible sessions while the window has focus.
   It is `Desired` in code.
 - **Config file**: `$XDG_CONFIG_HOME/ur/config.json`, under `~/.config` when the variable is unset.
-  It holds the server command and arguments and, from milestone 11, `on_event`. The daemon and
-  one-shot client share it.
+  It holds the ordered `servers` array, with each server's ID, name, command, and arguments. The
+  daemon and one-shot client share it.
 - **State file**: `$XDG_STATE_HOME/ur/state.json`, under `~/.local/state` when the variable is
   unset. It holds workspace names and paths, and nothing about sessions.
 - **GUI state file**: `$XDG_STATE_HOME/ur/gui.json`, written by the core and keyed by socket path.
@@ -93,12 +97,12 @@
 
 ### Daemon internals
 
-- **ACP connection**: The daemon's one connection to the server, shared by every session in every
-  workspace. It is `ConnectionTo<Agent>` in code.
-- **Supervisor**: The daemon task in `daemon/acp.rs` that launches the server, holds the ACP
-  connection, and reconnects with backoff when the server exits.
-- **Generation**: A number identifying one ACP connection. It is carried on every op result, and
-  `State` ignores anything from an earlier generation.
+- **ACP connection**: One daemon connection to a configured server, shared by that server's sessions
+  in every workspace. It is `ConnectionTo<Agent>` in code.
+- **Supervisor**: One daemon task in `daemon/acp.rs` for a configured server. It launches that
+  server, holds its ACP connection, and reconnects with backoff when it exits.
+- **Generation**: A per-server number reserved before an ACP connection attempt. Handlers and
+  results carry it, and `State` ignores anything from an earlier generation.
 - **`State`**: The daemon's in-memory workspaces, sessions, terminals, and subscriber lists behind
   one std mutex. Every mutation is a method that queues its events on the affected outboxes while
   the lock is held, and does no IO.
@@ -112,8 +116,11 @@
 - **Workspace path**: The absolute path of a workspace, made absolute when the workspace is added
   and stored as is. Every `session/new`, `session/load`, and `session/list` call for the workspace
   passes that exact string as `cwd`.
-- **Session**: An ACP session, identified by a server-assigned session ID. ur treats the ID as
-  opaque.
+- **Session**: One ACP session on exactly one configured server.
+- **ACP session ID**: The opaque server-assigned `SessionId`, used only at the ACP boundary.
+- **Session key**: The stable daemon-client reference to a session on one server. It contains the
+  JSON serialization of `[server ID, ACP session ID]`, is `SessionKey` in Rust, and is a string in
+  TypeScript. Existing wire fields named `session` carry this key.
 - **Saved history**: The server's durable copy of a session. The daemon saves no transcripts.
 - **Saved session**: A session returned by `session/list`. It starts `Idle` and unloaded.
 - **Loaded session**: A session whose transcript the daemon holds, either because the daemon created
@@ -227,10 +234,10 @@
 - **Event**: A JSON message the daemon pushes to a daemon client. Events carry ACP schema types
   unchanged.
 - **Watch**: The request that registers a daemon client for sidebar events: workspaces, their
-  session summaries and terminal summaries, server state, and capabilities. Pending permission
-  requests arrive in the session status.
-- **Session summary**: One session as watch shows it: its session ID, workspace, session status,
-  unread flag, session title, and last activity. It is `SessionSummary` in code.
+  session summaries and terminal summaries, the ordered server states, and config error. Pending
+  permission requests arrive in the session status.
+- **Session summary**: One session as watch shows it: its session key, server ID, workspace, status,
+  unread flag, title, and last activity. It is `SessionSummary` in code.
 - **Terminal summary**: One terminal as watch shows it: its terminal ID, workspace, and terminal
   title. It is `TerminalSummary` in code.
 - **Subscribe**: The request that registers a daemon client for one session's content: its
@@ -260,8 +267,8 @@
 - **Thread**: The GUI view of one session's transcript, with the editor below it.
 - **Editor**: The borderless prompt input under a thread, with the command list, image attachment
   chips, the usage indicator, config pickers, and Send or Stop.
-- **Workspace menu**: The native context menu of a workspace row: New Session, New Terminal, and
-  Remove Workspace….
+- **Workspace menu**: The native context menu of a workspace row: one New Session choice per
+  configured server, New Terminal, and Remove Workspace….
 - **Session menu**: The native context menu of a session row: Delete…, shown when the server
   advertises `session/delete`.
 - **Terminal menu**: The native context menu of a terminal row: Close Terminal. It is
@@ -275,8 +282,8 @@
 - **`TabItem`**: The session or terminal one tab shows: `{ type: "session", session }` or
   `{ type: "terminal", terminal }`. It is the panel's params.
 - **Close Tab**: The button a tab shows on hover.
-- **New menu**: The native menu from a pane's `+`: New Session and New Terminal, in the workspace of
-  the pane's active tab. It is `showNewMenu()` in code.
+- **New menu**: The native menu from a pane's `+`: one New Session choice per configured server and
+  New Terminal, in the workspace of the pane's active tab. It is `showNewMenu()` in code.
 - **Layout**: The dockview arrangement of panes and tabs, saved in the GUI state file. `Layout` is
   the component that holds `DockviewReact`.
 - **Selection**: The session or terminal of the active tab, highlighted in the sidebar.

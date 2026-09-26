@@ -13,9 +13,21 @@ ur, then go to System Settings → Privacy & Security and choose **Open Anyway**
 
 ## Get started
 
-Install an ACP-compatible agent separately. Open ur, choose the agent's executable, and add any
-launch arguments in separate fields. Then add a workspace with the **+** beside Workspaces, create a
-session, and send a prompt. Sessions and terminals stay available when you close and reopen ur.
+Install an ACP-compatible agent separately. Open ur, choose **Server**, and add a named server with
+its executable and launch arguments. Add more servers in the same settings screen. Then add a
+workspace with the **+** beside Workspaces. The workspace and pane creation menus offer one session
+choice per connected server, plus New Terminal. Sessions and terminals stay available when you close
+and reopen ur.
+
+The config file at `$XDG_CONFIG_HOME/ur/config.json` (or `~/.config/ur/config.json`) stores servers
+in menu order. Server IDs stay the same when a server is renamed:
+
+```json
+{"servers": [{"id": "stable-server-id", "name": "My agent", "command": "/absolute/path/to/agent", "args": []}]}
+```
+
+`ur agent-run [--server NAME] <workspace> <prompt>` runs one prompt directly. The name is optional
+when exactly one server is configured and required when several are configured.
 
 ## Keyboard shortcuts
 
@@ -31,4 +43,5 @@ session, and send a prompt. Sessions and terminals stay available when you close
 | Always reject     | Command+Shift+Option+Z | Ctrl+Shift+Alt+Z |
 
 Permission shortcuts answer the active session's oldest pending request when it has the matching
-option.
+option. The New Session shortcut opens the server choices when several servers are configured. With
+one connected server it creates a session directly; with none it opens server settings.

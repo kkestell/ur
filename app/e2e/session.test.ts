@@ -26,7 +26,7 @@ e2eTest("sessions stay newest first when an older session needs attention", asyn
   await environment.waitForIdle(older);
   const gui = await environment.openGui();
   await environment.newSession();
-  const labels = () => gui.texts(".workspace-sessions .row:not(:has(.terminal-icon)) .label");
+  const labels = () => gui.texts(".workspace-sessions .row:not(:has(.terminal-icon)) .label > span:first-child");
   await waitFor("newest session first", async () =>
     JSON.stringify(await labels()) === JSON.stringify(["New session", "tallies"]),
   );

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, ContentBlock, ContentChunk, SessionConfigKind, SessionConfigOption,
-    SessionConfigOptionValue, SessionId, SessionUpdate, StopReason,
+    SessionConfigOptionValue, SessionUpdate, StopReason,
 };
 use agent_client_protocol::{Channel, ConnectTo};
 use anyhow::anyhow;
@@ -14,7 +14,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::AbortHandle;
 use tokio::time::{sleep, timeout};
 use ur_client::{
-    Client, Entry, Event, PendingPermission, Request, Response, SessionSummary, Status, Workspace,
+    Client, Entry, Event, PendingPermission, Request, Response, SessionKey, SessionSummary, Status,
+    Workspace,
 };
 use ur_fake_server::{Hold, SavedHistory, fake_server};
 
@@ -133,10 +134,82 @@ impl TestDaemon {
     }
 }
 
+/// Two independent ACP connections whose fake servers both issue fake-1.
+fn two_servers() -> (TestDaemon, Arc<Mutex<Option<AbortHandle>>>) {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("ur.sock");
+    let state_file = dir.path().join("state.json");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let first = Arc::new(Mutex::new(None));
+    let second = Arc::new(Mutex::new(None));
+    let first_history = SavedHistory::default();
+    let second_history = SavedHistory::default();
+    let first_launch = {
+        let handle = first.clone();
+        let history = first_history.clone();
+        move || {
+            let (client, agent) = Channel::duplex();
+            let task =
+                tokio::spawn(fake_server(Hold::default(), history.clone()).connect_to(agent));
+            *handle.lock().unwrap() = Some(task.abort_handle());
+            client
+        }
+    };
+    let second_launch = {
+        let handle = second.clone();
+        let history = second_history.clone();
+        move || {
+            let (client, agent) = Channel::duplex();
+            let task =
+                tokio::spawn(fake_server(Hold::default(), history.clone()).connect_to(agent));
+            *handle.lock().unwrap() = Some(task.abort_handle());
+            client
+        }
+    };
+    let state_file_for_serve = state_file.clone();
+    tokio::spawn(async move {
+        let state = Arc::new(Mutex::new(super::state::State::new(Vec::new())));
+        for (id, name) in [("test", "Test"), ("beta", "Beta")] {
+            state
+                .lock()
+                .unwrap()
+                .configure_server(&super::ServerConfig {
+                    id: id.into(),
+                    name: name.into(),
+                    command: name.into(),
+                    args: Vec::new(),
+                });
+        }
+        let (_, first_ready) =
+            super::acp::spawn_supervisor("test".into(), "Test".into(), first_launch, state.clone());
+        let (_, second_ready) = super::acp::spawn_supervisor(
+            "beta".into(),
+            "Beta".into(),
+            second_launch,
+            state.clone(),
+        );
+        tokio::join!(first_ready.notified(), second_ready.notified());
+        let terminals = Arc::new(super::terminal::Terminals::new(state.clone()));
+        super::server::serve(listener, terminals, state, state_file_for_serve, None)
+            .await
+            .unwrap();
+    });
+    (
+        TestDaemon {
+            socket,
+            state_file,
+            history: first_history,
+            server: first,
+            _dir: dir,
+        },
+        second,
+    )
+}
+
 /// One daemon client's view of a subscribed session: the session snapshot,
 /// then each `entry` and `config_options_changed` event.
 struct Subscription {
-    session: SessionId,
+    session: SessionKey,
     snapshot: Vec<Entry>,
     transcript: Vec<Entry>,
     config_options: Vec<SessionConfigOption>,
@@ -230,7 +303,7 @@ impl Watch {
 
     /// Waits for the next `session_changed` for `session`, skipping other
     /// events, and returns its summary.
-    async fn next_change(&mut self, session: &SessionId) -> SessionSummary {
+    async fn next_change(&mut self, session: &SessionKey) -> SessionSummary {
         loop {
             if let Event::SessionChanged { summary } = self.next().await
                 && summary.session == *session
@@ -241,7 +314,7 @@ impl Watch {
     }
 
     /// Waits for the session to stop being `Working`, and returns its status.
-    async fn next_turn_end(&mut self, session: &SessionId) -> Status {
+    async fn next_turn_end(&mut self, session: &SessionKey) -> Status {
         loop {
             let status = self.next_change(session).await.status;
             if status != Status::Working {
@@ -262,13 +335,15 @@ async fn watch(daemon: &TestDaemon) -> Watch {
         Ok(Event::WatchSnapshot {
             workspaces,
             sessions,
-            capabilities,
+            servers,
             terminals: _,
-            server_state: _,
+            config_error: _,
         }) => Watch {
             workspaces,
             sessions,
-            capabilities,
+            capabilities: servers
+                .first()
+                .and_then(|server| server.capabilities.clone()),
             events,
             _client: client,
         },
@@ -308,13 +383,18 @@ async fn remove_workspace(client: &Client, name: &str) -> Response {
 }
 
 /// Adds the workspace, then creates a session in it.
-async fn new_session(client: &Client, workspace: &str) -> SessionId {
+async fn new_session(client: &Client, workspace: &str) -> SessionKey {
     assert_eq!(add_workspace(client, workspace).await, Response::Done);
     create_session(client, workspace).await
 }
 
-async fn create_session(client: &Client, workspace: &str) -> SessionId {
+async fn create_session(client: &Client, workspace: &str) -> SessionKey {
+    create_session_on(client, "test", workspace).await
+}
+
+async fn create_session_on(client: &Client, server: &str, workspace: &str) -> SessionKey {
     let request = Request::NewSession {
+        server: server.into(),
         workspace: workspace.to_string(),
     };
     match client.request(request).await.unwrap() {
@@ -325,10 +405,11 @@ async fn create_session(client: &Client, workspace: &str) -> SessionId {
 
 /// Creates a session in the workspace once the supervisor has started the
 /// server again.
-async fn create_session_after_restart(client: &Client, workspace: &str) -> SessionId {
+async fn create_session_after_restart(client: &Client, workspace: &str) -> SessionKey {
     timeout(WAIT, async {
         loop {
             let request = Request::NewSession {
+                server: "test".into(),
                 workspace: workspace.to_string(),
             };
             match client.request(request).await.unwrap() {
@@ -342,7 +423,7 @@ async fn create_session_after_restart(client: &Client, workspace: &str) -> Sessi
     .expect("the server starts again")
 }
 
-async fn subscribe(client: &Client, session: &SessionId) -> Subscription {
+async fn subscribe(client: &Client, session: &SessionKey) -> Subscription {
     let mut events = client.events();
     let request = Request::Subscribe {
         session: session.clone(),
@@ -365,11 +446,11 @@ async fn subscribe(client: &Client, session: &SessionId) -> Subscription {
 }
 
 /// The session's transcript, from a new daemon client's session snapshot.
-async fn transcript(daemon: &TestDaemon, session: &SessionId) -> Vec<Entry> {
+async fn transcript(daemon: &TestDaemon, session: &SessionKey) -> Vec<Entry> {
     subscribe(&daemon.connect().await, session).await.snapshot
 }
 
-async fn prompt(client: &Client, session: &SessionId, text: &str) -> Response {
+async fn prompt(client: &Client, session: &SessionKey, text: &str) -> Response {
     let request = Request::Prompt {
         session: session.clone(),
         content: vec![ContentBlock::from(text)],
@@ -377,14 +458,14 @@ async fn prompt(client: &Client, session: &SessionId, text: &str) -> Response {
     client.request(request).await.unwrap()
 }
 
-async fn focus(client: &Client, session: &SessionId) -> Response {
+async fn focus(client: &Client, session: &SessionKey) -> Response {
     let request = Request::Focus {
         sessions: vec![session.clone()],
     };
     client.request(request).await.unwrap()
 }
 
-async fn answer(client: &Client, session: &SessionId, request_id: u32, option: &str) -> Response {
+async fn answer(client: &Client, session: &SessionKey, request_id: u32, option: &str) -> Response {
     let request = Request::AnswerPermission {
         session: session.clone(),
         request_id,
@@ -393,21 +474,21 @@ async fn answer(client: &Client, session: &SessionId, request_id: u32, option: &
     client.request(request).await.unwrap()
 }
 
-async fn cancel(client: &Client, session: &SessionId) -> Response {
+async fn cancel(client: &Client, session: &SessionKey) -> Response {
     let request = Request::Cancel {
         session: session.clone(),
     };
     client.request(request).await.unwrap()
 }
 
-async fn delete(client: &Client, session: &SessionId) -> Response {
+async fn delete(client: &Client, session: &SessionKey) -> Response {
     let request = Request::DeleteSession {
         session: session.clone(),
     };
     client.request(request).await.unwrap()
 }
 
-async fn set_pace(client: &Client, session: &SessionId, pace: &str) -> Response {
+async fn set_pace(client: &Client, session: &SessionKey, pace: &str) -> Response {
     let request = Request::SetConfigOption {
         session: session.clone(),
         config_id: "pace".into(),
@@ -443,8 +524,9 @@ fn tool_call_ids(requests: &[PendingPermission]) -> Vec<String> {
 }
 
 /// The summary of a session that was just created or listed.
-fn new_summary(session: &SessionId, workspace: &str) -> SessionSummary {
+fn new_summary(session: &SessionKey, workspace: &str) -> SessionSummary {
     SessionSummary {
+        server: "test".into(),
         session: session.clone(),
         workspace: workspace.to_string(),
         status: Status::Idle { last_stop: None },
@@ -641,6 +723,7 @@ async fn workspace_requests_reject_bad_input() {
         (
             "a session in an unknown workspace",
             Request::NewSession {
+                server: "test".into(),
                 workspace: "nowhere".to_string(),
             },
             "no workspace nowhere",
@@ -937,7 +1020,7 @@ async fn session_requests_fail_without_a_server() {
         (
             "a config error",
             Err(anyhow!("the config file is missing")),
-            "the config file is missing",
+            "no server test",
         ),
         (
             "a server that never answers initialize",
@@ -955,6 +1038,7 @@ async fn session_requests_fail_without_a_server() {
         );
 
         let request = Request::NewSession {
+            server: "test".into(),
             workspace: "home".to_string(),
         };
         match client.request(request).await.unwrap() {
@@ -1387,9 +1471,234 @@ async fn watch_reports_the_capabilities() {
     daemon.kill_server();
 
     let capabilities = loop {
-        if let Event::CapabilitiesChanged { capabilities } = watcher.next().await {
+        if let Event::ServersChanged { servers, .. } = watcher.next().await
+            && let Some(capabilities) = servers
+                .first()
+                .and_then(|server| server.capabilities.clone())
+        {
             break capabilities;
         }
     };
     assert!(advertised(&capabilities), "{capabilities:?}");
+}
+
+#[tokio::test]
+async fn overlapping_acp_ids_have_independent_transcripts() {
+    let (daemon, _) = two_servers();
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let first = create_session_on(&client, "test", "home").await;
+    let second = create_session_on(&client, "beta", "home").await;
+    assert_ne!(first, second);
+    assert_eq!(
+        serde_json::from_str::<(String, String)>(&first.0)
+            .unwrap()
+            .1,
+        "fake-1"
+    );
+    assert_eq!(
+        serde_json::from_str::<(String, String)>(&second.0)
+            .unwrap()
+            .1,
+        "fake-1"
+    );
+    let first_client = daemon.connect().await;
+    let second_client = daemon.connect().await;
+    let mut first_sub = subscribe(&first_client, &first).await;
+    let mut second_sub = subscribe(&second_client, &second).await;
+    assert_eq!(prompt(&client, &first, "alpha").await, Response::Done);
+    assert_eq!(prompt(&client, &second, "beta").await, Response::Done);
+    first_sub.wait_for(2).await;
+    second_sub.wait_for(2).await;
+    assert_ne!(first_sub.transcript, second_sub.transcript);
+    assert!(format!("{:?}", first_sub.transcript).contains("alpha"));
+    assert!(format!("{:?}", second_sub.transcript).contains("beta"));
+}
+
+#[tokio::test]
+async fn config_options_route_to_the_owning_server() {
+    let (daemon, _) = two_servers();
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let first = create_session_on(&client, "test", "home").await;
+    let second = create_session_on(&client, "beta", "home").await;
+    assert_eq!(set_pace(&client, &second, "brisk").await, Response::Done);
+    assert_eq!(
+        pace(&subscribe(&client, &first).await.config_options),
+        "steady"
+    );
+    assert_eq!(
+        pace(&subscribe(&client, &second).await.config_options),
+        "brisk"
+    );
+}
+
+#[tokio::test]
+async fn deleting_one_servers_session_keeps_the_other() {
+    let (daemon, _) = two_servers();
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let first = create_session_on(&client, "test", "home").await;
+    let second = create_session_on(&client, "beta", "home").await;
+    assert_eq!(delete(&client, &second).await, Response::Done);
+    let snapshot = watch(&daemon).await;
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.session == first)
+    );
+    assert!(
+        !snapshot
+            .sessions
+            .iter()
+            .any(|session| session.session == second)
+    );
+}
+
+#[tokio::test]
+async fn restarting_one_server_keeps_the_others_connection() {
+    let (daemon, beta_task) = two_servers();
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let first = create_session_on(&client, "test", "home").await;
+    let second = create_session_on(&client, "beta", "home").await;
+    beta_task.lock().unwrap().take().unwrap().abort();
+    assert_eq!(
+        prompt(&client, &first, "still connected").await,
+        Response::Done
+    );
+    timeout(WAIT, async {
+        loop {
+            match prompt(&client, &second, "after restart").await {
+                Response::Done => break,
+                Response::Error { .. } | Response::Busy => sleep(Duration::from_millis(50)).await,
+                other => panic!("unexpected response {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("Beta reconnects");
+}
+
+#[tokio::test]
+async fn focus_and_unread_are_independent_for_overlapping_ids() {
+    let (daemon, _) = two_servers();
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let first = create_session_on(&client, "test", "home").await;
+    let second = create_session_on(&client, "beta", "home").await;
+    assert_eq!(focus(&client, &first).await, Response::Done);
+    assert_eq!(prompt(&client, &first, "alpha").await, Response::Done);
+    assert_eq!(prompt(&client, &second, "beta").await, Response::Done);
+    let summaries = timeout(WAIT, async {
+        loop {
+            let summaries = watch(&daemon).await.sessions;
+            if summaries.len() == 2
+                && summaries
+                    .iter()
+                    .all(|summary| matches!(summary.status, Status::Idle { last_stop: Some(_) }))
+            {
+                break summaries;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        !summaries
+            .iter()
+            .find(|summary| summary.session == first)
+            .unwrap()
+            .unread
+    );
+    assert!(
+        summaries
+            .iter()
+            .find(|summary| summary.session == second)
+            .unwrap()
+            .unread
+    );
+}
+
+#[tokio::test]
+async fn permission_answers_route_to_the_owning_server() {
+    let (daemon, _) = two_servers();
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let first = create_session_on(&client, "test", "home").await;
+    let second = create_session_on(&client, "beta", "home").await;
+    assert_eq!(prompt(&client, &first, "tool").await, Response::Done);
+    assert_eq!(prompt(&client, &second, "tool").await, Response::Done);
+    let summaries = timeout(WAIT, async {
+        loop {
+            let summaries = watch(&daemon).await.sessions;
+            if summaries.len() == 2
+                && summaries
+                    .iter()
+                    .all(|summary| matches!(summary.status, Status::NeedsPermission { .. }))
+            {
+                break summaries;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let beta = summaries
+        .into_iter()
+        .find(|summary| summary.session == second)
+        .unwrap();
+    let request_id = requests(beta)[0].request_id;
+    assert_eq!(
+        answer(&client, &second, request_id, "go").await,
+        Response::Done
+    );
+    let snapshot = watch(&daemon).await;
+    assert!(matches!(
+        snapshot
+            .sessions
+            .iter()
+            .find(|summary| summary.session == first)
+            .unwrap()
+            .status,
+        Status::NeedsPermission { .. }
+    ));
+    assert_eq!(cancel(&client, &first).await, Response::Done);
+}
+
+#[tokio::test]
+async fn removing_a_workspace_removes_sessions_from_both_servers() {
+    let (daemon, _) = two_servers();
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    create_session_on(&client, "test", "home").await;
+    create_session_on(&client, "beta", "home").await;
+    assert_eq!(remove_workspace(&client, "home").await, Response::Done);
+    assert!(watch(&daemon).await.sessions.is_empty());
+}
+
+#[tokio::test]
+async fn adding_a_workspace_lists_saved_sessions_from_both_servers() {
+    let (daemon, _) = two_servers();
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let first = create_session_on(&client, "test", "home").await;
+    let second = create_session_on(&client, "beta", "home").await;
+    assert_eq!(remove_workspace(&client, "home").await, Response::Done);
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let sessions = timeout(WAIT, async {
+        loop {
+            let sessions = watch(&daemon).await.sessions;
+            if sessions.len() == 2 {
+                break sessions;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(sessions.iter().any(|summary| summary.session == first));
+    assert!(sessions.iter().any(|summary| summary.session == second));
 }

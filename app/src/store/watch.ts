@@ -1,4 +1,3 @@
-import type { AgentCapabilities } from "@agentclientprotocol/sdk";
 import { useSyncExternalStore } from "react";
 import { type Connection, type WatchEvent, onConnection, onWatch } from "../ipc";
 import type { SessionSummary } from "../ipc/bindings/SessionSummary";
@@ -15,9 +14,8 @@ export type WatchState = {
   sessions: SessionSummary[];
   /** In the order they were opened. */
   terminals: TerminalSummary[];
-  /** The current ACP connection's capabilities, or `null` without one. */
-  capabilities: AgentCapabilities | null;
-  serverState: ServerState;
+  servers: ServerState[];
+  configError: string | null;
   connectionError: string | null;
 };
 
@@ -30,8 +28,8 @@ export const initialWatch: WatchState = {
   workspaces: [],
   sessions: [],
   terminals: [],
-  capabilities: null,
-  serverState: { command: null, args: [], connected: false, error: null },
+  servers: [],
+  configError: null,
   connectionError: null,
 };
 
@@ -51,8 +49,8 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
         workspaces: event.connected ? state.workspaces : [],
         sessions: event.connected ? state.sessions : [],
         terminals: event.connected ? state.terminals : [],
-        capabilities: event.connected ? state.capabilities : null,
-        serverState: event.connected ? state.serverState : initialWatch.serverState,
+        servers: event.connected ? state.servers : [],
+        configError: event.connected ? state.configError : null,
         connectionError: event.error,
       };
     case "watch_snapshot":
@@ -62,17 +60,11 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
         workspaces: event.workspaces,
         sessions: event.sessions,
         terminals: event.terminals,
-        capabilities: event.capabilities,
-        serverState: event.server_state,
+        servers: event.servers,
+        configError: event.config_error,
       };
-    case "capabilities_changed":
-      return { ...state, capabilities: event.capabilities };
-    case "server_state_changed":
-      return {
-        ...state,
-        serverState: event.server_state,
-        capabilities: event.server_state.connected ? state.capabilities : null,
-      };
+    case "servers_changed":
+      return { ...state, servers: event.servers, configError: event.config_error };
     case "workspace_added":
       return { ...state, workspaces: [...state.workspaces, event.workspace] };
     case "workspace_removed":

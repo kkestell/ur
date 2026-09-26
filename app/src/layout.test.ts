@@ -16,6 +16,7 @@ function watch(sessions: string[], terminals: number[]): WatchState {
     workspaces: [{ name: "ws", path: "/ws" }],
     sessions: sessions.map((session) => ({
       session,
+      server: "one",
       workspace: "ws",
       status: { type: "idle", last_stop: null },
       unread: false,

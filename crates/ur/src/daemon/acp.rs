@@ -36,16 +36,18 @@ const MAX_RESTART_DELAY: Duration = Duration::from_secs(30);
 /// again.
 #[cfg(test)]
 pub async fn supervise<S: ConnectTo<Client> + 'static>(
+    id: String,
     command: String,
     launch: impl Fn() -> S + Send + 'static,
     state: Arc<Mutex<State>>,
 ) -> tokio::task::JoinHandle<()> {
-    let (task, ready) = spawn_supervisor(command, launch, state);
+    let (task, ready) = spawn_supervisor(id, command, launch, state);
     ready.notified().await;
     task
 }
 
 pub fn spawn_supervisor<S: ConnectTo<Client> + 'static>(
+    id: String,
     command: String,
     launch: impl Fn() -> S + Send + 'static,
     state: Arc<Mutex<State>>,
@@ -56,12 +58,17 @@ pub fn spawn_supervisor<S: ConnectTo<Client> + 'static>(
         async move {
             let mut delay = RESTART_DELAY;
             loop {
-                let (initialized, reason) = connect(&command, launch(), &state, &ready).await;
+                let generation = match state.lock().unwrap().reserve(&id) {
+                    Ok(generation) => generation,
+                    Err(_) => return,
+                };
+                let (initialized, reason) =
+                    connect(&id, generation, &command, launch(), &state, &ready).await;
                 if initialized {
                     delay = RESTART_DELAY;
                 }
                 eprintln!("ur daemon: {reason}");
-                state.lock().unwrap().server_exited(reason);
+                state.lock().unwrap().server_exited(&id, generation, reason);
                 ready.notify_one();
                 sleep(delay).await;
                 delay = (delay * 2).min(MAX_RESTART_DELAY);
@@ -76,6 +83,8 @@ pub fn spawn_supervisor<S: ConnectTo<Client> + 'static>(
 /// sessions, signals `ready`, and waits for the ACP connection to close.
 /// Returns whether `initialize` succeeded, and why the ACP connection ended.
 async fn connect(
+    id: &str,
+    generation: u64,
     command: &str,
     server: impl ConnectTo<Client> + 'static,
     state: &Arc<Mutex<State>>,
@@ -87,11 +96,15 @@ async fn connect(
         .on_receive_notification(
             {
                 let state = state.clone();
+                let id = id.to_string();
                 // Applying the update here, without awaiting, holds the SDK's
                 // dispatch loop only for the lock, and keeps updates in the
                 // order the server sent them.
                 async move |notification: SessionNotification, _connection| {
-                    state.lock().unwrap().apply_update(notification);
+                    state
+                        .lock()
+                        .unwrap()
+                        .apply_update(&id, generation, notification);
                     Ok(())
                 }
             },
@@ -100,8 +113,12 @@ async fn connect(
         .on_receive_request(
             {
                 let state = state.clone();
+                let id = id.to_string();
                 async move |request: RequestPermissionRequest, responder, _connection| {
-                    state.lock().unwrap().request_permission(request, responder)
+                    state
+                        .lock()
+                        .unwrap()
+                        .request_permission(&id, generation, request, responder)
                 }
             },
             on_receive_request!(),
@@ -121,15 +138,22 @@ async fn connect(
             };
             {
                 let mut locked = state.lock().unwrap();
-                locked.set_server(Ok(Server {
-                    connection: connection.clone(),
-                    capabilities,
-                }));
-                for (workspace, sessions) in saved {
-                    locked.add_saved_sessions(&workspace, sessions);
+                if !locked.current(id, generation) {
+                    return Ok(Ok(()));
                 }
-                locked.reload_subscribed(|connection, generation, request| {
-                    ops::load(state, None)(connection, generation, request)
+                locked.set_server(
+                    id,
+                    generation,
+                    Ok(Server {
+                        connection: connection.clone(),
+                        capabilities,
+                    }),
+                );
+                for (workspace, sessions) in saved {
+                    locked.add_saved_sessions(id, generation, &workspace, sessions);
+                }
+                locked.reload_subscribed(id, |connection, generation, request| {
+                    ops::load(state, None, id.to_string())(connection, generation, request)
                 });
             }
             initialized = true;

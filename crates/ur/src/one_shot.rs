@@ -19,12 +19,13 @@ use crate::daemon::acp;
 
 /// Runs `agent-run` against the server in the config file, answering
 /// permission requests from stdin.
-pub async fn start(workspace: &Path, prompt: String) -> anyhow::Result<()> {
+pub async fn start(workspace: &Path, prompt: String, name: Option<&str>) -> anyhow::Result<()> {
     let Some(config) = Config::read()? else {
         anyhow::bail!("{} does not exist", config::path()?.display());
     };
-    let server = config.server;
-    let server = AcpAgent::new(AcpAgentConfig::new(server.command).args(server.args));
+    let server = config.select(name)?;
+    let server =
+        AcpAgent::new(AcpAgentConfig::new(server.command.clone()).args(server.args.clone()));
     let output = Arc::new(Mutex::new(std::io::stdout()));
     let answers = BufReader::new(tokio::io::stdin());
     let stop = run(server, workspace, prompt, answers, output.clone()).await?;

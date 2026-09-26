@@ -23,6 +23,8 @@ type TauriWindow = {
 type ShownWindow = {
   shown(selector: string): HTMLElement[];
   pendingFileReads?: Array<(() => Promise<void>) | undefined>;
+  __UR_E2E_MENU__?: { items: Array<{ text?: string; enabled?: boolean }>; pick?: string };
+  __UR_E2E_DIALOG__?: { confirm?: boolean; lastQuestion?: string };
 };
 
 type SessionSummary = {
@@ -34,7 +36,8 @@ type SessionSummary = {
 type WatchSnapshot = {
   type: "watch_snapshot";
   sessions: SessionSummary[];
-  server_state: { connected: boolean; command: string | null; error: string | null };
+  servers: Array<{ id: string; name: string; connected: boolean; command: string; error: string | null }>;
+  config_error: string | null;
 };
 
 /**
@@ -68,10 +71,12 @@ export class TestEnvironment {
       writeFileSync(
         join(this.#config, "ur/config.json"),
         JSON.stringify({
-          server: {
+          servers: [{
+            id: "test",
+            name: "Test",
             command: join(BIN, "ur-fake-server"),
             args: [join(dir, "history.json")],
-          },
+          }],
         }),
       );
     }
@@ -191,12 +196,19 @@ export class TestEnvironment {
   }
 
   /** Creates a session in the `home` workspace. */
-  async newSession(): Promise<string> {
-    const { response } = await this.request({ type: "new_session", workspace: "home" });
+  async newSession(server = "test"): Promise<string> {
+    const { response } = await this.request({ type: "new_session", server, workspace: "home" });
     if (response.type !== "session_created") {
       throw new Error(`unexpected new_session response: ${JSON.stringify(response)}`);
     }
     return response.session as string;
+  }
+
+  async addServer(name: string, historyFile = join(this.#dir, `${name}.json`), flags: string[] = []): Promise<string> {
+    const { response } = await this.request({ type: "add_server", name, command: this.fakeServer, args: [historyFile, ...flags] });
+    const id = response.server as string;
+    await waitFor(`${name} to connect`, async () => (await this.watch()).servers.some((server) => server.id === id && server.connected));
+    return id;
   }
 
   async prompt(session: string, text: string): Promise<void> {
@@ -385,6 +397,34 @@ export class Gui {
         return bounds.left >= viewport.left - 1 && bounds.right <= viewport.right + 1;
       });
     });
+  }
+
+  async menuEntries(): Promise<Array<{ text: string; enabled: boolean }>> {
+    return this.#session().execute(() => (window as unknown as ShownWindow).__UR_E2E_MENU__?.items.filter((item) => item.text)
+      .map((item) => ({ text: item.text!, enabled: item.enabled !== false })) ?? []);
+  }
+
+  async chooseNextMenu(text: string): Promise<void> {
+    await this.#session().execute((text) => {
+      const state = (window as unknown as ShownWindow).__UR_E2E_MENU__ ??= { items: [] };
+      state.pick = text;
+    }, text);
+  }
+
+  async confirmNextDialog(): Promise<void> {
+    await this.#session().execute(() => {
+      ((window as unknown as ShownWindow).__UR_E2E_DIALOG__ ??= {}).confirm = true;
+    });
+  }
+
+  async lastDialogQuestion(): Promise<string | undefined> {
+    return this.#session().execute(() => (window as unknown as ShownWindow).__UR_E2E_DIALOG__?.lastQuestion);
+  }
+
+  async contextMenu(selector: string): Promise<void> {
+    await this.#session().execute((selector) => {
+      setTimeout(() => (window as unknown as ShownWindow).shown(selector)[0].dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })), 0);
+    }, selector);
   }
 
   /**

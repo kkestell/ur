@@ -21,7 +21,6 @@ export function Sidebar({
   onOpen: (item: TabItem) => void;
   onConfigureServer: () => void;
 }) {
-  const canDelete = watch.capabilities?.sessionCapabilities?.delete != null;
   return (
     <nav className="sidebar min-w-0 flex-1 overflow-y-auto border-r-2 border-divider bg-panel pb-3 select-none">
       <div className="sidebar-header flex h-10 items-center gap-2 px-4 text-xs font-medium tracking-wide text-fg-dim uppercase">
@@ -57,17 +56,20 @@ export function Sidebar({
                       : "") +
                     (session.unread ? " unread font-semibold" : "")
                   }
-                  title={session.title ?? "New session"}
+                  title={`${session.title ?? "New session"} · ${watch.servers.find((server) => server.id === session.server)?.name ?? "Unknown server"}`}
                   onClick={() => onOpen({ type: "session", session: session.session })}
                   onContextMenu={(event) => {
-                    if (canDelete) {
+                    if (watch.servers.find((server) => server.id === session.server)?.capabilities?.sessionCapabilities?.delete != null) {
                       event.preventDefault();
                       void showSessionMenu(session);
                     }
                   }}
                 >
                   <MessageSquare className="shrink-0 text-fg-dim" size={12} strokeWidth={1.75} />
-                  <span className="label min-w-0 flex-1 truncate">{session.title ?? "New session"}</span>
+                  <span className="label min-w-0 flex-1 truncate">
+                    <span className="block truncate">{session.title ?? "New session"}</span>
+                    <span className="block truncate text-xs font-normal text-fg-dim">{watch.servers.find((server) => server.id === session.server)?.name ?? "Unknown server"}</span>
+                  </span>
                   <StatusMark status={session.status} />
                 </div>
               ))}

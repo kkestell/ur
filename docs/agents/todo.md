@@ -17,6 +17,8 @@
         loop
 - [x] Workspace terminal controls: terminals listed and managed under their workspace.
 - [x] Pane grid: agent sessions and terminals side by side in tabs and panes.
+- [x] [Multiple ACP servers](plans/2026-09-26-004-multiple-acp-servers.md): named servers share
+      workspaces while their sessions and connections remain separate.
 - [ ] Notifications and hooks: macOS notifications and an `on_event` command.
 - [x] [OX-0010](issues.csv:11): Dropped images can be omitted or reordered in a prompt
 - [x] [OX-0011](issues.csv:12): Followed CLI transcript misses replayed entries after a server
@@ -264,6 +266,17 @@ The wireframe's split button and split menu are not built.
 
 Check: a terminal running `npm run dev` next to an agent session. Close the GUI, reopen it, and both
 are restored in the same layout.
+
+## Multiple ACP servers
+
+Run several named ACP servers in one daemon. Their sessions share the workspace list while each
+server keeps its own connection, capabilities, and saved history. Add, edit, and remove servers in
+settings; choose a server from the workspace or pane menu when creating a session.
+
+Check: configure two fake servers with separate history files and overlapping ACP session IDs.
+Create a session from each menu, restart the GUI and daemon, and confirm both tabs and transcripts
+return under the correct server names. Stop one server and confirm the other's session and a
+terminal still work. The end-to-end suite covers this with `make e2e`.
 
 ## Notifications and hooks
 

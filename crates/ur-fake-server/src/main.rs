@@ -10,6 +10,11 @@ async fn main() -> agent_client_protocol::Result<()> {
         Some(file) => SavedHistory::file(file.into()),
         None => SavedHistory::default(),
     };
+    let flags: Vec<_> = std::env::args().skip(2).collect();
+    history.capabilities(
+        !flags.iter().any(|flag| flag == "--no-image"),
+        !flags.iter().any(|flag| flag == "--no-delete"),
+    );
     fake_server(Hold::default(), history)
         .connect_to(Stdio::new())
         .await

@@ -34,12 +34,13 @@ changes as the guarantees change.
 The end-to-end suite tests the GUI's behavior: the daemon, the core, and the webview together,
 against the fake server. `pnpm -C app e2e` builds the daemon, the fake server, and the app, with its
 embedded WebDriver server, into `target/e2e`, then runs the tests in `app/e2e/` one at a time. Each
-test gets a `TestEnvironment`: a temporary directory for the socket, `HOME`, the GUI state file, the
-fake server's saved history file, and a config file that launches the fake server, and a daemon
-started in it with one workspace, `home`, at the test's `HOME`. The saved history file lets sessions
-outlive a daemon restart. A failing test saves a screenshot to `app/e2e/artifacts/` for diagnosis.
-The server setup test starts without a config file or daemon so the GUI launches its bundled daemon.
-`scripts/check-macos-package` checks the app and unsigned DMG after a release build.
+test gets a `TestEnvironment`: a temporary directory for the socket, `HOME`, the GUI state file, and
+a config file with one named fake server. Tests can add more fake servers with independent saved
+history files. The daemon starts with one workspace, `home`, at the test's `HOME`. Saved history
+files let sessions outlive a daemon restart. A failing test saves a screenshot to
+`app/e2e/artifacts/` for diagnosis. The server setup test starts without a config file or daemon so
+the GUI launches its bundled daemon. `scripts/check-macos-package` checks the app and unsigned DMG
+after a release build.
 
 On macOS, the `webdriver` feature keeps the app in the background, so the suite runs without taking
 focus or showing windows. The app never becomes the active application and has no Dock icon. Its
@@ -50,13 +51,15 @@ sessions stay focused.
 Tests drive the GUI the way the user does, through clicks, the editor, and the terminal, and assert
 on what the window shows. `TestEnvironment.request()` sends setup requests to the daemon socket for
 actions the GUI does through native dialogs or menus, which WebDriver cannot drive, and
-`Gui.request()` sends a request through the core's `request` command for the same reason. A tab that
-is not active stays mounted but hidden, so the helpers look only at shown elements.
-`Gui.showTerminal()` opens a terminal in `home` and opens its tab by clicking its terminal row, so
-its view is the only xterm.js on the page; a reopened GUI restores the tab from the layout. Terminal
-tests assert on terminal text, read from the xterm.js rows, and type through `Gui.type`, not
-WebDriver key actions. The fake server's prompt scripts, named in `fake_server()`'s documentation,
-give agent session tests replies, permission requests, and errors.
+`Gui.request()` sends a request through the core's `request` command for the same reason. The
+end-to-end build wraps Tauri's menu API: it constructs the native menu, records its registered
+handlers, and lets WebDriver select one without opening a popup. A confirmation wrapper lets
+WebDriver answer removal prompts. A tab that is not active stays mounted but hidden, so the helpers
+look only at shown elements. `Gui.showTerminal()` opens a terminal in `home` and opens its tab by
+clicking its terminal row, so its view is the only xterm.js on the page; a reopened GUI restores the
+tab from the layout. Terminal tests assert on terminal text, read from the xterm.js rows, and type
+through `Gui.type`, not WebDriver key actions. The fake server's prompt scripts, named in
+`fake_server()`'s documentation, give agent session tests replies, permission requests, and errors.
 
 ### End-to-end guarantee list
 
@@ -65,6 +68,17 @@ give agent session tests replies, permission requests, and errors.
   remain available after the app closes and reopens.
 - A running terminal remains usable when the ACP server fails to start after changing its
   executable.
+- The workspace and pane menus show one choice per configured server and open a session from the
+  chosen server in the intended pane. Disconnected server choices are disabled.
+- With several configured servers, the New Session shortcut offers the server choices. With one, it
+  creates a session directly; with none, it opens server settings.
+- Settings add, rename, correct, and remove a named server without changing another server. A
+  removed server's sessions and tabs leave ur.
+- Session rows show their server names, and session tab tooltips identify the server.
+- Two servers with overlapping ACP session IDs retain separate tabs and transcripts after GUI and
+  daemon restarts.
+- Image attachments and Delete availability follow the selected session's server capabilities.
+- Another server's sessions and a terminal keep working while one server is unavailable.
 - A terminal survives closing and reopening the GUI: an editor's unsaved buffer is still on screen
   after the GUI reopens at a different window size, the editor sees the new size, and it accepts
   input.
