@@ -14,8 +14,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::AbortHandle;
 use tokio::time::{sleep, timeout};
 use ur_client::{
-    Client, Entry, Event, PendingPermission, Request, Response, SessionKey, SessionSummary, Status,
-    Workspace, WorkspaceColor,
+    Client, Entry, Event, PendingPermission, Request, Response, ServerIcon, SessionKey,
+    SessionSummary, Status, Workspace, WorkspaceColor,
 };
 use ur_fake_server::{Hold, SavedHistory, fake_server};
 
@@ -220,6 +220,7 @@ fn two_servers() -> (TestDaemon, Arc<Mutex<Option<AbortHandle>>>) {
                 .configure_server(&super::ServerConfig {
                     id: id.into(),
                     name: name.into(),
+                    icon: ServerIcon::Claude,
                     command: name.into(),
                     args: Vec::new(),
                 });
@@ -540,6 +541,7 @@ async fn add_server(client: &Client, name: &str, command: &str) -> String {
     let response = client
         .request(Request::AddServer {
             name: name.into(),
+            icon: ServerIcon::Claude,
             command: command.into(),
             args: Vec::new(),
         })
@@ -556,6 +558,7 @@ async fn update_server(client: &Client, server: &str, name: &str, command: &str)
         .request(Request::UpdateServer {
             server: server.into(),
             name: name.into(),
+            icon: ServerIcon::Claude,
             command: command.into(),
             args: Vec::new(),
         })
@@ -1812,7 +1815,7 @@ async fn adding_a_workspace_lists_saved_sessions_from_both_servers() {
 }
 
 #[tokio::test]
-async fn adding_and_renaming_a_server_keeps_its_session() {
+async fn renaming_a_server_and_changing_its_icon_keeps_its_session() {
     let daemon = TestDaemon::managed();
     daemon.launch("/fake/alpha", &SavedHistory::default());
     let client = daemon.connect().await;
@@ -1822,25 +1825,35 @@ async fn adding_and_renaming_a_server_keeps_its_session() {
     let id = add_server(&client, "Alpha", "/fake/alpha").await;
     ready_server(&daemon, &id).await;
     let session = create_session_on(&client, &id, "home").await;
-    assert_eq!(
-        update_server(&client, &id, "Renamed", "/fake/alpha").await,
-        Response::Done
-    );
+    let renamed = client
+        .request(Request::UpdateServer {
+            server: id.clone(),
+            name: "Renamed".into(),
+            icon: ServerIcon::Codex,
+            command: "/fake/alpha".into(),
+            args: Vec::new(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(renamed, Response::Done);
 
     assert_eq!(
         prompt(&client, &session, "still here").await,
         Response::Done
     );
     assert_eq!(watch(&daemon).await.sessions.len(), 1);
-    let mut saw_name = false;
+    let mut saw_change = false;
     while let Ok(event) = watcher.events.try_recv() {
         if let Event::ServersChanged { servers, .. } = event {
-            saw_name |= servers
-                .iter()
-                .any(|server| server.id == id && server.name == "Renamed" && server.connected);
+            saw_change |= servers.iter().any(|server| {
+                server.id == id
+                    && server.name == "Renamed"
+                    && server.icon == ServerIcon::Codex
+                    && server.connected
+            });
         }
     }
-    assert!(saw_name);
+    assert!(saw_change);
 }
 
 #[tokio::test]
@@ -2072,6 +2085,7 @@ async fn failed_config_writes_leave_servers_and_sessions_intact() {
             "add" => client
                 .request(Request::AddServer {
                     name: "Beta".into(),
+                    icon: ServerIcon::Claude,
                     command: "/fake/beta".into(),
                     args: Vec::new(),
                 })
@@ -2140,12 +2154,14 @@ async fn several_servers_initialize_independently_before_serving() {
     let stalled = control.start(super::ServerConfig {
         id: "stalled".into(),
         name: "Stalled".into(),
+        icon: ServerIcon::Claude,
         command: "/fake/stalled".into(),
         args: Vec::new(),
     });
     let healthy = control.start(super::ServerConfig {
         id: "healthy".into(),
         name: "Healthy".into(),
+        icon: ServerIcon::Claude,
         command: "/fake/healthy".into(),
         args: Vec::new(),
     });

@@ -166,20 +166,22 @@ fn handle(
         }
         Request::AddServer {
             name,
+            icon,
             command,
             args,
         } => control
             .ok_or_else(|| anyhow::anyhow!("server setup is unavailable"))
-            .and_then(|control| control.add(name, command, args))
+            .and_then(|control| control.add(name, icon, command, args))
             .map(|server| Response::ServerAdded { server }),
         Request::UpdateServer {
             server,
             name,
+            icon,
             command,
             args,
         } => control
             .ok_or_else(|| anyhow::anyhow!("server setup is unavailable"))
-            .and_then(|control| control.update(&server, name, command, args))
+            .and_then(|control| control.update(&server, name, icon, command, args))
             .map(|()| Response::Done),
         Request::RemoveServer { server } => control
             .ok_or_else(|| anyhow::anyhow!("server setup is unavailable"))

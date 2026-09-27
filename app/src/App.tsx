@@ -50,12 +50,16 @@ export default function App() {
     }
   }, [watch.connected]);
 
-  // Capture shortcuts before the editor or terminal handles the key.
+  // Capture shortcuts before the editor or terminal handles the key. An open
+  // modal dialog takes the keys for itself.
   useEffect(() => {
-    if (api === null || showSetup) {
+    if (api === null) {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
+      if (document.querySelector("dialog[open]") !== null) {
+        return;
+      }
       const mac = isMacPlatform();
       const opens = newShortcut(event, mac);
       const action = tabShortcut(event, mac);
@@ -103,7 +107,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [api, selection, watch, showSetup]);
+  }, [api, selection, watch]);
 
   if (!watch.connected) {
     return (
@@ -127,7 +131,7 @@ export default function App() {
   // `Layout` restores the saved layout against the watch snapshot, and a
   // disconnect unmounts it, so reconnecting restores it against the new one.
   return (
-    <div className="relative h-full">
+    <div className="h-full">
       <div className="layout flex h-full min-w-0 overflow-hidden border-t border-divider">
         <div className="relative flex shrink-0" style={{ width }}>
           <Sidebar watch={watch} selection={selection} onOpen={onOpen} onConfigureServer={() => { setSettingsServer(undefined); setEditingServer(true); }} />
@@ -157,9 +161,7 @@ export default function App() {
         </div>
       </div>
       {showSetup && (
-        <div className="absolute inset-0 z-50 bg-panel">
-          <ServerSetup servers={watch.servers} configError={watch.configError} initialServer={settingsServer} onSaved={() => setEditingServer(false)} onCancel={() => setEditingServer(false)} />
-        </div>
+        <ServerSetup servers={watch.servers} configError={watch.configError} initialServer={settingsServer} onSaved={() => setEditingServer(false)} onCancel={() => setEditingServer(false)} />
       )}
     </div>
   );

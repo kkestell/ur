@@ -2,7 +2,7 @@ THIS DOCUMENT MUST BE KEPT UP TO DATE
 
 ## Code
 
-Map each file here as it is added, following the project layout in `docs/agents/architecture.md`.
+Map each file here as it is added.
 
 - `README.md` — the project description and keyboard shortcut table.
 - `Makefile` — `make check` prepares the debug sidecar and runs every validation check;
@@ -26,7 +26,7 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `crates/ur-client/src/protocol.rs` — `TerminalId`, `SessionKey`, `Request` (with server
   management, `open_terminal(workspace)`, `detach_terminal`, `close_terminal`, `delete_session`, and
   `set_config_option`), `Response`, `Event` (with `servers_changed`, `session_deleted`,
-  `terminal_changed`, and `config_options_changed`), `Workspace`, `WorkspaceColor`,
+  `terminal_changed`, and `config_options_changed`), `Workspace`, `WorkspaceColor`, `ServerIcon`,
   `SessionSummary`, `TerminalSummary`, `Status`, `PendingPermission`, `ServerState`, `Entry`,
   `ClientMessage`, `DaemonMessage`, `socket_path()`, and `state_dir()`.
 - `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the core, with `request()`,
@@ -39,8 +39,8 @@ Map each file here as it is added, following the project layout in `docs/agents/
   images, to check the editor layout. `SavedHistory` supplies separate holds for load and delete
   requests in daemon tests.
 - `crates/ur/src/main.rs` — the `ur` command line: `daemon` and the development tool `agent-run`.
-- `crates/ur/src/config.rs` — ordered named servers with stable IDs, configuration validation,
-  one-shot selection, and atomic JSON saving to a selected path.
+- `crates/ur/src/config.rs` — ordered named servers with stable IDs and icons, configuration
+  validation, one-shot selection, and atomic JSON saving to a selected path.
 - `crates/ur/src/one_shot.rs` — `ur agent-run`, the one-shot client, and its tests against a test
   agent.
 - `crates/ur/src/daemon/mod.rs` — `start()`: binds the socket, reads the state and config, starts
@@ -112,36 +112,45 @@ Map each file here as it is added, following the project layout in `docs/agents/
 - `app/src/keys.ts` — `isMacPlatform()` and platform-specific Command or Ctrl shortcuts:
   `shortcutKind()` and `shortcutLabel()` for permission options, `newShortcut()` for new sessions
   and terminals, and `tabShortcut()` for close and reopen.
+- `app/src/serverIcons.tsx` — `serverIcons`, each server icon's label and drawing in picker order:
+  the Claude symbol, the OpenAI symbol for Codex, and the letters OX; and `SessionIcon`, a session's
+  server icon, shared by the sidebar, the tabs, and server settings.
 - `app/src/colors.ts` — `workspaceColors`, each workspace color's label in swatch order, and
   `workspaceColorStyle()`, the inline style that sets `--workspace-color`.
-- `app/src/actions.ts` — `pickWorkspaceFolder()`, `addWorkspace()`, `newSession()` and
-  `newTerminal()`, which open the new tab through `onOpen`, `closeTerminal()`, `removeWorkspace()`,
-  `deleteSession()`, `showWorkspaceMenu()`, `showNewMenu()`, `showSessionMenu()`, and
-  `showTerminalMenu()`: the folder picker, confirmations, error messages, and native menus.
+- `app/src/actions.ts` — `newSession()` and `newTerminal()`, which open the new tab through
+  `onOpen`, `closeTerminal()`, `removeWorkspace()`, `deleteSession()`, `showWorkspaceMenu()`,
+  `showNewMenu()`, `showSessionMenu()`, and `showTerminalMenu()`: confirmations, error messages, and
+  native menus.
 - `app/src/layout.ts` — `TabItem`, `tabId()`, `openTab()`, `tabWorkspace()`, `tabColor()`,
   `goneTabs()`, and `visibleSessions()`.
 - `app/src/slash.ts` — `slashQuery()` and `matchingCommands()`, the command list's matching.
 - `app/src/usage.ts` — `usageText()`, the usage indicator's popover lines.
-- `app/src/components/AddWorkspaceButton.tsx` — `AddWorkspaceButton`, which opens the folder picker
-  and then `WorkspaceColorPicker`, the dialog of swatches whose choice adds the workspace.
+- `app/src/components/AddWorkspaceButton.tsx` — `AddWorkspaceButton`, which opens
+  `AddWorkspaceDialog`: the `Dialog` with the workspace path, its Choose… button for the folder
+  picker, the workspace color swatches, inline errors, and Cancel and Add.
 - `app/src/components/Sidebar.tsx` — the header's `+`, an `AddWorkspaceButton`, the workspaces,
-  their sessions and terminal rows, with each session's status mark and the selection highlighted,
-  attention counts, and the workspace, session, and terminal menus.
+  their sessions and terminal rows, with each session's server icon and status mark, its server's
+  name when several servers are configured, and the selection highlighted, attention counts, and the
+  workspace, session, and terminal menus.
 - `app/src/components/SidebarHandle.tsx` — `SidebarHandle`, the drag handle on the sidebar's border,
   and the sidebar's default, minimum, and maximum widths.
 - `app/src/components/StatusMark.tsx` — `StatusMark`, a session's status mark, shared by the sidebar
   and the tabs.
-- `app/src/components/ServerSetup.tsx` — the named server list, selected server form, executable
-  picker, separate arguments, connection errors, and removal confirmation.
+- `app/src/components/Dialog.tsx` — `Dialog`, a modal `<dialog>` in the browser's top layer,
+  rendered into the document body, that Escape dismisses. The Add Workspace dialog and the server
+  settings dialog use it.
+- `app/src/components/ServerSetup.tsx` — the server settings dialog: the named server list, selected
+  server form, icon picker, executable picker, separate arguments, connection errors, and removal
+  confirmation.
 - `app/src/components/Layout.tsx` — `Layout`: `DockviewReact` with `SessionPanel` (the thread, the
   editor, and the permission shortcuts for the selection), `TerminalPanel`, `PaneActions` (the
-  pane's `+`), and the watermark with the empty states and its `AddWorkspaceButton`; the workspace
-  color borders of each tab's content; tab moves with pointer events, and divider and tab presses
-  that start no text selection; reporting user-closed tabs, restoring and saving the layout,
-  scrolling each pane's active tab into view, closing tabs whose session or terminal is gone, and
-  `setVisible()` for the visible sessions.
-- `app/src/components/Tab.tsx` — `Tab`: the tab's workspace color background and border, its session
-  or terminal icon, title, status mark, and Close Tab.
+  pane's `+`), and the watermark with the empty states and its `AddWorkspaceButton`; tab moves with
+  pointer events, and divider and tab presses that start no text selection; reporting user-closed
+  tabs, restoring and saving the layout, scrolling each pane's active tab into view, closing tabs
+  whose session or terminal is gone, and `setVisible()` for the visible sessions.
+- `app/src/components/Tab.tsx` — `Tab`: the tab's workspace color background, its server's icon or
+  the terminal icon, title, status mark, and Close Tab, and activation on `mousedown` for presses
+  that arrive without a `pointerdown`.
 - `app/src/components/Thread.tsx` — the items of the selected session, with user message thumbnails,
   and `Thought`, the Thinking row.
 - `app/src/components/AgentMessage.tsx` — `AgentMessage`: an agent message rendered as Markdown,
@@ -167,22 +176,23 @@ Map each file here as it is added, following the project layout in `docs/agents/
   webview.
 - `app/src/styles.css` — imports Tailwind CSS and its Typography plugin; the `@theme` block, which
   defines the app's colors and type sizes; dockview's pane and tab styling, which uses them;
-  `.workspace-tab` and `.workspace-content`, which paint tabs and their content in their workspace
-  color; and the highlight on a divider that drags.
+  `.workspace-tab`, which paints inactive tabs in a dark shade of their workspace color and the
+  active tab in a lighter one; and the highlight on a divider that drags.
 - `app/vite.config.ts` — configures Vite with React and Tailwind CSS, and uses menu and dialog shims
   only in end-to-end builds.
 - `app/index.html` — the webview document and root element.
 - `app/src/App.tsx` — the window: the saved layout, read on each connect, the `DockviewApi` and the
   selection, the sidebar, whose choices open tabs, with its saved width and `SidebarHandle`, the
-  new, close, and reopen shortcuts and in-memory closed-tab history, and `Layout` once the watch
-  snapshot arrives.
+  new, close, and reopen shortcuts, which do nothing while a modal dialog is open, the in-memory
+  closed-tab history, the server settings dialog, and `Layout` once the watch snapshot arrives.
 - `app/e2e/harness.ts` — `TestEnvironment`, `Gui`, and `e2eTest`, used by the end-to-end suite and
   ad-hoc checks. `TestEnvironment` writes a config file that launches the fake server with its saved
   history file and sends setup requests to the daemon socket, including adding the `home` workspace;
   `Gui.showTerminal()` opens a terminal in it and opens its tab by clicking its terminal row, or
   finds the tab restored from the layout. `Gui.setPlatform()` simulates a different platform for
-  shortcut tests, and `Gui.chooseFolder()` answers the next folder picker. It can add another fake
-  server and select native menu actions in end-to-end builds.
+  shortcut tests, and `Gui.chooseFolder()` answers the next folder picker, and `Gui.inputValue()`
+  reads an input. It can add another fake server and select native menu actions in end-to-end
+  builds.
 - `app/e2e/menu-shim.ts` — constructs native menus in the end-to-end build and exposes their
   registered handlers to WebDriver in place of opening a native popup.
 - `app/e2e/dialog-shim.ts` — lets WebDriver answer confirmation dialogs and the folder picker in the
@@ -239,6 +249,14 @@ Plans, work logs, reviews, and issues live in `docs/agents/`.
 
 Never mention "milestones", "phases", etc. in code comments or documentation (other than todo.md) --
 describe the work instead.
+
+The docs in `docs/agents/` never describe the code or individual changes. Change them only when what
+they cover changes:
+
+- `architecture.md`: ur's components, the boundaries between them, what each owns, and the decisions
+  that shape them.
+- `testing.md`: how to run the tests, where each kind of test goes, and test discipline.
+- `glossary.md`: naming rules and one-line definitions of domain terms.
 
 Read before planning and changing code:
 

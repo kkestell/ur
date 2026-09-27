@@ -8,7 +8,8 @@ import {
   workspaceSessions,
   workspaceTerminals,
 } from "../store/watch";
-import { MessageSquare, Plus, Terminal } from "lucide-react";
+import { Plus, Terminal } from "lucide-react";
+import { SessionIcon } from "../serverIcons";
 import { AddWorkspaceButton } from "./AddWorkspaceButton";
 import { StatusMark } from "./StatusMark";
 
@@ -50,6 +51,8 @@ export function Sidebar({
             <div className="workspace-sessions px-2">
               {workspaceSessions(watch, workspace.name).map((session) => {
                 const server = sessionServer(watch, session);
+                const serverName = watch.servers.length > 1 ? (server?.name ?? "Unknown server") : null;
+                const title = session.title ?? "New session";
                 return <div
                   key={session.session}
                   className={
@@ -59,7 +62,7 @@ export function Sidebar({
                       : "") +
                     (session.unread ? " unread font-semibold" : "")
                   }
-                  title={`${session.title ?? "New session"} · ${server?.name ?? "Unknown server"}`}
+                  title={serverName == null ? title : `${title} · ${serverName}`}
                   onClick={() => onOpen({ type: "session", session: session.session })}
                   onContextMenu={(event) => {
                     if (server?.capabilities?.sessionCapabilities?.delete != null) {
@@ -68,11 +71,9 @@ export function Sidebar({
                     }
                   }}
                 >
-                  <MessageSquare className="shrink-0 text-fg-dim" size={12} strokeWidth={1.75} />
-                  <span className="label min-w-0 flex-1 truncate">
-                    <span className="block truncate">{session.title ?? "New session"}</span>
-                    <span className="block truncate text-xs font-normal text-fg-dim">{server?.name ?? "Unknown server"}</span>
-                  </span>
+                  <SessionIcon server={server} className="shrink-0 text-fg-dim" />
+                  <span className="label min-w-0 flex-1 truncate">{title}</span>
+                  {serverName != null && <span className="server max-w-24 shrink-0 truncate text-xs font-normal text-fg-dim">{serverName}</span>}
                   <StatusMark status={session.status} />
                 </div>;
               })}

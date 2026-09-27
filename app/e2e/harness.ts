@@ -35,8 +35,9 @@ type SessionSummary = {
 
 type WatchSnapshot = {
   type: "watch_snapshot";
+  workspaces: Array<{ name: string; path: string; color: string }>;
   sessions: SessionSummary[];
-  servers: Array<{ id: string; name: string; connected: boolean; command: string; error: string | null }>;
+  servers: Array<{ id: string; name: string; icon: string; connected: boolean; command: string; error: string | null }>;
   config_error: string | null;
 };
 
@@ -74,6 +75,7 @@ export class TestEnvironment {
           servers: [{
             id: "test",
             name: "Test",
+            icon: "claude",
             command: join(BIN, "ur-fake-server"),
             args: [join(dir, "history.json")],
           }],
@@ -205,7 +207,7 @@ export class TestEnvironment {
   }
 
   async addServer(name: string, historyFile = join(this.#dir, `${name}.json`), flags: string[] = []): Promise<string> {
-    const { response } = await this.request({ type: "add_server", name, command: this.fakeServer, args: [historyFile, ...flags] });
+    const { response } = await this.request({ type: "add_server", name, icon: "claude", command: this.fakeServer, args: [historyFile, ...flags] });
     const id = response.server as string;
     await waitFor(`${name} to connect`, async () => (await this.watch()).servers.some((server) => server.id === id && server.connected));
     return id;
@@ -594,6 +596,14 @@ export class Gui {
       () =>
         ((window as unknown as ShownWindow).shown(".editor textarea")[0] as HTMLTextAreaElement)
           .value,
+    );
+  }
+
+  /** The first shown input's value. */
+  async inputValue(selector: string): Promise<string> {
+    return this.#session().execute(
+      (selector) => ((window as unknown as ShownWindow).shown(selector)[0] as HTMLInputElement).value,
+      selector,
     );
   }
 

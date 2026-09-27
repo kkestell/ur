@@ -88,15 +88,17 @@ pub enum Request {
     /// be an absolute path.
     AddServer {
         name: String,
+        icon: ServerIcon,
         command: String,
         args: Vec<String>,
     },
-    /// Saves the server's name, executable, and arguments. `command` must be
+    /// Saves the server's name, icon, executable, and arguments. `command` must be
     /// an absolute path. A changed executable or argument restarts the
     /// server.
     UpdateServer {
         server: String,
         name: String,
+        icon: ServerIcon,
         command: String,
         args: Vec<String>,
     },
@@ -276,12 +278,27 @@ pub enum Event {
 pub struct ServerState {
     pub id: String,
     pub name: String,
+    pub icon: ServerIcon,
     pub command: String,
     pub args: Vec<String>,
     pub connected: bool,
     pub error: Option<String>,
     #[ts(type = "import(\"@agentclientprotocol/sdk\").AgentCapabilities | null")]
     pub capabilities: Option<Box<AgentCapabilities>>,
+}
+
+/// A server icon, which marks the server's sessions in the sidebar and their
+/// tabs: the agent the server runs, in picker order.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ServerIcon {
+    /// The Claude symbol.
+    Claude,
+    /// The OpenAI symbol, used by ChatGPT and Codex.
+    Codex,
+    /// The letters OX.
+    Ox,
 }
 
 /// A workspace, as the wire protocol and the state file hold it.

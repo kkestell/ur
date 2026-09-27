@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { TestEnvironment, e2eTest, waitFor } from "./harness.ts";
 import { test } from "node:test";
 
@@ -14,6 +15,17 @@ e2eTest("workspace menu creates a session on the chosen server", async (environm
   await gui.waitForText(".workspace-sessions .row", "Beta");
   await gui.waitForText(".dv-tab", "New session");
   assert.match((await gui.attributes(".tab .label", "title"))[0] ?? "", /Beta/);
+});
+
+e2eTest("session rows name their server only when several are configured", async (environment) => {
+  await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.waitForText(".workspace-sessions .row", "New session");
+  assert.equal(await gui.hasElement(".workspace-sessions .row .server"), false);
+  assert.deepEqual(await gui.attributes(".workspace-sessions .row", "title"), ["New session"]);
+  await environment.addServer("Beta");
+  await gui.waitForText(".workspace-sessions .row .server", "Test");
+  assert.deepEqual(await gui.attributes(".workspace-sessions .row", "title"), ["New session · Test"]);
 });
 
 e2eTest("pane menu creates the chosen server's session in its pane", async (environment) => {
@@ -78,6 +90,23 @@ e2eTest("overlapping ACP session IDs keep their transcripts across restarts", as
   await gui.waitForText(".block.agent", "you said: hello");
 });
 
+e2eTest("a server's icon marks its session rows and tabs, and settings change it", async (environment) => {
+  await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.click(".workspace-sessions .row", "New session");
+  await gui.waitForText(".dv-tab", "New session");
+  assert.deepEqual(await gui.attributes(".workspace-sessions .row .server-icon", "data-icon"), ["claude"]);
+  assert.deepEqual(await gui.attributes(".tab .server-icon", "data-icon"), ["claude"]);
+
+  await gui.click(".sidebar-header button", "Server");
+  await gui.click(".server-setup .icon-choice[title='Codex']");
+  await gui.click(".server-save");
+  await gui.waitForNone(".server-setup");
+  await waitFor("the tab's new icon", async () => (await gui.attributes(".tab .server-icon", "data-icon"))[0] === "codex");
+  assert.deepEqual(await gui.attributes(".workspace-sessions .row .server-icon", "data-icon"), ["codex"]);
+  assert.equal(JSON.parse(readFileSync(environment.configFile, "utf8")).servers[0].icon, "codex");
+});
+
 e2eTest("settings add rename and remove a server without changing another", async (environment) => {
   const gui = await environment.openGui();
   await gui.click(".sidebar-header button", "Server");
@@ -136,7 +165,7 @@ e2eTest("another server and a terminal continue while one server is unavailable"
   await environment.newSession(beta);
   const gui = await environment.openGui();
   await gui.showTerminal();
-  await environment.request({ type: "update_server", server: beta, name: "Beta", command: "/no/such/server", args: [] });
+  await environment.request({ type: "update_server", server: beta, name: "Beta", icon: "claude", command: "/no/such/server", args: [] });
   await gui.waitForText(".server-banner", "Beta");
   await gui.contextMenu(".workspace-name");
   assert.deepEqual((await gui.menuEntries()).filter((item) => item.text.includes("Beta")),

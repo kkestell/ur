@@ -11,7 +11,6 @@ import "dockview-react/dist/styles/dockview.css";
 import { Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { showNewMenu } from "../actions";
-import { workspaceColorStyle } from "../colors";
 import { request, saveLayout, setVisible } from "../ipc";
 import type { PendingPermission } from "../ipc/bindings/PendingPermission";
 import { isMacPlatform, shortcutKind } from "../keys";
@@ -19,7 +18,6 @@ import {
   type TabItem,
   goneTabs,
   openTab,
-  tabColor,
   tabId,
   tabWorkspace,
   visibleSessions,
@@ -279,10 +277,7 @@ function SessionPanel({ api, params }: IDockviewPanelProps<TabItem>) {
   }, [id, requests, active]);
 
   return (
-    <div
-      className="session workspace-content flex h-full min-h-0 flex-col"
-      style={workspaceColorStyle(tabColor(watch, params))}
-    >
+    <div className="session flex h-full min-h-0 flex-col">
       <Thread items={items} onAnswer={(request, option) => answer(request, option.optionId)} />
       <Editor
         session={id}
@@ -302,7 +297,7 @@ function TerminalPanel({ params }: IDockviewPanelProps<TabItem>) {
     return null;
   }
   return (
-    <div className="workspace-content h-full" style={workspaceColorStyle(tabColor(watch, params))}>
+    <div className="h-full">
       <TerminalPane terminal={id} />
     </div>
   );

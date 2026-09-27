@@ -139,6 +139,7 @@ impl State {
                 slot.state.error = None;
             }
             slot.state.name = config.name.clone();
+            slot.state.icon = config.icon;
             slot.state.command = config.command.clone();
             slot.state.args = config.args.clone();
         } else {
@@ -146,6 +147,7 @@ impl State {
                 state: ServerState {
                     id: config.id.clone(),
                     name: config.name.clone(),
+                    icon: config.icon,
                     command: config.command.clone(),
                     args: config.args.clone(),
                     connected: false,

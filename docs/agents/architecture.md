@@ -1,493 +1,73 @@
 # ur architecture
 
-ur is an ACP client. Ox (`~/projects/ox`) is the server we develop and test against, not part of
-ur's architecture. Switching to another server with compatible ACP capabilities should require
-changing its launch configuration, not ur's code. When the work in `todo.md` is done, you can run
-ten agent sessions across three repositories, close the window, come back later, see which sessions
-need attention, and approve, answer, or cancel them from the GUI or the command line. Terminal panes
-keep shells and TUI apps running when the GUI closes. Reopening a pane restores the running
-application's screen. Terminals last until closed, their workspace is removed, or the daemon exits.
+ur is a desktop client for ACP agents. A long-running daemon holds the agent connections, the
+sessions, and the terminals. The GUI is a view onto the daemon: closing it stops nothing, and
+reopening it picks up where it left off.
 
-This is a hobby project. Keep the implementation small, make the ordinary workflow work, and use
-testing to find the next problems worth solving. Prefer explicit limitations to speculative recovery
-machinery or abstractions for cases we have not encountered.
+## Components
 
-## ACP boundary
+- **ACP servers**: agent processes the daemon launches from the config file. Each is a separate
+  process, and any ACP-compatible server works without changes to ur.
+- **Daemon** (`crates/ur`): runs every configured server, and owns workspaces, session state,
+  permission requests, and terminals. It serves any number of clients over a local Unix socket.
+- **Wire protocol** (`crates/ur-client`): the socket's message types and an async client. It is the
+  only definition of the protocol. The webview's TypeScript types are generated from it.
+- **GUI core** (`app/src-tauri`): the Tauri app's Rust side. It is the GUI's only socket client,
+  starts the bundled daemon when none is running, and reconnects after the daemon restarts.
+- **Webview** (`app/src`): renders what the core forwards and sends the user's requests through it.
+  It never touches the socket.
+- **Fake server** (`crates/ur-fake-server`): a scripted ACP server for tests.
 
-The [ACP spec](https://agentclientprotocol.com/protocol/v1/initialization) is the contract. Use the
-SDK's protocol types and capability negotiation. Server names, tool names, tool argument schemas,
-model names, modes, permission labels, and session or tool IDs have no special meaning to ur.
+## Boundaries
 
-- The ordered `servers` array in `$XDG_CONFIG_HOME/ur/config.json` (under `~/.config` when unset)
-  holds each server's immutable ID, editable name, executable, and arguments. The daemon starts all
-  of them; the one-shot client selects one by name. Server settings add, edit, and remove entries
-  without restarting the daemon. For example:
+### ACP
 
-  ```json
-  {"servers": [{"id": "ox-local", "name": "Ox", "command": "ox", "args": []}]}
-  ```
+The ACP spec is the contract. ur gives no special meaning to server names, tools, models, modes, or
+IDs, and has no server-specific code. Optional features follow the capabilities each server
+advertises, and ur advertises only the client capabilities it implements. ACP types pass through the
+daemon and the wire protocol unchanged, and one reducer in the webview is the only code that
+interprets them for display.
 
-- Call optional methods only when supported. List and load enable saved history; without them, ur
-  still supports sessions created during the current ACP connection. Delete is available only when
-  advertised. Image attachments require image-prompt support. Config selectors, slash commands, and
-  usage indicators come from the data the server supplies.
-- Advertise only client capabilities ur implements. Initially, client `fs/*` and ACP `terminal/*`
-  services are unadvertised; ur's user terminal panes are separate. A server that requires those
-  services needs that standard ACP support added, not a server-specific adapter.
-- Use the server's normal authentication setup for development. Surface authentication requirements
-  and errors from ACP without hard-coded login commands or credential handling for Ox.
-- Wireframe model names, modes, permission choices, commands, and workspace names are examples. The
-  UI uses server-provided labels or neutral text. Ox's database, tools, subagents, limits, and
-  notification timing are not client requirements.
+### Socket
 
-Keep this as ordinary configuration and protocol handling. Ox remains the end-to-end test server;
-SDK-based test agents exercise the protocol without depending on Ox's implementation.
+The daemon listens on a local Unix socket with no authentication. Frames carry either JSON messages
+or raw terminal bytes, so terminal output is never JSON-encoded. Clients send requests and receive
+responses and events. A client that watches or subscribes gets a snapshot followed by every later
+change in order. A client that cannot keep up is dropped rather than slowing the daemon.
+
+### GUI core and webview
+
+The core owns the connection and the set of things the GUI wants: watch, subscriptions, terminal
+attachments, and focus. After each reconnect it replays that set, and the fresh snapshots replace
+the webview's state, so the webview has no reconnect logic.
+
+## Ownership
+
+- **Saved history belongs to the ACP server.** The daemon keeps transcripts only in memory and
+  rebuilds them with `session/load` when the server supports it.
+- **The daemon owns live session state**: each session's status, unread flag, and pending permission
+  requests. Every client sees the same values.
+- **The config file** holds the configured servers. **The daemon's state file** holds workspaces.
+  **The GUI state file** holds the layout. Each has one writer.
 
 ## Decisions
 
-### One ACP connection per configured server
+- **One ACP connection per server.** A server's sessions share its connection across workspaces.
+  Each server has its own supervisor, which restarts it after an exit, so one server failing affects
+  only its own sessions.
+- **Session identity is the server plus the ACP session ID.** Clients treat the combined key as
+  opaque, so identical ACP session IDs on different servers stay distinct.
+- **One operation per session at a time.** Prompt, load, and delete exclude each other. A
+  conflicting request is answered busy and changes nothing.
+- **Permission requests go to every client.** The first answer wins. Cancelling a turn answers its
+  pending requests as cancelled, as ACP requires.
+- **Terminals live in the daemon.** Shells outlive the GUI. The daemon keeps each terminal's screen
+  state, so attaching restores the current screen, including running full-screen programs.
+- **Daemon state has one lock, and nothing awaits or does IO under it.** Each change is applied and
+  its events queued under the lock, which keeps each client's snapshot and live events in order, and
+  ACP updates are applied in the order the server sent them.
 
-The daemon starts one supervisor and ACP connection per configured server. A server's sessions share
-its connection across workspaces. If one server exits, only its active turns fail; its supervisor
-restarts it and restores its history where supported. The supervisor waits 1 second before trying
-again. Each failed start doubles the wait, up to 30 seconds, and a successful `initialize` resets
-it. Initial attempts run concurrently. The socket begins serving when every first attempt has
-connected and listed saved sessions, failed, or reached its 30-second timeout.
+## Runtime
 
-### The ACP server owns saved history
-
-The daemon saves no transcripts. It keeps each loaded session's transcript in memory as a list of
-entries of three kinds: an ACP `SessionUpdate` it received, a user prompt it sent, and a turn error.
-After a restart, the daemon rebuilds the list from `session/load` when supported, using its replayed
-transcript. Live updates and replay use the same entry handling. A load builds a fresh list and
-replaces the previous transcript on success; it never appends replay to the old transcript. Rejected
-prompts and turn errors exist only in memory and are gone after a restart.
-
-For each workspace, the sidebar combines newly created sessions with those returned by
-`session/list` when supported, following its pagination and using their titles and last activity.
-The daemon calls `session/list` for every workspace after each server's `initialize`, and on every
-connected listing-capable server when a workspace is added. A workspace whose list fails on one
-server still shows the sessions discovered on the others. `session_info_update`, when sent, live or
-replayed, keeps those details current. Workspaces appear alphabetically. Sessions and terminals
-appear newest first under each workspace. The daemon retains creation order for sessions created
-during its run. Saved sessions appear in reverse `session/list` order because that protocol response
-does not provide creation times. A session with no title yet shows as "New session". Selecting a
-session shows its thread; the daemon loads its saved transcript automatically the first time it is
-needed for viewing or prompting, when loading is supported. Newly created sessions are already
-loaded.
-
-A load starts when a daemon client subscribes to an unloaded session that is not `Failed`, when a
-daemon client prompts an unloaded session, and, after the server restarts, for every unloaded
-session with subscribers. A `subscribe` that starts a load, or arrives during one, gets its session
-snapshot and its response when the load ends. A prompt that starts a load answers once
-`session/load` is sent, sets `Working`, and sends the prompt when the load succeeds. If the
-transcript being replaced ends with a turn error entry, that entry is kept after the replay, so the
-error of a turn the server exit interrupted survives the reload. Without `loadSession`, sessions
-from an earlier ACP connection keep their transcripts in memory but cannot be prompted.
-
-The daemon's own state file (`$XDG_STATE_HOME/ur/state.json`, under `~/.local/state` when the
-variable is unset) holds workspace names, absolute paths, and workspace colors. The daemon reads it
-at startup and stops with an error naming the file when it cannot. Saved session discovery comes
-from the server. The GUI stores which threads are visible as part of its layout.
-
-A workspace path is made absolute when the workspace is added and stored as is. Every `session/new`,
-`session/load`, and `session/list` call for that workspace passes that exact string.
-
-Each session belongs to one server. ACP session IDs remain opaque at the server boundary. Daemon
-clients use a stable session key containing the JSON serialization of `[server ID, ACP session ID]`.
-The daemon stores both values separately, so identically named ACP sessions on different servers
-remain distinct across renames and restarts. Tab layouts and focus use the session key as an opaque
-string.
-
-### Session status
-
-The daemon owns one status for each session. Every client reads the same value. One operation guard
-per session covers prompt, load, and delete. The daemon takes it before calling the server and
-rejects a conflicting request as busy without changing the transcript or status. Delete cancels an
-active prompt and keeps the session reserved until deletion finishes.
-
-| Status                         | Enters when                                                                                                                | Leaves when                                                                   |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `Idle { last_stop }`           | the prompt returns a stop reason, or a session is discovered in the server's list                                          | a prompt is sent                                                              |
-| `Working`                      | a prompt is sent, the last pending permission request is answered, or cancellation starts                                  | the prompt returns, or a permission request arrives before cancellation       |
-| `NeedsPermission { requests }` | a permission request arrives                                                                                               | the last pending request is answered, cancellation starts, or the prompt ends |
-| `Failed { message }`           | the prompt returns a JSON-RPC error, a load fails, or the server exits while the session is `Working` or `NeedsPermission` | a prompt is sent                                                              |
-
-`requests` holds every pending permission request for the session, oldest first. ACP permits several
-requests to be pending; their JSON-RPC IDs are opaque, so the daemon gives each a request ID of its
-own, as described under Permissions. A prompt sent to a session whose load failed loads it first; if
-the load fails again, the session returns to `Failed`.
-
-Each session also has an `unread` flag. It turns on when a turn ends or fails while no client has
-the session focused, and turns off when a client focuses it or sends it a prompt. A session **needs
-attention** when it is `NeedsPermission`, `Failed`, or unread. The sidebar shows a count beside its
-workspace without moving the workspace or session.
-
-A client focuses the set of sessions it is showing. The GUI focuses every session shown as the
-active tab of a pane while its window has focus, and focuses nothing when the window loses focus. A
-client's focus clears when it disconnects.
-
-### Permissions
-
-The daemon holds the ACP responder for each pending permission request and sends the request to
-every client. It numbers pending permission requests from 1, across all sessions, and clients answer
-by that request ID. The JSON-RPC ID can be a string, a number, or null, so the daemon does not use
-it. Any client can answer, and the first answer wins. The daemon then tells every client the request
-is resolved. When a client cancels a session, the daemon sends `session/cancel` and answers every
-pending permission request for that session with `Cancelled`, which the ACP spec requires. Until the
-prompt returns, the session stays busy and shows `Working`; any further permission request is
-answered `Cancelled`. When the prompt ends or the server disconnects, the daemon clears any
-remaining pending requests and tells clients they are resolved.
-
-The GUI draws one button per option, using the label and kind in the request. Its shortcuts answer
-the oldest pending request by option kind: Command+Y for `allow_once`, Command+Shift+Y for
-`allow_always`, Command+Option+Z for `reject_once`, and Command+Shift+Option+Z for `reject_always`
-on macOS. Other platforms use Ctrl in place of Command and Alt in place of Option.
-
-### Sessions, tabs, and workspaces
-
-Sessions appear automatically under their workspace. The creation menus offer one New Session entry
-per configured server; disconnected entries are disabled. Delete, when supported by that session's
-server, removes it after confirmation. If a turn is running, Delete cancels it, waits for the prompt
-to return, then calls `session/delete`. Choosing a session or terminal in the sidebar activates its
-tab if it has one, wherever it is, and otherwise opens it in the active pane. Closing a tab only
-changes the layout.
-
-Command+N opens a new session and Command+Shift+N a new terminal on macOS. Other platforms use Ctrl
-in place of Command. Each opens in the workspace of the active tab, or in the first workspace in the
-sidebar when no tab is open. Command+W on macOS or Ctrl+W on other platforms closes the active tab.
-Command+Shift+T or Ctrl+Shift+T reopens the most recently closed tab in the active pane. The GUI
-keeps closed tabs only in memory for its current run; it skips tabs whose session or terminal is
-gone or whose tab was opened again from the sidebar.
-
-Adding a workspace opens the folder picker, then the workspace color picker, a dialog of fourteen
-swatches, one for each Catppuccin Mocha accent color. Choosing a swatch adds the workspace; Escape
-or a press outside the dialog adds nothing. Each tab's background is a darker version of its
-workspace's color, and the tab and its content have a 1px border in that color. The content's top
-border is the line under the tabs.
-
-Remove Workspace cancels its running turns and stops its terminals after confirmation, then removes
-the workspace from the sidebar. Saved history and the lifecycle of agent tools and background jobs
-remain the server's concern.
-
-### User messages
-
-When the daemon sends `session/prompt`, it adds a user prompt entry to the session's in-memory
-transcript. If the server rejects the prompt with an error before the turn starts (for example, the
-input is too large or the model does not accept images), the turn error described below appears just
-after the prompt. When `session/load` is supported, user messages come back from its replay.
-
-### Turn errors
-
-When `session/prompt` returns a JSON-RPC error, or the server exits during a turn, the daemon
-appends a turn error entry with the message and sets the session `Failed`. The entry stays in the
-thread; the next prompt clears the `Failed` status. This is the single error-entry rule for both
-rejected prompts and failures during a turn; there is no second error stored on the user prompt.
-
-### Config options
-
-The daemon passes through `configOptions` from session responses and `config_option_update`
-notifications. The GUI builds selectors from their labels, values, and current selections; no model,
-effort, or mode is hard-coded. If the server supplies no config options, those selectors are absent.
-
-The controls follow the standard
-[session config options](https://agentclientprotocol.com/protocol/v1/session-config-options) schema.
-
-### Wire protocol
-
-The socket uses one frame format: a one-byte tag, a big-endian `u32` length, and the payload. Tags:
-
-- `JSON`, both directions: a serde-encoded message. From the client, a request with an ID. From the
-  daemon, a response with the request's ID, or an event.
-- `PTY`, both directions: a terminal ID followed by raw bytes. From the client, input. From the
-  daemon, output. This keeps terminal output out of JSON.
-
-Events contain ACP schema types (`SessionUpdate`, `RequestPermissionRequest`, `SessionConfigOption`)
-unchanged. The GUI groups them for display as described below. JSON client requests:
-
-```text
-watch
-add_server(name, command, args) | update_server(server, name, command, args) | remove_server(server)
-add_workspace | remove_workspace
-new_session(server, workspace) | delete_session(session)
-subscribe(session) | focus(sessions)
-prompt(session, content) | cancel(session)
-answer_permission(session, request_id, option_id)
-set_config_option(session, config_id, value)
-open_terminal(workspace) | attach_terminal(terminal, rows, cols) | detach_terminal
-terminal_resize | close_terminal
-```
-
-`terminal_exited` tells every watching or attached daemon client that a terminal's shell exited and
-the daemon removed the terminal. Each socket connection gets it once, after all of that terminal's
-output.
-
-There are three levels of events. `watch` covers the sidebar: workspaces, their sessions and
-terminals, each session's title, status, unread flag, and server ID, each terminal's title, and the
-ordered server states with their individual capabilities and errors. Pending permission requests
-travel in the session status, so every watching client receives them. After the watch snapshot, the
-daemon sends `servers_changed` with the complete server list and config error, `workspace_added`,
-`workspace_removed` (which also removes the workspace's sessions and terminals), `session_changed`
-with the session's whole summary when a session is added or its status or unread flag changes,
-`session_deleted` when a session is deleted, `terminal_changed` with the terminal's whole summary
-when a terminal is opened or its terminal title changes, and `terminal_exited`. `subscribe` covers
-one session's content: its transcript and config options. After the session snapshot, the daemon
-sends each transcript entry and `config_options_changed` when the config options change outside a
-load. A subscribed session removed with its workspace, or deleted, gets `session_removed`.
-`attach_terminal` covers one terminal's initial screen restoration and live output, using the
-terminal attachment format described under Terminals in the daemon. For `watch` and `subscribe`,
-under one lock the daemon queues a snapshot and registers the client for live events. Socket writes
-happen outside the lock. Each connection gets the snapshot followed by live changes in order. A
-client that cannot keep up is dropped. Transcript replacement after a load sends a fresh session
-snapshot, which clients use to replace their local state.
-
-### Project layout
-
-One Cargo workspace:
-
-- `crates/ur`: the `ur` binary, which runs the daemon and the development one-shot client.
-- `crates/ur-client`: the frame format, the request and event types, and an async client for the
-  socket. The GUI uses it.
-- `crates/ur-fake-server`: the fake server, a scripted server built with the SDK's
-  `Agent.builder()`. The daemon's tests run its library in process, and the end-to-end suite's
-  daemon launches its binary from the config file.
-- `app/`: the Tauri 2 app. `app/src` is the frontend, React and TypeScript built with Vite.
-  `app/src-tauri` is the app's Rust core, a workspace member that depends on `ur-client`.
-  `pnpm tauri dev` builds a debug sidecar and can connect to an existing daemon. The unsigned macOS
-  bundle and DMG include a release sidecar built for the same target as the app.
-
-```text
-crates/ur/src/
-  main.rs         clap: daemon | agent-run
-  config.rs       config.json: named servers with their commands and args,
-                  on_event
-  one_shot.rs     agent-run; speaks ACP directly, no daemon
-  daemon/
-    mod.rs        start(): read state.json and the config file, start one
-                  supervisor per server and wait for their first attempts,
-                  then serve the listener; ServerControl for server changes
-    state.rs      State: workspaces, sessions, terminals, subscriber lists.
-                  Pure: no IO, no await.
-    acp.rs        supervisor loop around connect_with, restart with backoff,
-                  Agent facade over ConnectionTo<Agent>
-    ops.rs        prompt, load, delete, cancel, answer_permission, with
-                  responses handled in on_receiving_result callbacks
-    terminal.rs   portable-pty plus vt100, one struct per terminal
-    server.rs     Unix socket accept loop, per-connection reader and writer,
-                  Outbox
-    hooks.rs      notifications and on_event (milestone 11)
-
-crates/ur-client/src/
-  frame.rs        Frame::Json(Bytes) | Frame::Pty { id, Bytes };
-                  tokio_util Encoder and Decoder
-  protocol.rs     Request, Response, Event, Entry, Status, WatchSnapshot,
-                  SessionSnapshot
-  client.rs       Client: a Clone handle. connect(path),
-                  request(Request) -> Response, events() -> Receiver<Event>,
-                  pty(id) -> Receiver<Bytes>, pty_input(id, bytes)
-
-app/src-tauri/src/
-  main.rs         builder, dialog plugin, opener plugin, managed Link, window
-                  focus hook
-  link.rs         owns ur_client::Client; reconnect loop; Desired { watch,
-                  subscribed, attached, focus }; forwards events to app.emit
-                  and PTY bytes to the terminal Channel
-  commands.rs     request(req: Request) -> Response, attach_terminal,
-                  detach_terminal, terminal_input, set_visible, layout,
-                  save_layout
-  terminal.rs     terminal ID to Channel<tauri::ipc::Response>
-  gui_state.rs    gui.json
-
-app/src/
-  ipc/            request(), onWatch(), onSession(id), attachTerminal(id),
-                  typed by the generated bindings
-  store/          watch.ts, sessions.ts as Map<id, ThreadState> with
-                  useSession(id), terminals.ts
-  transcript/     reduce.ts: (ThreadState, Event) -> ThreadState, pure and
-                  unit tested; blocks.ts display types
-  components/     Sidebar, Thread, Editor, ConfigPicker, UsageIndicator,
-                  Permission, TerminalPane, Layout, Tab, StatusMark,
-                  AddWorkspaceButton
-  hooks/          useTerminal(id)
-  layout.ts       TabItem, openTab(), tabColor(), goneTabs(),
-                  visibleSessions()
-  colors.ts       workspace color labels and inline style
-  actions.ts      folder picker, confirmations, native menus
-  slash.ts        command list matching
-  usage.ts        usage indicator text
-  keys.ts
-```
-
-`ur-client`'s `Client` is a cloneable handle over one writer task and a pending map keyed by request
-ID. The Tauri core uses it unchanged. TypeScript bindings for `protocol.rs` come from `ts-rs`, with
-ACP payload fields overridden to the types exported by `@agentclientprotocol/sdk`, so the webview
-writes no protocol types by hand.
-
-### Daemon architecture
-
-- One `Arc<Mutex<State>>` with a std mutex, never held across an await. Every mutation is a method
-  on `State` that queues its events on the affected outboxes while the lock is held. An outbox is a
-  bounded `mpsc::Sender<Frame>` used with `try_send`, which never waits, so `State` still does no IO
-  and no awaiting; a full outbox closes that connection. A subscriber's snapshot and every later
-  entry are queued under the same lock, in transcript order, which gives the ordering guarantee
-  under Wire protocol.
-- ACP handlers apply what they receive to `State` directly. The notification handler locks `State`,
-  appends the ACP update entry, queues its event, and returns without awaiting. The SDK's dispatch
-  loop waits for each handler, so it is held only for the lock, and updates reach `State` in the
-  order the server sent them. Replay from `session/load` arrives through the same handler and the
-  same `apply_update`.
-- Each supervisor calls `connect_with`, sends `initialize`, lists every workspace's saved sessions,
-  stores its `ConnectionTo<Agent>` and capabilities in `State`, reloads its subscribed sessions, and
-  awaits its connection's close. Each attempt reserves its server's generation before connecting.
-  Handlers and results carry the server ID and generation; obsolete ones cannot change state. On
-  exit, the supervisor fails only its `Working` and `NeedsPermission` sessions, cancels pending
-  permission requests, marks its sessions unloaded, releases their operation guards, and reconnects.
-- The guard lives in `State` as `session.op`, an `Op`: `Prompt` while a turn runs, `Load` while
-  `session/load` is in flight, or `Delete` while `session/delete` is in flight. `Prompt` can hold
-  the waiting delete: a `delete_session` that cancelled the turn. The `session/prompt` callback
-  sends its `session/delete` under the same lock, so no other request takes the guard in between.
-  `Load` holds the replayed entries, which become the transcript only on success, and the
-  `subscribe` requests waiting for the load. During a load, `apply_update` adds to the replay and
-  sends nothing to subscribers. Under the lock: if `op` is set, return busy; otherwise send the
-  request through the connection clone, set `op`, and, for a prompt, append the user prompt entry
-  and set `Working`. Sending under the lock means a failed send leaves nothing to undo, and the
-  server's first update waits for the lock, so it follows the user prompt entry. The op handles the
-  response in an `on_receiving_result` callback, never `block_task()`: the SDK runs that callback
-  before it dispatches the server's next message. So the `session/new` callback adds the session
-  before the server's first update for it is handled, and the `session/prompt` callback clears `op`
-  only after the turn's last update is in the transcript. The callbacks always return `Ok`, because
-  an error from one shuts down the ACP connection. A prompt or load callback ignores the error a
-  request gets when the ACP connection closes, which can arrive before or after the supervisor sees
-  the close; the supervisor records that server exit, so each interrupted turn gets one turn error
-  entry. Delete holds `op` through cancel, wait, and delete.
-- Pending permission requests hold their SDK `Responder` in `Session.responders`, keyed by request
-  ID; `answer_permission` and cancellation respond through it.
-- `Entry`, `Status`, and the snapshot structs are defined in `ur-client` and used as-is inside
-  `State`. There is no conversion layer.
-
-### GUI architecture
-
-The GUI is a single-window Tauri app. Its Rust core is the socket client: it connects to the daemon,
-starts the bundled `ur daemon` sidecar if none is listening, retries until the daemon is up, and is
-the only part of the app that speaks the wire protocol. Closing the window leaves the daemon and
-terminals running. The server settings screen lists named servers and edits each one's absolute
-executable path and separate arguments through the daemon. It shows each connection failure so the
-user can correct that server. The webview never touches the socket.
-
-- One Tauri command, `request`, takes a wire-protocol `Request` and returns the daemon's `Response`.
-  The tagged `Request` enum carries the name and arguments, so adding a request touches
-  `protocol.rs` and the daemon only. The other commands are `attach_terminal`, `detach_terminal`,
-  `terminal_input`, `layout`, `save_layout`, `connection`, and `set_visible`. `attach_terminal` is
-  separate because it takes the terminal's `Channel`, which `request` cannot carry. `connection`
-  gives the webview the current connection when it starts, since a `connection` event emitted before
-  its listener is installed is lost.
-- Daemon events reach the webview as Tauri events: `watch` events under one name, and every
-  subscribed session's events under the one name `session`, with the webview dispatching on the
-  payload's session key. Tauri event names allow only alphanumerics, `-`, `/`, `:`, and `_`, and
-  session keys contain JSON punctuation, so a name that carries one is not safe. The webview keeps
-  the sidebar and each subscribed session's state in stores outside React, keyed by session key, so
-  closing a tab keeps the transcript and reopening does not refetch. Components read the stores
-  through `useSyncExternalStore` or zustand.
-- One transcript reducer groups consecutive message and thought chunks, combines a user's text and
-  image parts, and updates tool calls by ID. It keeps each tool call's content, which a
-  `tool_call_update` with content replaces whole. A fresh snapshot resets that state and uses the
-  same reducer as live events. The reducer is the only code that knows ACP update shapes; components
-  render the blocks it derives. Whether a Thinking row or tool call is expanded is component state,
-  not part of the blocks.
-- Terminal output goes through a `Channel<tauri::ipc::Response>` of raw bytes, one per attached
-  terminal, so it is never JSON-encoded. Terminal input goes to the core through a `terminal_input`
-  command, which sends a binary `PTY` frame.
-- The webview tells the core which sessions are visible in panes through `set_visible`. The core
-  combines that with the window's focus, which it gets from `WindowEvent::Focused`, and sends
-  `focus` to the daemon as described under Session status, on each `set_visible` and each window
-  focus change. Focus is part of the desired set, replayed after the subscriptions.
-- Pending permission requests render from the watch store, where they arrive in the session status,
-  not from the thread state. `transcript/permissions.ts` places them among the blocks: each takes
-  the place of the tool call block with its tool call ID, or follows the last block.
-- Native pieces come from Tauri and are used from the webview: the dialog plugin for the folder
-  picker, confirmations, and error messages, the opener plugin, which opens links in agent messages
-  in the default browser, and the menu API's `Menu.popup()` for the workspace, session, terminal,
-  and new menus. Image files are dropped on the editor as HTML drop events, since the window's
-  `dragDropEnabled` is off, and the webview reads them into image content. Keyboard shortcuts are
-  handled in the webview.
-- The core writes the GUI state file described below.
-
-The `useSession` hook sends `subscribe` the first time a session is used and never unsubscribes: the
-wire protocol has no `unsubscribe`, and the session store keeps every subscribed session's thread so
-reselecting it does not refetch. A session removed with its workspace leaves both the store and the
-desired set, so it is subscribed afresh if it comes back. The Link keeps the desired set: watch,
-subscribed sessions, terminal attachments with their sizes, and focus. After a disconnect it
-reconnects and replays that set. The webview has no reconnect logic: snapshots replace store state,
-terminal views restore through the terminal attachment path, and a `connection` event drives the
-no-connection empty state. Requests interrupted by disconnection report an error and are not
-automatically resent; the user can inspect the session before trying again.
-
-### Terminals in the daemon
-
-The daemon owns each login shell through `portable-pty` and retains the terminal state while the GUI
-is closed. A terminal belongs to a workspace, and its shell starts in the workspace path. Its
-terminal title is the shell's file name until a program sets one with OSC 0 or OSC 2, which the
-parser reports through `vt100::Callbacks::set_window_title()`. `State` holds each terminal's summary
-for watch, and `Terminals` holds the PTYs, parsers, and attachments under their own mutexes and
-reports opens, terminal title changes, and exits to `State`. Locks are taken in the order `State`,
-the terminal map, then a terminal's output. A terminal pane is an xterm.js `Terminal` with the fit
-addon. On attachment, the GUI restores the current screen and resumes live output. `onData` goes
-through `terminal_input` to the PTY, and `onResize` goes to `terminal_resize`.
-
-Reliable restoration of running TUI apps is a requirement. Milestone 0 must start with the Rust
-`vt100` crate: feed PTY output into `vt100::Parser` while the GUI is open or closed, then use
-`Screen::state_formatted()` as the starting point for the snapshot sent to xterm.js on attachment,
-followed by live output. Milestone 0 validates this integration with real TUI apps and establishes
-the terminal attachment format used by the rest of the application.
-
-Each terminal holds its `vt100::Parser` and its list of attached outboxes under one std mutex. The
-reader thread locks it, feeds the parser, and fans the bytes out to every attached outbox. Attach
-locks the same mutex, takes `state_formatted()` and the size as the snapshot, and adds its outbox.
-No output can arrive between the snapshot and the registration.
-
-The terminal attachment format, established in milestone 0:
-
-- `attach_terminal(terminal, rows, cols)` first resizes the PTY and the parser if the size differs,
-  so the screen snapshot matches the daemon client's view. The application redraws at the new size
-  through live output.
-- The screen snapshot is `state_formatted()`, prefixed with `ESC [ ? 1049 h` when the alternate
-  screen is active. `state_formatted()` does not switch to the alternate screen, and without the
-  prefix a restored full-screen application would leave its last frame in the normal buffer when it
-  quits.
-- The screen snapshot is the attachment's first `PTY` frame, queued before the outbox is registered
-  and before the response, so a daemon client registers its `pty` receiver before sending
-  `attach_terminal`.
-- The parser keeps no scrollback. The normal buffer's contents and scrollback from before the
-  attachment are not restored.
-
-`detach_terminal`, or losing the GUI, ends the terminal attachment and leaves the shell and its
-applications running. Close Terminal and Remove Workspace stop the corresponding terminals: the
-daemon sends `SIGHUP` to the shell, which passes it to its jobs, and the kernel sends it to the
-foreground process group when the shell exits. The terminal ends when its PTY closes, the same way
-as a shell that ran `exit`. A program that ignores `SIGHUP` and keeps the PTY open keeps its
-terminal listed.
-
-### GUI state
-
-The core keeps the GUI's layout in `$XDG_STATE_HOME/ur/gui.json`, keyed by socket path, as
-dockview's serialized layout, which includes each pane's active tab and the active pane. The webview
-saves it on every layout change. Tabs refer to sessions and terminals by ID. When the GUI restores
-the layout, it drops tabs whose session or terminal no longer exists.
-
-### Transport
-
-The daemon listens on a Unix socket, `$UR_SOCKET` or `$TMPDIR/ur.sock`. There is no TCP listener and
-no auth code.
-
-### Runtime
-
-The daemon runs on Tokio, because the ACP Rust SDK (`agent-client-protocol` 2.1.0) is async. The
-supervisors in `daemon/acp.rs` use `Client.builder()` with the handlers for `SessionNotification`
-and `RequestPermissionRequest` described under Daemon architecture, and `connect_with` to an
-`AcpAgent` built from the configured command and arguments (see the SDK's
-`examples/yolo_one_shot_client.rs`). Requests to the server go through a clone of
-`ConnectionTo<Agent>`, and ops handle their responses in `on_receiving_result` callbacks as
-described under Daemon architecture. Only `initialize` and `session/list` are awaited with
-`block_task()`: each supervisor, which is not a handler, awaits `initialize` and the lists after it,
-and a spawned task awaits the list for a workspace that was just added. PTY reads stay on a blocking
-thread. The app's core runs the socket connection on Tauri's Tokio runtime.
+The daemon runs on Tokio because the ACP Rust SDK is async. Terminal reads run on blocking threads.
+The GUI core runs its socket connection on Tauri's Tokio runtime.

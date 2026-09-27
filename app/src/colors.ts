@@ -20,8 +20,8 @@ export const workspaceColors: Record<WorkspaceColor, string> = {
 };
 
 /**
- * The inline style that sets `--workspace-color`, which `.workspace-tab` and
- * `.workspace-content` read. Without a color, they use their default.
+ * The inline style that sets `--workspace-color`, which `.workspace-tab`
+ * reads. Without a color, it uses its default.
  */
 export function workspaceColorStyle(color: WorkspaceColor | undefined): CSSProperties {
   return color === undefined

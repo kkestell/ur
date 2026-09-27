@@ -1,13 +1,16 @@
 # Testing
 
-Run `cargo test --workspace` for the Rust test suite and `cargo build
---workspace` for a debug
-build. `pnpm -C app test` runs the webview's unit tests under vitest.
+`make check` runs the Rust tests, the webview's unit tests, and the other checks. `make e2e` runs
+the end-to-end suite.
 
-Test ACP behavior against a test agent built with the SDK's `Agent.builder()` in the test process,
-without a model provider or Ox. The daemon's tests run the fake server in process over
-`Channel::duplex()`. Use Ox for live end-to-end checks listed in `docs/agents/todo.md`. `make run`
-starts the daemon and the GUI for them.
+## Where tests go
+
+- **Daemon and protocol behavior**: Rust tests against the fake server, run in process. They need no
+  model provider and no Ox.
+- **Pure webview logic**, such as the transcript reducer: unit tests under vitest.
+- **GUI behavior**: the end-to-end suite, which runs the daemon, the core, and the webview together
+  against the fake server. A behavior the fake server lacks is added to the fake server.
+- **Live checks against Ox**: by hand, with `make run`, for the checks listed in `todo.md`.
 
 ## Test discipline
 
@@ -31,138 +34,11 @@ changes as the guarantees change.
 
 ## End-to-end suite
 
-The end-to-end suite tests the GUI's behavior: the daemon, the core, and the webview together,
-against the fake server. `pnpm -C app e2e` builds the daemon, the fake server, and the app, with its
-embedded WebDriver server, into `target/e2e`, then runs the tests in `app/e2e/` one at a time. Each
-test gets a `TestEnvironment`: a temporary directory for the socket, `HOME`, the GUI state file, and
-a config file with one named fake server. Tests can add more fake servers with independent saved
-history files. The daemon starts with one workspace, `home`, at the test's `HOME`. Saved history
-files let sessions outlive a daemon restart. A failing test saves a screenshot to
-`app/e2e/artifacts/` for diagnosis. The server setup test starts without a config file or daemon so
-the GUI launches its bundled daemon. `scripts/check-macos-package` checks the app and unsigned DMG
-after a release build.
+Each test runs in its own temporary environment with its own socket, home directory, config, and
+state, so tests share nothing. Tests drive the GUI the way the user does and assert on what the
+window shows. Native menus and dialogs, which WebDriver cannot reach, are replaced in the end-to-end
+build by versions the tests can answer. Setup that the user would do through them goes straight to
+the daemon socket.
 
-On macOS, the `webdriver` feature keeps the app in the background, so the suite runs without taking
-focus or showing windows. The app never becomes the active application and has no Dock icon. Its
-window is transparent, lets clicks pass through, and sits in front so WebKit keeps the page visible.
-The GUI treats its window as focused from launch and never receives a focus change, so its visible
-sessions stay focused.
-
-Tests drive the GUI the way the user does, through clicks, the editor, and the terminal, and assert
-on what the window shows. `TestEnvironment.request()` sends setup requests to the daemon socket for
-actions the GUI does through native dialogs or menus, which WebDriver cannot drive, and
-`Gui.request()` sends a request through the core's `request` command for the same reason. The
-end-to-end build wraps Tauri's menu API: it constructs the native menu, records its registered
-handlers, and lets WebDriver select one without opening a popup. A confirmation wrapper lets
-WebDriver answer removal prompts. A tab that is not active stays mounted but hidden, so the helpers
-look only at shown elements. `Gui.showTerminal()` opens a terminal in `home` and opens its tab by
-clicking its terminal row, so its view is the only xterm.js on the page; a reopened GUI restores the
-tab from the layout. Terminal tests assert on terminal text, read from the xterm.js rows, and type
-through `Gui.type`, not WebDriver key actions. The fake server's prompt scripts, named in
-`fake_server()`'s documentation, give agent session tests replies, permission requests, and errors.
-
-### End-to-end guarantee list
-
-- With no daemon or config file, the app starts its bundled daemon. A failed server choice shows an
-  error, and a corrected choice connects without restarting the app. The daemon, session, and thread
-  remain available after the app closes and reopens.
-- A running terminal remains usable when the ACP server fails to start after changing its
-  executable.
-- The workspace and pane menus show one choice per configured server and open a session from the
-  chosen server in the intended pane. Disconnected server choices are disabled.
-- With several configured servers, the New Session shortcut offers the server choices. With one, it
-  creates a session directly; with none, it opens server settings.
-- Settings add, rename, correct, and remove a named server without changing another server. A
-  removed server's sessions and tabs leave ur.
-- Session rows show their server names, and session tab tooltips identify the server.
-- Two servers with overlapping ACP session IDs retain separate tabs and transcripts after GUI and
-  daemon restarts.
-- Image attachments and Delete availability follow the selected session's server capabilities.
-- Another server's sessions and a terminal keep working while one server is unavailable.
-- A terminal survives closing and reopening the GUI: an editor's unsaved buffer is still on screen
-  after the GUI reopens at a different window size, the editor sees the new size, and it accepts
-  input.
-- Quitting a restored full-screen application returns to the shell, and none of its last screen is
-  left behind.
-- A terminal's row and tab show the shell's name until a program sets a title.
-- Terminals appear newest first under their workspace, even after a title change.
-- A terminal starts in its workspace's directory.
-- Close Terminal removes the terminal's row.
-- A terminal whose shell exits leaves the sidebar and closes its tab.
-- Removing a workspace stops its terminals.
-- The empty states follow the workspaces and the selection.
-- Adding a workspace asks for its workspace color; choosing a swatch adds the workspace, and
-  dismissing the workspace color picker adds nothing.
-- A session created before the GUI opens answers a prompt sent from the editor.
-- Workspaces stay alphabetical when one needs attention.
-- Sessions stay newest first when an older session needs attention.
-- Stop cancels a running turn.
-- The selected session and its transcript survive closing and reopening the GUI.
-- The GUI reconnects after a daemon restart without duplicating the thread, and a new prompt works.
-- A prompt the daemon answers busy comes back to the editor.
-- Each session's tab keeps its own editor draft.
-- A session that comes back with its workspace shows its thread.
-- Another session's activity leaves the thread's scroll position alone.
-- A session's tab shows the session title.
-- Deleting a session removes it from the sidebar and closes its tab.
-- A session holding 20 MB of images loads after reopening the GUI.
-- A working session shows the spinner.
-- A session waiting for permission shows its mark and its workspace's count.
-- Clicking a permission option answers the request.
-- A permission request shows its tool call's content.
-- The permission shortcuts answer the oldest request.
-- Permission labels and shortcuts use Ctrl on platforms other than macOS.
-- A session that finishes a turn while not shown is unread until it is shown.
-- A failed turn shows its error and the failed mark.
-- A rejected prompt shows its error under the user message.
-- Agent messages render as Markdown.
-- The copy button copies the message's Markdown source.
-- A Thinking row shows its thought when clicked and hides it when clicked again.
-- A Run Command block shows its output when clicked.
-- A tool call row shows its content when clicked.
-- Clicking a link in an agent message leaves the app in place.
-- Dragging a tab to a pane's edge makes a new pane, and to a pane's center moves the tab there.
-- Tabs do not show a hidden-tab counter.
-- Every tab shows Close Tab without hovering.
-- Dragging the divider between panes resizes them, and the divider press cannot start a text
-  selection.
-- Choosing a session or terminal with a tab activates that tab in its pane.
-- A session chosen in the sidebar opens in the active pane.
-- The layout and each pane's active tab survive closing and reopening the GUI, and each restored
-  active tab is fully visible in its pane's tab bar.
-- Close Tab leaves its terminal running.
-- The close shortcut closes the active tab with the editor or terminal focused, leaving its session
-  or terminal in the sidebar.
-- Closed tabs reopen newest first in the active pane, including tabs closed with Close Tab.
-- New, close, and reopen shortcuts use Ctrl on platforms other than macOS.
-- Recently closed tabs are forgotten after restarting the GUI.
-- Reopen skips a tab already opened from the sidebar and a terminal that has been removed.
-- Removing a session and moving a tab do not add tabs to reopen history.
-- A terminal tab keeps its size while another tab is shown.
-- A session's tab shows its status mark.
-- A session shown in a pane that is not active does not become unread.
-- The permission shortcuts answer only the active tab's session.
-- Typing / lists the server's slash commands, and Enter inserts one.
-- Choosing a config option value sets it on the server.
-- A press outside a config picker closes it.
-- A config option the server changes updates its picker.
-- Config pickers that do not fit the editor's row move to the More menu, which stays inside the
-  window, and come back when the pane widens.
-- A model that accepts images shows the image icon in its list.
-- Usage the server reports shows in the usage indicator.
-- An image dropped on the editor is sent with the prompt.
-- A pending image blocks sending until it is read or removed.
-- Images dropped together reach the prompt in drop order.
-- A dropped file that is not an image is refused.
-
-### Admission
-
-Every change to the GUI's behavior adds an end-to-end test for each behavior the user can see: what
-the window shows and what the user's actions do. When the fake server lacks a behavior a test needs,
-the change extends the fake server. Styling, wording, and component structure are not end-to-end
-guarantees. There are no screenshot comparisons.
-
-### Ad-hoc checks
-
-Other checks, such as confirming a change in the running app, are ad-hoc checks: scripts outside the
-repository that import `app/e2e/harness.ts`. Their scripts and screenshots are not committed.
+On macOS the suite runs in the background without taking focus. A failing test saves a screenshot to
+`app/e2e/artifacts/`.

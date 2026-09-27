@@ -159,8 +159,8 @@ test("a_deleted_session_leaves_the_sidebar", () => {
 });
 
 test("server_changes_replace_the_complete_list_and_clear_capabilities", () => {
-  const one = { id: "one", name: "One", command: "/bin/one", args: [], connected: true, error: null, capabilities: { loadSession: true } };
-  const two = { id: "two", name: "Two", command: "/bin/two", args: [], connected: true, error: null, capabilities: { loadSession: true } };
+  const one = { id: "one", name: "One", icon: "claude" as const, command: "/bin/one", args: [], connected: true, error: null, capabilities: { loadSession: true } };
+  const two = { id: "two", name: "Two", icon: "claude" as const, command: "/bin/two", args: [], connected: true, error: null, capabilities: { loadSession: true } };
   let state = reduceWatch(connected, { type: "watch_snapshot", terminals: [], servers: [one, two], config_error: null, workspaces: [], sessions: [] });
   expect(state.servers.map((server) => server.id)).toEqual(["one", "two"]);
   state = reduceWatch(state, { type: "servers_changed", servers: [one, { ...two, connected: false, capabilities: null, error: "failed" }], config_error: null });

@@ -8,6 +8,7 @@ use agent_client_protocol::{Client, ConnectTo};
 use anyhow::{Context, bail};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::task::JoinHandle;
+use ur_client::ServerIcon;
 
 use crate::config::{Config, ServerConfig};
 use state::State;
@@ -86,13 +87,20 @@ impl ServerControl {
         Ok(())
     }
 
-    pub fn add(&self, name: String, command: String, args: Vec<String>) -> anyhow::Result<String> {
+    pub fn add(
+        &self,
+        name: String,
+        icon: ServerIcon,
+        command: String,
+        args: Vec<String>,
+    ) -> anyhow::Result<String> {
         Self::validate_command(&command)?;
         let mut configuration = self.configuration.lock().unwrap();
         let id = uuid::Uuid::new_v4().to_string();
         let server = ServerConfig {
             id: id.clone(),
             name,
+            icon,
             command,
             args,
         };
@@ -110,6 +118,7 @@ impl ServerControl {
         &self,
         id: &str,
         name: String,
+        icon: ServerIcon,
         command: String,
         args: Vec<String>,
     ) -> anyhow::Result<()> {
@@ -125,6 +134,7 @@ impl ServerControl {
         *server = ServerConfig {
             id: id.into(),
             name,
+            icon,
             command,
             args,
         };
@@ -215,6 +225,7 @@ async fn run<S: ConnectTo<Client> + 'static>(
             state.lock().unwrap().configure_server(&ServerConfig {
                 id: id.clone(),
                 name: "Test".into(),
+                icon: ServerIcon::Claude,
                 command: command.clone(),
                 args: Vec::new(),
             });

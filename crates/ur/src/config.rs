@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, anyhow};
 use serde::{Deserialize, Serialize};
+use ur_client::ServerIcon;
 
 /// The config file, `$XDG_CONFIG_HOME/ur/config.json`, else
 /// `~/.config/ur/config.json`.
@@ -19,6 +20,7 @@ pub struct Config {
 pub struct ServerConfig {
     pub id: String,
     pub name: String,
+    pub icon: ServerIcon,
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -112,6 +114,7 @@ mod tests {
                 .map(|(index, name)| ServerConfig {
                     id: format!("id-{index}"),
                     name: (*name).into(),
+                    icon: ServerIcon::Claude,
                     command: "/bin/echo".into(),
                     args: vec![],
                 })

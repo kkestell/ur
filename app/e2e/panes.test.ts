@@ -206,6 +206,12 @@ e2eTest("choosing a session or terminal with a tab activates that tab in its pan
   await gui.waitForText(".sidebar .row.selected", "tallies");
 });
 
+e2eTest("a press on a tab without a pointerdown activates the tab and its pane", async (environment) => {
+  const { gui } = await twoPanes(environment);
+  await gui.press(".dv-tab .label", "sh");
+  await waitForPanes(gui, ["*[*sh]", "[*tallies]"]);
+});
+
 e2eTest("a session chosen in the sidebar opens in the active pane", async (environment) => {
   const { gui } = await twoPanes(environment);
   await environment.newSession();
