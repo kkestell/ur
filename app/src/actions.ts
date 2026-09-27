@@ -1,11 +1,13 @@
 import { Menu } from "@tauri-apps/api/menu";
 import { ask, message } from "@tauri-apps/plugin-dialog";
+import { workspaceColors } from "./colors";
 import { request } from "./ipc";
 import type { Request } from "./ipc/bindings/Request";
 import type { Response } from "./ipc/bindings/Response";
 import type { SessionSummary } from "./ipc/bindings/SessionSummary";
 import type { Status } from "./ipc/bindings/Status";
 import type { TerminalSummary } from "./ipc/bindings/TerminalSummary";
+import type { WorkspaceColor } from "./ipc/bindings/WorkspaceColor";
 import type { TabItem } from "./layout";
 import type { WatchState } from "./store/watch";
 
@@ -79,16 +81,26 @@ function serverChoices(watch: WatchState, workspace: string, onOpen: (item: TabI
   }));
 }
 
-/** The workspace menu: one choice per server, New Terminal, and Remove Workspace…. */
+/** The workspace menu: one choice per server, New Terminal, Color, and Remove Workspace…. */
 export async function showWorkspaceMenu(
   watch: WatchState,
   workspace: string,
   onOpen: (item: TabItem) => void,
 ): Promise<void> {
+  const current = watch.workspaces.find((other) => other.name === workspace)?.color;
   const menu = await Menu.new({
     items: [
       ...serverChoices(watch, workspace, onOpen),
       { text: "New Terminal", action: () => void newTerminal(workspace, onOpen) },
+      { item: "Separator" },
+      {
+        text: "Color",
+        items: (Object.entries(workspaceColors) as [WorkspaceColor, string][]).map(([color, label]) => ({
+          text: label,
+          checked: color === current,
+          action: () => void send({ type: "set_workspace_color", name: workspace, color }),
+        })),
+      },
       { item: "Separator" },
       { text: "Remove Workspace…", action: () => void removeWorkspace(watch, workspace) },
     ],

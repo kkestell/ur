@@ -183,7 +183,7 @@ impl Link {
                 let name = match &event {
                     Event::WatchSnapshot { .. }
                     | Event::ServersChanged { .. }
-                    | Event::WorkspaceAdded { .. }
+                    | Event::WorkspaceChanged { .. }
                     | Event::WorkspaceRemoved { .. }
                     | Event::SessionChanged { .. }
                     | Event::SessionDeleted { .. }

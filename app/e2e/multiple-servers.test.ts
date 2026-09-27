@@ -8,7 +8,7 @@ e2eTest("workspace menu creates a session on the chosen server", async (environm
   const gui = await environment.openGui();
   await gui.contextMenu(".workspace-name");
   assert.deepEqual((await gui.menuEntries()).map((item) => item.text),
-    ["New Session — Test", "New Session — Beta", "New Terminal", "Remove Workspace…"]);
+    ["New Session — Test", "New Session — Beta", "New Terminal", "Color", "Remove Workspace…"]);
   await gui.chooseNextMenu("New Session — Beta");
   await gui.contextMenu(".workspace-name");
   await waitFor("a Beta session", async () => (await environment.watch()).sessions.some((session) => session.session.includes(beta)));

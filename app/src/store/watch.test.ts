@@ -132,6 +132,29 @@ test("a_removed_workspace_drops_its_sessions", () => {
   expect(state.sessions.map((session) => session.session)).toEqual(["s2"]);
 });
 
+test("a_changed_workspace_replaces_the_one_with_its_name", () => {
+  let state = reduceWatch(connected, {
+    type: "watch_snapshot",
+    terminals: [],
+    servers: [],
+    config_error: null,
+    workspaces: [{ name: "a", path: "/a", color: "blue" }],
+    sessions: [],
+  });
+  state = reduceWatch(state, {
+    type: "workspace_changed",
+    workspace: { name: "a", path: "/a", color: "peach" },
+  });
+  state = reduceWatch(state, {
+    type: "workspace_changed",
+    workspace: { name: "b", path: "/b", color: "green" },
+  });
+  expect(state.workspaces).toEqual([
+    { name: "a", path: "/a", color: "peach" },
+    { name: "b", path: "/b", color: "green" },
+  ]);
+});
+
 test("a_disconnect_clears_the_watch_state", () => {
   let state = reduceWatch(connected, {
     type: "watch_snapshot",

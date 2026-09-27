@@ -51,3 +51,16 @@ e2eTest("the window's shortcuts do nothing while a dialog is open", async (envir
   await waitFor("the terminal tab", async () => (await gui.displayedCount(".tab .terminal-icon")) > 0);
   assert.equal(await gui.displayedCount(".tab .terminal-icon"), 1);
 });
+
+e2eTest("the workspace menu changes the workspace color", async (environment) => {
+  await environment.newSession();
+  const gui = await environment.openGui();
+  await gui.click(".workspace-sessions .row", "New session");
+  await gui.waitForText(".dv-tab", "New session");
+
+  await gui.chooseNextMenu("Peach");
+  await gui.contextMenu(".workspace-name");
+  await waitFor("the peach tab", async () =>
+    (await gui.attributes(".workspace-tab", "style")).some((style) => style?.includes("--color-workspace-peach")));
+  assert.match((await gui.attributes(".sidebar .workspace", "style"))[0] ?? "", /--color-workspace-peach/);
+});

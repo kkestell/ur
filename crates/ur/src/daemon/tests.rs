@@ -424,6 +424,14 @@ async fn add_workspace(client: &Client, name: &str) -> Response {
     client.request(request).await.unwrap()
 }
 
+async fn set_workspace_color(client: &Client, name: &str, color: WorkspaceColor) -> Response {
+    let request = Request::SetWorkspaceColor {
+        name: name.to_string(),
+        color,
+    };
+    client.request(request).await.unwrap()
+}
+
 async fn remove_workspace(client: &Client, name: &str) -> Response {
     let request = Request::RemoveWorkspace {
         name: name.to_string(),
@@ -767,7 +775,7 @@ async fn watch_sends_the_snapshot_then_changes() {
 
     assert_eq!(
         early.next().await,
-        Event::WorkspaceAdded {
+        Event::WorkspaceChanged {
             workspace: workspace("home")
         }
     );
@@ -791,9 +799,40 @@ async fn workspaces_survive_a_daemon_restart() {
     assert_eq!(add_workspace(&client, "one").await, Response::Done);
     assert_eq!(add_workspace(&client, "two").await, Response::Done);
     assert_eq!(remove_workspace(&client, "one").await, Response::Done);
+    assert_eq!(
+        set_workspace_color(&client, "two", WorkspaceColor::Peach).await,
+        Response::Done
+    );
 
     let restarted = daemon.restart(&hold);
-    assert_eq!(watch(&restarted).await.workspaces, [workspace("two")]);
+    let two = Workspace {
+        color: WorkspaceColor::Peach,
+        ..workspace("two")
+    };
+    assert_eq!(watch(&restarted).await.workspaces, [two]);
+}
+
+#[tokio::test]
+async fn setting_a_workspace_color_updates_watchers() {
+    let daemon = TestDaemon::start(&Hold::default());
+    let client = daemon.connect().await;
+    assert_eq!(add_workspace(&client, "home").await, Response::Done);
+    let mut watcher = watch(&daemon).await;
+
+    assert_eq!(
+        set_workspace_color(&client, "home", WorkspaceColor::Green).await,
+        Response::Done
+    );
+
+    assert_eq!(
+        watcher.next().await,
+        Event::WorkspaceChanged {
+            workspace: Workspace {
+                color: WorkspaceColor::Green,
+                ..workspace("home")
+            }
+        }
+    );
 }
 
 #[tokio::test]
@@ -836,6 +875,14 @@ async fn workspace_requests_reject_bad_input() {
             Request::NewSession {
                 server: "test".into(),
                 workspace: "nowhere".to_string(),
+            },
+            "no workspace nowhere",
+        ),
+        (
+            "a color for an unknown workspace",
+            Request::SetWorkspaceColor {
+                name: "nowhere".to_string(),
+                color: WorkspaceColor::Red,
             },
             "no workspace nowhere",
         ),
@@ -1323,7 +1370,7 @@ async fn adding_a_workspace_lists_its_saved_sessions() {
 
     assert_eq!(
         watcher.next().await,
-        Event::WorkspaceAdded {
+        Event::WorkspaceChanged {
             workspace: workspace("home")
         }
     );

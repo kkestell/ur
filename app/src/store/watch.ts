@@ -65,8 +65,18 @@ export function reduceWatch(state: WatchState, event: WatchEvent | ConnectionEve
       };
     case "servers_changed":
       return { ...state, servers: event.servers, configError: event.config_error };
-    case "workspace_added":
-      return { ...state, workspaces: [...state.workspaces, event.workspace] };
+    case "workspace_changed": {
+      const index = state.workspaces.findIndex(
+        (workspace) => workspace.name === event.workspace.name,
+      );
+      const workspaces = [...state.workspaces];
+      if (index === -1) {
+        workspaces.push(event.workspace);
+      } else {
+        workspaces[index] = event.workspace;
+      }
+      return { ...state, workspaces };
+    }
     case "workspace_removed":
       return {
         ...state,

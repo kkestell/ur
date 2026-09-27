@@ -1,4 +1,5 @@
 import { showSessionMenu, showTerminalMenu, showWorkspaceMenu } from "../actions";
+import { workspaceColorStyle } from "../colors";
 import type { TabItem } from "../layout";
 import {
   type WatchState,
@@ -36,7 +37,7 @@ export function Sidebar({
       {orderedWorkspaces(watch).map((workspace) => {
         const count = attentionCount(watch, workspace.name);
         return (
-          <div key={workspace.name} className="workspace mb-3">
+          <div key={workspace.name} className="workspace pb-2" style={workspaceColorStyle(workspace.color)}>
             <div
               className="workspace-name flex min-h-8 items-center px-4 text-label font-semibold tracking-wide text-fg-dim uppercase"
               title={workspace.name}
@@ -56,9 +57,9 @@ export function Sidebar({
                 return <div
                   key={session.session}
                   className={
-                    "row flex min-h-8 cursor-default items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-row-hover" +
+                    "row flex min-h-8 cursor-default items-center gap-2 rounded px-2 py-1.5 text-left" +
                     (selection?.type === "session" && selection.session === session.session
-                      ? " selected bg-row-selected text-fg-strong hover:bg-row-selected"
+                      ? " selected text-fg-strong"
                       : "") +
                     (session.unread ? " unread font-semibold" : "")
                   }
@@ -81,9 +82,9 @@ export function Sidebar({
                 <div
                   key={terminal.terminal}
                   className={
-                    "row flex min-h-8 cursor-default items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-row-hover" +
+                    "row flex min-h-8 cursor-default items-center gap-2 rounded px-2 py-1.5 text-left" +
                     (selection?.type === "terminal" && selection.terminal === terminal.terminal
-                      ? " selected bg-row-selected text-fg-strong hover:bg-row-selected"
+                      ? " selected text-fg-strong"
                       : "")
                   }
                   title={terminal.title}

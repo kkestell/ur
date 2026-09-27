@@ -11,7 +11,7 @@ use agent_client_protocol::{Agent, ConnectionTo, Responder};
 use anyhow::{anyhow, bail};
 use ur_client::{
     DaemonMessage, Entry, Event, Frame, PendingPermission, Response, ServerState, SessionKey,
-    SessionSummary, Status, TerminalId, TerminalSummary, Workspace,
+    SessionSummary, Status, TerminalId, TerminalSummary, Workspace, WorkspaceColor,
 };
 
 use super::server::Outbox;
@@ -401,7 +401,28 @@ impl State {
         workspaces.push(workspace.clone());
         save(&workspaces)?;
         self.workspaces = workspaces;
-        broadcast(&mut self.watchers, Event::WorkspaceAdded { workspace });
+        broadcast(&mut self.watchers, Event::WorkspaceChanged { workspace });
+        Ok(())
+    }
+
+    /// Calls `save` with the list of workspaces holding the new color, and
+    /// changes the color only if `save` succeeds.
+    pub fn set_workspace_color(
+        &mut self,
+        name: &str,
+        color: WorkspaceColor,
+        save: impl FnOnce(&[Workspace]) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        let mut workspaces = self.workspaces.clone();
+        let workspace = workspaces
+            .iter_mut()
+            .find(|workspace| workspace.name == name)
+            .ok_or_else(|| anyhow!("no workspace {name}"))?;
+        workspace.color = color;
+        let workspace = workspace.clone();
+        save(&workspaces)?;
+        self.workspaces = workspaces;
+        broadcast(&mut self.watchers, Event::WorkspaceChanged { workspace });
         Ok(())
     }
 

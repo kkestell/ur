@@ -191,6 +191,9 @@ fn handle(
             ops::add_workspace(state, state_file, Workspace { name, path, color })
                 .map(|()| Response::Done)
         }
+        Request::SetWorkspaceColor { name, color } => {
+            ops::set_workspace_color(state, state_file, &name, color).map(|()| Response::Done)
+        }
         Request::RemoveWorkspace { name } => {
             ops::remove_workspace(state, terminals, state_file, &name).map(|()| Response::Done)
         }

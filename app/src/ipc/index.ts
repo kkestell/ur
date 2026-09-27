@@ -15,7 +15,7 @@ export type WatchEvent = Extract<
     type:
       | "watch_snapshot"
       | "servers_changed"
-      | "workspace_added"
+      | "workspace_changed"
       | "workspace_removed"
       | "session_changed"
       | "session_deleted"

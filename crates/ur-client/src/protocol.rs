@@ -112,6 +112,8 @@ pub enum Request {
         path: PathBuf,
         color: WorkspaceColor,
     },
+    /// Saves the workspace's new color.
+    SetWorkspaceColor { name: String, color: WorkspaceColor },
     /// Cancels the workspace's running prompts, then removes the workspace and
     /// its sessions, and stops its terminals.
     RemoveWorkspace { name: String },
@@ -202,9 +204,7 @@ pub enum Event {
     /// A terminal's shell exited, and the daemon removed the terminal. Sent
     /// once to each watching or attached socket connection, after all of the
     /// terminal's output.
-    TerminalExited {
-        terminal: TerminalId,
-    },
+    TerminalExited { terminal: TerminalId },
     /// Every workspace in the order it was added, every session in discovery
     /// order, and every terminal in the order it was opened, sent before later
     /// changes.
@@ -221,22 +221,15 @@ pub enum Event {
         servers: Vec<ServerState>,
         config_error: Option<String>,
     },
-    WorkspaceAdded {
-        workspace: Workspace,
-    },
+    /// A workspace was added, or its color changed.
+    WorkspaceChanged { workspace: Workspace },
     /// The workspace, its sessions, and its terminals are gone.
-    WorkspaceRemoved {
-        name: String,
-    },
+    WorkspaceRemoved { name: String },
     /// A session was added, or its status, unread flag, session title, or last
     /// activity changed.
-    SessionChanged {
-        summary: SessionSummary,
-    },
+    SessionChanged { summary: SessionSummary },
     /// A terminal was opened, or its terminal title changed.
-    TerminalChanged {
-        summary: TerminalSummary,
-    },
+    TerminalChanged { summary: TerminalSummary },
     /// The session was deleted and is gone from the sidebar.
     SessionDeleted {
         #[ts(type = "string")]

@@ -16,7 +16,7 @@ use agent_client_protocol::schema::v1::{
 };
 use agent_client_protocol::{Agent, ConnectionTo, is_incoming_transport_closed};
 use anyhow::bail;
-use ur_client::{Response, SessionKey, Workspace};
+use ur_client::{Response, SessionKey, Workspace, WorkspaceColor};
 
 use super::acp;
 use super::server::Outbox;
@@ -65,6 +65,21 @@ pub fn add_workspace(
         });
     }
     Ok(())
+}
+
+/// Saves the workspace's new color in the state file.
+pub fn set_workspace_color(
+    state: &Arc<Mutex<State>>,
+    state_file: &Path,
+    name: &str,
+    color: WorkspaceColor,
+) -> anyhow::Result<()> {
+    state
+        .lock()
+        .unwrap()
+        .set_workspace_color(name, color, |workspaces| {
+            state_file::write(state_file, workspaces)
+        })
 }
 
 /// Removes a workspace from the state file, then cancels its running prompts,

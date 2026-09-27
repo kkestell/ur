@@ -11,8 +11,6 @@
   --color-surface: #1a1a1a; /* pane content, the active tab, and terminals */
   --color-editor: #1e1e1e; /* the editor below a session's thread */
   --color-raised: #252525; /* popovers and blocks in the thread */
-  --color-row-hover: #2c2c2c;
-  --color-row-selected: #34383d;
   --color-control: #333; /* buttons, and flat controls on hover */
   --color-control-hover: #3a3a3a;
 
@@ -108,17 +106,24 @@
 }
 
 /*
- * A tab's background, a dark shade of the color `--workspace-color` sets
- * inline, and a lighter shade for the active tab. A terminal tab opened before
- * its `terminal_changed` arrives has no workspace yet, and uses the divider
- * color.
+ * A dark shade of the color `--workspace-color` sets inline fills each tab and
+ * each workspace in the sidebar, a lighter shade fills the active tab and the
+ * selected sidebar row, and a shade between them fills a sidebar row under the
+ * pointer. A terminal tab opened before its `terminal_changed` arrives has no
+ * workspace yet, and uses the divider color.
  */
-.workspace-tab {
+.workspace-tab,
+.sidebar .workspace {
   --workspace-color: var(--color-divider);
   background: color-mix(in srgb, var(--workspace-color) 18%, black);
 }
 
-.panes .dv-tab.dv-active-tab .workspace-tab {
+.sidebar .workspace .row:hover {
+  background: color-mix(in srgb, var(--workspace-color) 26%, black);
+}
+
+.panes .dv-tab.dv-active-tab .workspace-tab,
+.sidebar .workspace .row.selected {
   background: color-mix(in srgb, var(--workspace-color) 35%, black);
 }
 
