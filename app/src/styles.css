@@ -52,11 +52,10 @@
 
 /*
  * Dockview's panes and tabs. Dockview puts its theme class on an element
- * around `.panes`, so the colors are set on `.panes`. Each tab is painted by
- * its `Tab` component, which fills it with its workspace's color. Each tab has
- * a divider on its right. The line along the bottom of the tab bar runs under
- * the inactive tabs and stops at the active tab. Hidden tabs have dimmer text
- * than the active tab.
+ * around `.panes`, so the colors are set on `.panes`. Each tab is drawn by
+ * its `Tab` component. Each tab has a divider on its right. The line along the
+ * bottom of the tab bar runs under the inactive tabs and stops at the active
+ * tab.
  * Tabs shrink to fit the tab bar down to their minimum width, and past that
  * the tab bar scrolls.
  * The window's top border and the pane separators are the line above the tabs.
@@ -106,13 +105,13 @@
 }
 
 /*
- * A dark shade of the color `--workspace-color` sets inline fills each tab and
- * each workspace in the sidebar, a lighter shade fills the active tab and the
- * selected sidebar row, and a shade between them fills a sidebar row under the
- * pointer. A terminal tab opened before its `terminal_changed` arrives has no
- * workspace yet, and uses the divider color.
+ * `--workspace-color`, set inline, is the workspace's color. A dark shade of it
+ * fills each workspace in the sidebar, a lighter shade fills the selected row,
+ * and a shade between them fills a row under the pointer. A tab's title is in
+ * the color, and dimmer while the tab is hidden. A terminal tab opened before
+ * its `terminal_changed` arrives has no workspace yet, and its title uses the
+ * text color.
  */
-.workspace-tab,
 .sidebar .workspace {
   --workspace-color: var(--color-divider);
   background: color-mix(in srgb, var(--workspace-color) 18%, black);
@@ -122,9 +121,17 @@
   background: color-mix(in srgb, var(--workspace-color) 26%, black);
 }
 
-.panes .dv-tab.dv-active-tab .workspace-tab,
 .sidebar .workspace .row.selected {
   background: color-mix(in srgb, var(--workspace-color) 35%, black);
+}
+
+.workspace-tab {
+  --workspace-color: var(--color-fg);
+  color: color-mix(in srgb, var(--workspace-color) 55%, var(--color-panel));
+}
+
+.panes .dv-tab.dv-active-tab .workspace-tab {
+  color: var(--workspace-color);
 }
 
 /* The dividers between panes are 2px wide, as is the sidebar's border. */

@@ -6,10 +6,11 @@ import { attachTerminal, detachTerminal, request, terminalInput } from "../ipc";
 
 /**
  * The terminal's xterm.js view. Attaches on mount and detaches on unmount, so
- * render it keyed by terminal ID.
+ * render it keyed by terminal ID. It takes the keyboard focus while `active`.
  */
-export function TerminalPane({ terminal }: { terminal: number }) {
+export function TerminalPane({ terminal, active }: { terminal: number; active: boolean }) {
   const container = useRef<HTMLDivElement>(null);
+  const view = useRef<Terminal>(null);
   const [error, setError] = useState<string>();
 
   useEffect(() => {
@@ -27,6 +28,7 @@ export function TerminalPane({ terminal }: { terminal: number }) {
     xterm.loadAddon(fit);
     const element = container.current!;
     xterm.open(element);
+    view.current = xterm;
     // A tab that is not active has no size, and fitting it would shrink the
     // terminal to one row and resize the PTY.
     const fitIfShown = () => {
@@ -64,6 +66,7 @@ export function TerminalPane({ terminal }: { terminal: number }) {
 
     return () => {
       observer.disconnect();
+      view.current = null;
       xterm.dispose();
       // After the attachment ends, so a detach cannot overtake it.
       attaching
@@ -74,6 +77,16 @@ export function TerminalPane({ terminal }: { terminal: number }) {
         .catch(console.error);
     };
   }, [terminal]);
+
+  // On the next frame, because dockview shows a newly active tab then, and a
+  // hidden terminal cannot take the focus.
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => view.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [terminal, active]);
 
   return (
     <div className="terminal flex h-full min-h-0 flex-col p-3">

@@ -18,7 +18,7 @@ objc2 = "0.6.4"
 portable-pty = "0.9.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-tauri = "2.11.5"
+tauri = { version = "2.11.5", features = ["tray-icon"] }
 tauri-build = "2.6.3"
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-opener = "2.5.5"
@@ -31,3 +31,13 @@ ur-client = { path = "crates/ur-client" }
 ur-fake-server = { path = "crates/ur-fake-server" }
 uuid = { version = "1", features = ["v4"] }
 vt100 = "0.16.2"
+
+# Dependencies build without debug info. Workspace crates keep file and line
+# numbers for panics and backtraces, and `packed` collects them into a `.dSYM`
+# so object files are not left in `target/` after each link.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "packed"
+
+[profile.dev.package."*"]
+debug = false

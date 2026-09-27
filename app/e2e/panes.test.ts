@@ -75,6 +75,26 @@ e2eTest("⌘N opens a new session and ⇧⌘N a new terminal in the active pane"
   await gui.waitForText(".sidebar .row:has(.terminal-icon) .label", "sh");
 });
 
+e2eTest("a new session or terminal tab focuses its prompt or terminal", async (environment) => {
+  const gui = await environment.openGui();
+  await gui.pressShortcut("KeyN");
+  await waitForPanes(gui, ["*[*New session]"]);
+  await waitFor("the prompt to be focused", () => gui.focused(".editor textarea"));
+  await gui.pressShortcut("KeyN", { shift: true });
+  await waitForPanes(gui, ["*[New session, *sh]"]);
+  await waitFor("the terminal to be focused", () => gui.focused(".xterm-helper-textarea"));
+});
+
+e2eTest("activating a tab focuses its prompt or terminal", async (environment) => {
+  const { gui } = await twoPanes(environment);
+  await gui.press(".dv-tab .label", "sh");
+  await waitForPanes(gui, ["*[*sh]", "[*tallies]"]);
+  await waitFor("the terminal to be focused", () => gui.focused(".xterm-helper-textarea"));
+  await gui.click(".sidebar .row", "tallies");
+  await waitForPanes(gui, ["[*sh]", "*[*tallies]"]);
+  await waitFor("the prompt to be focused", () => gui.focused(".editor textarea"));
+});
+
 e2eTest("Ctrl opens, closes, and reopens tabs on other platforms", async (environment) => {
   const gui = await environment.openGui();
   await gui.setPlatform("Linux");

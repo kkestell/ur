@@ -8,6 +8,7 @@ import { Ellipsis, SendHorizontal } from "lucide-react";
 import {
   type DragEvent,
   type KeyboardEvent,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -31,11 +32,14 @@ export function Editor({
   status,
   thread,
   capabilities,
+  active,
 }: {
   session: string;
   status: Status | undefined;
   thread: ThreadState | undefined;
   capabilities: AgentCapabilities | null;
+  /** Whether the editor's tab is the active tab, which focuses the textarea. */
+  active: boolean;
 }) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
@@ -57,6 +61,16 @@ export function Editor({
   const textarea = useRef<HTMLTextAreaElement>(null);
   const natural = useRef<HTMLDivElement>(null);
   const query = slashQuery(text);
+
+  // On the next frame, because dockview shows a newly active tab then, and a
+  // hidden textarea cannot take the focus.
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => textarea.current!.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [active]);
   const matches = query === undefined || listClosed ? [] : matchingCommands(commands, query);
 
   const changeText = (next: string) => {

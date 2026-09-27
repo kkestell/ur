@@ -1,26 +1,24 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
 import { Terminal, X } from "lucide-react";
 import { workspaceColorStyle } from "../colors";
-import { type TabItem, tabColor } from "../layout";
+import { type TabItem, tabColor, tabTitle } from "../layout";
 import { sessionServer, useWatch } from "../store/watch";
 import { SessionIcon } from "../serverIcons";
 import { StatusMark } from "./StatusMark";
 
 /**
  * A session or terminal tab: its server's icon or the terminal icon, its
- * title, its status mark when relevant, and Close Tab. A terminal tab has no
- * title until its `terminal_changed` arrives.
+ * title, its status mark when relevant, and Close Tab.
  */
 export function Tab({ api, params }: IDockviewPanelHeaderProps<TabItem>) {
   const watch = useWatch();
-  let title;
+  const title = tabTitle(watch, params);
   let tooltip;
   let mark = null;
   let icon;
   if (params.type === "session") {
     const summary = watch.sessions.find((session) => session.session === params.session);
     const server = sessionServer(watch, summary);
-    title = summary?.title ?? "New session";
     tooltip = watch.servers.length > 1
       ? `${title} · ${server?.name ?? "Unknown server"}`
       : title;
@@ -29,7 +27,6 @@ export function Tab({ api, params }: IDockviewPanelHeaderProps<TabItem>) {
       mark = <StatusMark status={summary.status} />;
     }
   } else {
-    title = watch.terminals.find((terminal) => terminal.terminal === params.terminal)?.title;
     tooltip = title;
     icon = <Terminal className="tab-kind terminal-icon shrink-0 text-fg-muted" size={12} strokeWidth={1.75} />;
   }

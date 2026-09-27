@@ -9,7 +9,7 @@ import {
   workspaceSessions,
   workspaceTerminals,
 } from "../store/watch";
-import { Plus, Terminal } from "lucide-react";
+import { Plus, Server, Terminal } from "lucide-react";
 import { SessionIcon } from "../serverIcons";
 import { AddWorkspaceButton } from "./AddWorkspaceButton";
 import { StatusMark } from "./StatusMark";
@@ -29,7 +29,9 @@ export function Sidebar({
     <nav className="sidebar min-w-0 flex-1 overflow-y-auto border-r-2 border-divider bg-panel pb-3 select-none">
       <div className="sidebar-header flex h-10 items-center gap-2 px-4 text-xs font-medium tracking-wide text-fg-dim uppercase">
         <span className="label min-w-0 flex-1">Workspaces</span>
-        <button className="rounded px-1 hover:bg-control" title="Server settings" onClick={onConfigureServer}>Server</button>
+        <button className="icon-button flex size-7 items-center justify-center rounded text-fg-muted hover:bg-control hover:text-fg" title="Server Settings" aria-label="Server Settings" onClick={onConfigureServer}>
+          <Server size={16} strokeWidth={1.75} />
+        </button>
         <AddWorkspaceButton className="icon-button flex size-7 items-center justify-center rounded text-fg-muted hover:bg-control hover:text-fg" title="Add Workspace">
           <Plus size={16} strokeWidth={1.75} />
         </AddWorkspaceButton>

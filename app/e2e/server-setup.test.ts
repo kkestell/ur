@@ -26,7 +26,7 @@ test("the app starts its daemon and saves a working server after a failed choice
     await waitFor("the server to connect", async () => (await environment.watch()).servers[0]?.connected);
     await gui.waitForNone(".server-setup");
     const saved = JSON.parse(readFileSync(environment.configFile, "utf8"));
-    assert.deepEqual(saved, { servers: [{ id: saved.servers[0].id, name: "Test", command: environment.fakeServer, args: [environment.historyFile] }] });
+    assert.deepEqual(saved, { servers: [{ id: saved.servers[0].id, name: "Test", icon: "claude", command: environment.fakeServer, args: [environment.historyFile] }] });
     await environment.addWorkspace("home", environment.home);
     await gui.waitForText(".workspace-name", "home");
     const session = await environment.newSession(saved.servers[0].id);
@@ -47,7 +47,7 @@ test("the app starts its daemon and saves a working server after a failed choice
 e2eTest("terminals stay available while the configured server is unavailable", async (environment) => {
   const gui = await environment.openGui();
   await gui.showTerminal();
-  await gui.click(".sidebar-header button", "Server");
+  await gui.click(".sidebar-header [title='Server Settings']");
   await gui.setInput(".server-command", "/no/such/server");
   await gui.click(".server-save");
   await gui.waitForText(".server-banner", "/no/such/server");

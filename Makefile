@@ -1,4 +1,4 @@
-.PHONY: check check-rust check-app check-docs format format-docs e2e run
+.PHONY: check check-rust check-app check-docs format format-docs e2e run release
 
 check: check-rust check-app check-docs
 
@@ -29,3 +29,7 @@ e2e:
 # `pnpm tauri dev`. Closing the window or pressing Ctrl-C stops the daemon.
 run:
 	scripts/run
+
+# Builds an unsigned release ur.app in target/release/bundle/macos.
+release:
+	pnpm -C app tauri build --bundles app --no-sign

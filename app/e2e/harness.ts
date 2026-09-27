@@ -362,6 +362,14 @@ export class Gui {
     });
   }
 
+  /** Whether the focused element is a shown element matching `selector`. */
+  async focused(selector: string): Promise<boolean> {
+    return this.#session().execute(
+      (selector) => (window as unknown as ShownWindow).shown(selector).includes(document.activeElement as HTMLElement),
+      selector,
+    );
+  }
+
   /** Whether every shown element matching `selector` lies inside the window. */
   async insideWindow(selector: string): Promise<boolean> {
     return this.#session().execute(

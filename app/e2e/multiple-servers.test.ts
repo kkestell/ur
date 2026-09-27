@@ -98,7 +98,7 @@ e2eTest("a server's icon marks its session rows and tabs, and settings change it
   assert.deepEqual(await gui.attributes(".workspace-sessions .row .server-icon", "data-icon"), ["claude"]);
   assert.deepEqual(await gui.attributes(".tab .server-icon", "data-icon"), ["claude"]);
 
-  await gui.click(".sidebar-header button", "Server");
+  await gui.click(".sidebar-header [title='Server Settings']");
   await gui.click(".server-setup .icon-choice[title='Codex']");
   await gui.click(".server-save");
   await gui.waitForNone(".server-setup");
@@ -109,7 +109,7 @@ e2eTest("a server's icon marks its session rows and tabs, and settings change it
 
 e2eTest("settings add rename and remove a server without changing another", async (environment) => {
   const gui = await environment.openGui();
-  await gui.click(".sidebar-header button", "Server");
+  await gui.click(".sidebar-header [title='Server Settings']");
   await gui.click(".server-setup button", "Add Server");
   await gui.setInput(".server-name", "Beta");
   await gui.setInput(".server-command", "/no/such/server");
@@ -125,13 +125,13 @@ e2eTest("settings add rename and remove a server without changing another", asyn
   const session = await environment.newSession(beta);
   await gui.click(".workspace-sessions .row", "Beta");
   await gui.waitForText(".dv-tab", "New session");
-  await gui.click(".sidebar-header button", "Server");
+  await gui.click(".sidebar-header [title='Server Settings']");
   await gui.click(".server-setup button", "Beta");
   await gui.setInput(".server-name", "Renamed");
   await gui.click(".server-save");
   await waitFor("the rename", async () => (await environment.watch()).servers.some((server) => server.id === beta && server.name === "Renamed"));
   assert.equal((await environment.watch()).servers[0].name, "Test");
-  await gui.click(".sidebar-header button", "Server");
+  await gui.click(".sidebar-header [title='Server Settings']");
   await gui.click(".server-setup button", "Renamed");
   await gui.confirmNextDialog();
   await gui.click(".server-remove");

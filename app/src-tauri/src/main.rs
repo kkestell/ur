@@ -3,9 +3,10 @@ mod background;
 mod commands;
 mod gui_state;
 mod link;
+mod tray;
 
 use link::Link;
-use tauri::{Manager, WindowEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 fn main() {
     let builder = tauri::Builder::default()
@@ -18,13 +19,14 @@ fn main() {
         .setup(|app| {
             #[cfg(all(feature = "webdriver", target_os = "macos"))]
             background::show_main_window(app)?;
+            tray::build(app)?;
             tauri::async_runtime::spawn(Link::run(app.handle().clone()));
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let WindowEvent::Focused(focused) = event {
-                window.state::<Link>().set_focused(*focused);
-            }
+        .on_window_event(|window, event| match event {
+            WindowEvent::Focused(focused) => window.state::<Link>().set_focused(*focused),
+            WindowEvent::Destroyed => window.state::<Link>().set_focused(false),
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             commands::request,
@@ -46,5 +48,18 @@ fn main() {
         background::prohibit_activation(&mut app);
         app
     };
-    app.run(|_, _| {});
+    app.run(|app, event| match event {
+        // Closing the last window leaves the app running in the menu bar.
+        // Only that exit request has no code.
+        RunEvent::ExitRequested {
+            code: None, api, ..
+        } => api.prevent_exit(),
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { .. } => {
+            if let Err(error) = tray::show_main_window(app) {
+                eprintln!("ur-app: opening the window: {error}");
+            }
+        }
+        _ => {}
+    });
 }

@@ -3,6 +3,7 @@ import {
   type DockviewReadyEvent,
   DockviewReact,
   type IDockviewHeaderActionsProps,
+  type DockviewPanelApi,
   type IDockviewPanelProps,
   type SerializedDockview,
   themeDark,
@@ -243,12 +244,7 @@ function SessionPanel({ api, params }: IDockviewPanelProps<TabItem>) {
 
   // Whether this is the selection, whose pending requests the permission
   // shortcuts answer.
-  const [active, setActive] = useState(api.isActive);
-  useEffect(() => {
-    setActive(api.isActive);
-    const listener = api.onDidActiveChange((event) => setActive(event.isActive));
-    return () => listener.dispose();
-  }, [api]);
+  const active = usePanelActive(api);
 
   const answer = (request: PendingPermission, optionId: string) => {
     answerPermission(id, request.request_id, optionId);
@@ -284,23 +280,36 @@ function SessionPanel({ api, params }: IDockviewPanelProps<TabItem>) {
         status={status}
         thread={thread}
         capabilities={sessionServer(watch, summary)?.capabilities ?? null}
+        active={active}
       />
     </div>
   );
 }
 
 /** The terminal's view, once its `terminal_changed` has arrived. */
-function TerminalPanel({ params }: IDockviewPanelProps<TabItem>) {
+function TerminalPanel({ api, params }: IDockviewPanelProps<TabItem>) {
   const id = (params as Extract<TabItem, { type: "terminal" }>).terminal;
   const watch = useWatch();
+  const active = usePanelActive(api);
   if (!watch.terminals.some((terminal) => terminal.terminal === id)) {
     return null;
   }
   return (
     <div className="h-full">
-      <TerminalPane terminal={id} />
+      <TerminalPane terminal={id} active={active} />
     </div>
   );
+}
+
+/** Whether the panel's tab is the active tab in the active pane. */
+function usePanelActive(api: DockviewPanelApi): boolean {
+  const [active, setActive] = useState(api.isActive);
+  useEffect(() => {
+    setActive(api.isActive);
+    const listener = api.onDidActiveChange((event) => setActive(event.isActive));
+    return () => listener.dispose();
+  }, [api]);
+  return active;
 }
 
 /**

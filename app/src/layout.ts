@@ -35,6 +35,16 @@ export function tabWorkspace(watch: WatchState, item: TabItem): string | undefin
     : watch.terminals.find((terminal) => terminal.terminal === item.terminal)?.workspace;
 }
 
+/**
+ * The item's title: its session title, else "New session", or its terminal
+ * title. A terminal has no title until its `terminal_changed` arrives.
+ */
+export function tabTitle(watch: WatchState, item: TabItem): string | undefined {
+  return item.type === "session"
+    ? (watch.sessions.find((session) => session.session === item.session)?.title ?? "New session")
+    : watch.terminals.find((terminal) => terminal.terminal === item.terminal)?.title;
+}
+
 /** The workspace color of the item's workspace. */
 export function tabColor(watch: WatchState, item: TabItem): WorkspaceColor | undefined {
   const workspace = tabWorkspace(watch, item);
