@@ -227,20 +227,20 @@ filename-only changes, run `make check-docs` and use focused searches and diff i
 
 A change to GUI behavior adds end-to-end tests for it against the fake server, extending the fake
 server when it lacks the behavior, and runs the end-to-end suite, `make e2e`. Run it also when
-finishing each top-level item in `docs/agents/todo.md`.
+finishing each top-level item in `agents/todo.md`.
 
 ## Ox workflow
 
-Plans, work logs, reviews, and issues live in `docs/agents/`.
+Plans, work logs, reviews, and issues live in `agents/`.
 
-- `/ox-plan` explores a change and writes a plan to `docs/agents/plans/`.
-- `/ox-work` implements a plan, writes a work log to `docs/agents/work/`, and commits.
-- `/ox-review` reviews code, writes a review to `docs/agents/reviews/`, and records each finding in
-  `docs/agents/issues.csv`.
-- `docs/agents/todo.md` is the task list. High and medium severity issues are added under the task
-  they affect, or as new top-level items.
-- `docs/agents/issues.csv` is the issue log. Each row has an id (`OX-NNNN`), a created time, a
-  title, a severity (`low`, `medium`, `high`), the review lens that found it, a status (`unplanned`,
+- `/ox-plan` explores a change and writes a plan to `agents/plans/`.
+- `/ox-work` implements a plan, writes a work log to `agents/work/`, and commits.
+- `/ox-review` reviews code, writes a review to `agents/reviews/`, and records each finding in
+  `agents/issues.csv`.
+- `agents/todo.md` is the task list. High and medium severity issues are added under the task they
+  affect, or as new top-level items.
+- `agents/issues.csv` is the issue log. Each row has an id (`OX-NNNN`), a created time, a title, a
+  severity (`low`, `medium`, `high`), the review lens that found it, a status (`unplanned`,
   `planned`, `wontfix`, `fixed`), and the review that found it. Issues found outside a review leave
   the lens and review empty. Append rows; never reorder or delete them, because `todo.md` links to
   rows by line number.
@@ -250,8 +250,8 @@ Plans, work logs, reviews, and issues live in `docs/agents/`.
 Never mention "milestones", "phases", etc. in code comments or documentation (other than todo.md) --
 describe the work instead.
 
-The docs in `docs/agents/` never describe the code or individual changes. Change them only when what
-they cover changes:
+The docs in `agents/` never describe the code or individual changes. Change them only when what they
+cover changes:
 
 - `architecture.md`: ur's components, the boundaries between them, what each owns, and the decisions
   that shape them.
@@ -260,11 +260,11 @@ they cover changes:
 
 Read before planning and changing code:
 
-- `docs/agents/architecture.md`
-- `docs/agents/todo.md`
-- `docs/agents/code-style.md`
-- `docs/agents/glossary.md`
-- `docs/agents/testing.md`
+- `agents/architecture.md`
+- `agents/todo.md`
+- `agents/code-style.md`
+- `agents/glossary.md`
+- `agents/testing.md`
 
 ## Backwards Compatibility
 
