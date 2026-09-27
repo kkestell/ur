@@ -1,233 +1,26 @@
-THIS DOCUMENT MUST BE KEPT UP TO DATE
+Keep this document accurate and short.
 
 ## Code
 
-Map each file here as it is added.
-
-- `README.md` — the project description and keyboard shortcut table.
-- `Makefile` — `make check` prepares the debug sidecar and runs every validation check;
-  `make format` formats the Rust code and the Markdown files; `make e2e` runs the end-to-end suite;
-  `make run` starts the daemon and the GUI for poking around.
-- `scripts/build-sidecar` — builds the `ur` daemon for Tauri's target and copies it to the sidecar
-  path for development, tests, and unsigned macOS packages.
-- `scripts/build-macos` — builds the unsigned macOS app and DMG, then checks the package.
-- `.github/workflows/release-macos.yml` — checks and builds the unsigned Apple Silicon DMG on a
-  GitHub macOS runner, then publishes that runner-built artifact for a version tag.
-- `scripts/check-macos-package` — checks that an unsigned macOS app and DMG contain the app and
-  daemon sidecar and that the DMG is readable.
-- `scripts/run` — `make run`: builds and starts the daemon on the default socket, stopping when
-  another daemon already listens there, runs `pnpm tauri dev`, and stops the daemon when the GUI
-  exits.
-- `dprint.json` — the dprint config for the Markdown files, which wraps prose at 100 columns.
-- `Cargo.toml` — the Cargo workspace and shared dependency versions.
-- `.cargo/config.toml` — sets `TS_RS_EXPORT_DIR` so `cargo test` writes the TypeScript bindings to
-  `app/src/ipc/bindings/`.
-- `crates/ur-client/src/frame.rs` — `Frame` and `FrameCodec`, the wire protocol framing.
-- `crates/ur-client/src/protocol.rs` — `TerminalId`, `SessionKey`, `Request` (with server
-  management, `open_terminal(workspace)`, `detach_terminal`, `close_terminal`, `delete_session`, and
-  `set_config_option`), `Response`, `Event` (with `servers_changed`, `session_deleted`,
-  `terminal_changed`, and `config_options_changed`), `Workspace`, `WorkspaceColor`, `ServerIcon`,
-  `SessionSummary`, `TerminalSummary`, `Status`, `PendingPermission`, `ServerState`, `Entry`,
-  `ClientMessage`, `DaemonMessage`, `socket_path()`, and `state_dir()`.
-- `crates/ur-client/src/client.rs` — `Client`, the daemon client used by the core, with `request()`,
-  `events()`, `pty()`, and `pty_input()`.
-- `crates/ur-fake-server/` — the fake server: `lib.rs` exports `fake_server()`, `Hold`, `Pending`,
-  and `SavedHistory`, and `main.rs` serves it over stdin and stdout, keeping its saved history in
-  the file its argument names, if any. Tests can select image and delete capabilities. It gives
-  every session the `pace` config option and answers `session/set_config_option` and
-  `session/delete`. The `options` script sends several config options, with a model that accepts
-  images, to check the editor layout. `SavedHistory` supplies separate holds for load and delete
-  requests in daemon tests.
-- `crates/ur/src/main.rs` — the `ur` command line: `daemon` and the development tool `agent-run`.
-- `crates/ur/src/config.rs` — ordered named servers with stable IDs and icons, configuration
-  validation, one-shot selection, and atomic JSON saving to a selected path.
-- `crates/ur/src/one_shot.rs` — `ur agent-run`, the one-shot client, and its tests against a test
-  agent.
-- `crates/ur/src/daemon/mod.rs` — `start()`: binds the socket, reads the state and config, starts
-  every server concurrently, and serves; `ServerControl` saves server changes to its config path and
-  manages their supervisors, with in-process launches in tests.
-- `crates/ur/src/daemon/state.rs` — `State`: per-server ACP connections, capabilities, and
-  generations, shared workspaces, watchers, terminal summaries, and server-owned sessions with their
-  transcripts, session titles, config options, operation guards and the loads and deletes they hold,
-  statuses, unread flags, focus, pending permission requests, and subscribers.
-- `crates/ur/src/daemon/state_file.rs` — `read()` and `write()` for the state file.
-- `crates/ur/src/daemon/acp.rs` — one supervisor per server, which restarts its process after exit,
-  and generation-scoped ACP handlers; `list_sessions()`; `initialize()`, shared with the one-shot
-  client.
-- `crates/ur/src/daemon/ops.rs` — `add_workspace()`, which also lists the workspace's saved
-  sessions, and `remove_workspace()`, which also closes the workspace's terminals, which write the
-  state file; `new_session()`, `subscribe()`, `prompt()`, `load()`, `delete_session()`, and
-  `set_config_option()`, which handle the server's responses in `on_receiving_result` callbacks; and
-  `cancel()`.
-- `crates/ur/src/daemon/server.rs` — the accept loop, each socket connection's reader and writer,
-  request handling, and `Outbox`.
-- `crates/ur/src/daemon/terminal.rs` — `Terminals`: login shells through `portable-pty`, started in
-  their workspace path, their `vt100::Parser` with `Title`, which records terminal title changes,
-  terminal attachment and detaching, closing, the screen snapshot, and the reports to `State`.
-- `crates/ur/src/daemon/tests.rs` — the daemon's session and server-change tests, run in process
-  against separate fake server launches and saved histories.
-- `crates/ur/tests/terminal.rs` — integration tests that run `ur daemon`.
-- `app/src-tauri/Cargo.toml` — the `webdriver` feature, which embeds `tauri-plugin-wdio-webdriver`'s
-  WebDriver server for the end-to-end suite and keeps the app in the background on macOS. Release
-  builds and `pnpm tauri dev` leave it out.
-- `app/src-tauri/src/main.rs` — the Tauri builder, the dialog and opener plugins, managed `Link`,
-  `setup`, which starts `Link::run()`, and the commands.
-- `app/src-tauri/capabilities/default.json` — the main window's permissions: Tauri's core defaults,
-  the dialog plugin's `open`, `ask`, and `message`, and the opener plugin's `open_url` for http,
-  https, mailto, and tel URLs.
-- `app/src-tauri/tauri.conf.json` — the app and window config. `dragDropEnabled` is off, so the
-  webview receives HTML drop events with `File` objects.
-- `app/src-tauri/src/link.rs` — `Link`: the reconnect loop `run()`, which owns the `Client`, replays
-  the desired set `Desired { watch, subscribed, visible, focused }` after each connect, forwards
-  events to the webview under the `watch`, `session`, and `connection` event names, routing each
-  event type to one name, and forwards terminal output to the webview's `Channel`, one forwarding
-  task per attached terminal, which `detach()` aborts before sending `detach_terminal`;
-  `set_visible()` and `set_focused()`, which send `focus` for the visible sessions while the window
-  has focus.
-- `app/src-tauri/src/background.rs` — with the `webdriver` feature on macOS, `prohibit_activation()`
-  and `show_main_window()`, which keep the app from becoming active and show its window transparent
-  and click-through while its webview renders.
-- `app/src-tauri/src/commands.rs` — the core commands `request`, `attach_terminal`,
-  `detach_terminal`, `terminal_input`, `connection`, `layout`, `save_layout`, `sidebar_width`,
-  `save_sidebar_width`, and `set_visible`.
-- `app/src-tauri/src/gui_state.rs` — the GUI state file: the sidebar width, `Saved { layout }` per
-  socket path, holding dockview's serialized layout as is, and `Connection`.
-- `app/src/ipc/` — `request()`, `attachTerminal()`, `detachTerminal()`, `terminalInput()`,
-  `connection()`, `layout()`, `saveLayout()`, `sidebarWidth()`, `saveSidebarWidth()`,
-  `setVisible()`, and the `onWatch()`, `onSession()`, and `onConnection()` listeners; `bindings/` is
-  generated by `cargo test` and committed.
-- `app/src/store/watch.ts` — `WatchState`, with `hasSnapshot`, `reduceWatch()`, `needsAttention()`,
-  `workspaceSessions()`, `workspaceTerminals()`, `orderedWorkspaces()`, `attentionCount()`, and
-  `useWatch()`: the connection, workspaces, sessions, terminals, and ordered server states outside
-  React, with alphabetical workspaces and newest sessions and terminals first.
-- `app/src/store/sessions.ts` — every subscribed session's `ThreadState`, `useSession()`, which
-  subscribes once, and `useThread()`.
-- `app/src/transcript/blocks.ts` — `Block` and `ThreadState`, the thread's display types. The user
-  block carries its images and the tool call block its tool call content; `ThreadState` also holds
-  the slash commands, the latest usage, and the config options.
-- `app/src/transcript/reduce.ts` — the transcript reducer `reduce()` and `applyEntry()`, the only
-  webview code that reads `SessionUpdate` shapes.
-- `app/src/transcript/permissions.ts` — `withPermissions()` and `Item`: the pending permission
-  requests placed among the blocks, each merged with the tool call block of the same ID.
-- `app/src/keys.ts` — `isMacPlatform()` and platform-specific Command or Ctrl shortcuts:
-  `shortcutKind()` and `shortcutLabel()` for permission options, `newShortcut()` for new sessions
-  and terminals, and `tabShortcut()` for close and reopen.
-- `app/src/serverIcons.tsx` — `serverIcons`, each server icon's label and drawing in picker order:
-  the Claude symbol, the OpenAI symbol for Codex, and the letters OX; and `SessionIcon`, a session's
-  server icon, shared by the sidebar, the tabs, and server settings.
-- `app/src/colors.ts` — `workspaceColors`, each workspace color's label in swatch order, and
-  `workspaceColorStyle()`, the inline style that sets `--workspace-color`.
-- `app/src/actions.ts` — `newSession()` and `newTerminal()`, which open the new tab through
-  `onOpen`, `closeTerminal()`, `removeWorkspace()`, `deleteSession()`, `showWorkspaceMenu()`,
-  `showNewMenu()`, `showSessionMenu()`, and `showTerminalMenu()`: confirmations, error messages, and
-  native menus.
-- `app/src/layout.ts` — `TabItem`, `tabId()`, `openTab()`, `tabWorkspace()`, `tabColor()`,
-  `goneTabs()`, and `visibleSessions()`.
-- `app/src/slash.ts` — `slashQuery()` and `matchingCommands()`, the command list's matching.
-- `app/src/usage.ts` — `usageText()`, the usage indicator's popover lines.
-- `app/src/components/AddWorkspaceButton.tsx` — `AddWorkspaceButton`, which opens
-  `AddWorkspaceDialog`: the `Dialog` with the workspace path, its Choose… button for the folder
-  picker, the workspace color swatches, inline errors, and Cancel and Add.
-- `app/src/components/Sidebar.tsx` — the header's `+`, an `AddWorkspaceButton`, the workspaces,
-  their sessions and terminal rows, with each session's server icon and status mark, its server's
-  name when several servers are configured, and the selection highlighted, attention counts, and the
-  workspace, session, and terminal menus.
-- `app/src/components/SidebarHandle.tsx` — `SidebarHandle`, the drag handle on the sidebar's border,
-  and the sidebar's default, minimum, and maximum widths.
-- `app/src/components/StatusMark.tsx` — `StatusMark`, a session's status mark, shared by the sidebar
-  and the tabs.
-- `app/src/components/Dialog.tsx` — `Dialog`, a modal `<dialog>` in the browser's top layer,
-  rendered into the document body, that Escape dismisses. The Add Workspace dialog and the server
-  settings dialog use it.
-- `app/src/components/ServerSetup.tsx` — the server settings dialog: the named server list, selected
-  server form, icon picker, executable picker, separate arguments, connection errors, and removal
-  confirmation.
-- `app/src/components/Layout.tsx` — `Layout`: `DockviewReact` with `SessionPanel` (the thread, the
-  editor, and the permission shortcuts for the selection), `TerminalPanel`, `PaneActions` (the
-  pane's `+`), and the watermark with the empty states and its `AddWorkspaceButton`; tab moves with
-  pointer events, and divider and tab presses that start no text selection; reporting user-closed
-  tabs, restoring and saving the layout, scrolling each pane's active tab into view, closing tabs
-  whose session or terminal is gone, and `setVisible()` for the visible sessions.
-- `app/src/components/Tab.tsx` — `Tab`: the tab's workspace color background, its server's icon or
-  the terminal icon, title, status mark, and Close Tab, and activation on `mousedown` for presses
-  that arrive without a `pointerdown`.
-- `app/src/components/Thread.tsx` — the items of the selected session, with user message thumbnails,
-  and `Thought`, the Thinking row.
-- `app/src/components/AgentMessage.tsx` — `AgentMessage`: an agent message rendered as Markdown,
-  with links that open in the default browser, and the copy button.
-- `app/src/components/ToolCall.tsx` — `ToolCall`, the Run Command block or the tool call row, and
-  `ToolIcon`, the icon for each tool kind.
-- `app/src/components/ToolCallContent.tsx` — `ToolCallContentView`: tool call content as
-  preformatted text.
-- `app/src/components/Permission.tsx` — one pending permission request: its tool call title, its
-  content through `ToolCallContentView`, one row per option with its platform-specific shortcut, and
-  "Awaiting Confirmation."
-- `app/src/components/Editor.tsx` — `Editor` and `ImageAttachment`: the command list, image
-  attachment chips, the prompt textarea, which grows with its text from one line to eight, and the
-  bottom row of the usage indicator, config pickers, and Send or Stop; narrow panes show extra
-  config pickers in a menu.
-- `app/src/components/ConfigPicker.tsx` — `ConfigPicker`, the list or toggle for one config option.
-- `app/src/components/Popover.tsx` — `Popover`, a popup above its anchor, rendered into the document
-  body and kept inside the window, and `useClickOutside()`.
-- `app/src/components/UsageIndicator.tsx` — `UsageIndicator`, the ring and its popover.
-- `app/src/components/TerminalPane.tsx` — `TerminalPane`: the xterm.js view of one terminal, which
-  attaches on mount, detaches on unmount, and fits only while shown.
-- `app/src/main.tsx` — renders `App`, and stops files dropped outside the editor from navigating the
-  webview.
-- `app/src/styles.css` — imports Tailwind CSS and its Typography plugin; the `@theme` block, which
-  defines the app's colors and type sizes; dockview's pane and tab styling, which uses them;
-  `.workspace-tab`, which paints inactive tabs in a dark shade of their workspace color and the
-  active tab in a lighter one; and the highlight on a divider that drags.
-- `app/vite.config.ts` — configures Vite with React and Tailwind CSS, and uses menu and dialog shims
-  only in end-to-end builds.
-- `app/index.html` — the webview document and root element.
-- `app/src/App.tsx` — the window: the saved layout, read on each connect, the `DockviewApi` and the
-  selection, the sidebar, whose choices open tabs, with its saved width and `SidebarHandle`, the
-  new, close, and reopen shortcuts, which do nothing while a modal dialog is open, the in-memory
-  closed-tab history, the server settings dialog, and `Layout` once the watch snapshot arrives.
-- `app/e2e/harness.ts` — `TestEnvironment`, `Gui`, and `e2eTest`, used by the end-to-end suite and
-  ad-hoc checks. `TestEnvironment` writes a config file that launches the fake server with its saved
-  history file and sends setup requests to the daemon socket, including adding the `home` workspace;
-  `Gui.showTerminal()` opens a terminal in it and opens its tab by clicking its terminal row, or
-  finds the tab restored from the layout. `Gui.setPlatform()` simulates a different platform for
-  shortcut tests, and `Gui.chooseFolder()` answers the next folder picker, and `Gui.inputValue()`
-  reads an input. It can add another fake server and select native menu actions in end-to-end
-  builds.
-- `app/e2e/menu-shim.ts` — constructs native menus in the end-to-end build and exposes their
-  registered handlers to WebDriver in place of opening a native popup.
-- `app/e2e/dialog-shim.ts` — lets WebDriver answer confirmation dialogs and the folder picker in the
-  end-to-end build.
-- `app/e2e/tsconfig.json` — limits the end-to-end TypeScript build to the checked-in harness and
-  tests, excluding ad-hoc files in `artifacts/`.
-- `app/e2e/workspace.test.ts` — the end-to-end test for adding a workspace with its workspace color.
-- `app/e2e/terminal.test.ts` — the end-to-end tests for terminals.
-- `app/e2e/session.test.ts` — the end-to-end tests for agent sessions against the fake server.
-- `app/e2e/server-setup.test.ts` — starts the app without a daemon or config, corrects a bad server
-  choice, then checks reconnection after closing and reopening the app.
-- `app/e2e/attention.test.ts` — the end-to-end tests for session status, unread sessions, and
-  permission requests.
-- `app/e2e/editor.test.ts` — the end-to-end tests for the editor: its height, slash commands, config
-  pickers, the usage indicator, and image attachments.
-- `app/e2e/thread.test.ts` — the end-to-end tests for thread rendering, against the fake server's
-  `render` script, and for agent message links.
-- `app/e2e/panes.test.ts` — the end-to-end tests for panes, tabs, and the saved layout.
-- `app/e2e/multiple-servers.test.ts` — end-to-end tests for named server settings, choices,
-  capabilities, overlapping IDs, restoration, and independent failures.
+- `crates/ur` — the `ur` binary: the daemon and the one-shot client.
+- `crates/ur-client` — the wire protocol and the daemon client.
+- `crates/ur-fake-server` — the scripted ACP server used in tests.
+- `app/src-tauri` — the GUI core.
+- `app/src` — the webview. `app/src/ipc/bindings/` is generated by `cargo test` and committed.
+- `app/e2e` — the end-to-end suite and its harness.
+- `scripts/` — build, packaging, and run scripts.
+- `.github/workflows/` — the macOS release build.
+- `agents/` — agent docs, plans, work logs, reviews, and issues.
 
 ## Validation
 
-For changes affecting behavior, interfaces, artifacts, or builds, run full validation with
-`make check`: `cargo fmt --all -- --check`, `cargo test --workspace --all-targets --all-features`,
-`cargo build --workspace --all-features`,
-`cargo clippy --workspace --all-targets --all-features -- -D warnings`, `pnpm -C app build`,
-`pnpm -C app test` (the webview's unit tests under vitest), and `dprint check`. Report any skipped
-or failed check; do not call partial validation complete. For documentation-only, comment-only, and
-filename-only changes, run `make check-docs` and use focused searches and diff inspection. Run
-`make format-docs` to format the Markdown files.
+- `make check` runs every check. Run it after changing code.
+- `make check-docs` checks the Markdown. Run it after changing only docs or comments.
+- `make format` formats the code and the Markdown.
+- `make e2e` runs the end-to-end suite. Run it after changing GUI behavior, which also needs
+  end-to-end tests.
 
-A change to GUI behavior adds end-to-end tests for it against the fake server, extending the fake
-server when it lacks the behavior, and runs the end-to-end suite, `make e2e`. Run it also when
-finishing each top-level item in `agents/todo.md`.
+Report any check that fails or is skipped.
 
 ## Ox workflow
 
@@ -247,16 +40,23 @@ Plans, work logs, reviews, and issues live in `agents/`.
 
 ## Documentation
 
+The code describes what the code does. Docs never restate it: no descriptions of files, functions,
+fields, or UI flows, and no summaries of changes. Git history records the changes.
+
+Most changes need no doc edits. Before editing any doc, check whether the change alters what that
+doc covers. If it does not, leave the doc alone, even when the doc mentions the feature. A fact
+lives in one place, never in several docs. When a doc passage is wrong, correct or delete it without
+expanding it. Add a doc or a section only when asked.
+
+- `AGENTS.md`: instructions for agents and the top-level directory map.
+- `README.md`: how a user installs and uses ur. It changes when what a user does changes.
+- `agents/architecture.md`: ur's components, the boundaries between them, what each owns, and the
+  decisions that shape them.
+- `agents/testing.md`: how to run the tests, where each kind of test goes, and test discipline.
+- `agents/glossary.md`: naming rules and one-line definitions of domain terms.
+
 Never mention "milestones", "phases", etc. in code comments or documentation (other than todo.md) --
 describe the work instead.
-
-The docs in `agents/` never describe the code or individual changes. Change them only when what they
-cover changes:
-
-- `architecture.md`: ur's components, the boundaries between them, what each owns, and the decisions
-  that shape them.
-- `testing.md`: how to run the tests, where each kind of test goes, and test discipline.
-- `glossary.md`: naming rules and one-line definitions of domain terms.
 
 Read before planning and changing code:
 
