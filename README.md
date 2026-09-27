@@ -1,49 +1,62 @@
 # ur
 
-ur is a desktop client for ACP agents. It keeps sessions and terminals available when you close and
-reopen the app.
+ur is a small interactive ACP client. Each invocation starts one server and one new session in the
+supplied directory. It requires an already authenticated server that supports text prompts without
+client filesystem or terminal capabilities.
 
-## Install on macOS
+Build with Rust:
 
-Download `ur-macos-arm64.dmg` from the
-[latest release](https://github.com/kkestell/ur/releases/latest). Open the DMG and drag ur to
-Applications. The app is unsigned, so macOS may block its first launch. If that happens, try to open
-ur, then go to System Settings → Privacy & Security and choose **Open Anyway**, following
-[Apple's instructions](https://support.apple.com/en-us/102445).
-
-## Get started
-
-Install an ACP-compatible agent separately. Open ur, choose **Server**, and add a named server with
-its icon, executable, and launch arguments. The icon, Claude, Codex, or Ox, marks the server's
-sessions in the sidebar and their tabs. Add more servers in the same settings dialog. Then add a
-workspace with the **+** beside Workspaces: enter or choose its folder, choose its color, and choose
-Add. The workspace and pane creation menus offer one session choice per configured server, disabled
-while that server is not connected, plus New Terminal. Sessions and terminals stay available when
-you close and reopen ur.
-
-The config file at `$XDG_CONFIG_HOME/ur/config.json` (or `~/.config/ur/config.json`) stores servers
-in menu order. Server IDs stay the same when a server is renamed:
-
-```json
-{"servers": [{"id": "stable-server-id", "name": "My agent", "command": "/absolute/path/to/agent", "args": []}]}
+```sh
+cargo build -p ur --release
+./target/release/ur --server Ox /path/to/project
 ```
 
-`ur agent-run [--server NAME] <workspace> <prompt>` runs one prompt directly. The name is optional
-when exactly one server is configured and required when several are configured.
+The directory defaults to the current directory. `scripts/run` builds a debug binary and forwards
+its arguments to ur.
 
-## Keyboard shortcuts
+Configure servers in `$XDG_CONFIG_HOME/ur/config.json`, or `~/.config/ur/config.json`:
 
-| Action            | macOS                  | Other platforms  |
-| ----------------- | ---------------------- | ---------------- |
-| New Session       | Command+N              | Ctrl+N           |
-| New Terminal      | Command+Shift+N        | Ctrl+Shift+N     |
-| Close Tab         | Command+W              | Ctrl+W           |
-| Reopen Closed Tab | Command+Shift+T        | Ctrl+Shift+T     |
-| Allow once        | Command+Y              | Ctrl+Y           |
-| Always allow      | Command+Shift+Y        | Ctrl+Shift+Y     |
-| Reject once       | Command+Option+Z       | Ctrl+Alt+Z       |
-| Always reject     | Command+Shift+Option+Z | Ctrl+Shift+Alt+Z |
+```json
+{
+  "servers": [
+    { "name": "Ox", "command": "ox", "args": ["acp"] }
+  ]
+}
+```
 
-Permission shortcuts answer the active session's oldest pending request when it has the matching
-option. The New Session shortcut opens the server choices when several servers are configured. With
-one connected server it creates a session directly; with none it opens server settings.
+Use your server's actual executable and ACP arguments. Omit `--server` only when exactly one server
+is configured. Replace any old config with this shape: IDs and icons are no longer accepted. There
+is no migration. Old `state.json` and `gui.json` files are unused and may be deleted from
+`$XDG_STATE_HOME/ur`, or `~/.local/state/ur`.
+
+Type a prompt and press Enter. Paste preserves newlines and waits for Enter; the input line shows
+newlines as `↵`. Long input shows its end. Backspace deletes the last character; Ctrl-U clears the
+input. Slash commands are sent as ordinary text.
+
+Permission requests show numbered choices. Enter a number and press Enter. Ctrl-C during a turn
+cancels it and its pending permissions; ur waits for the turn to end before accepting another
+prompt. When idle, Ctrl-C clears nonempty input or quits if empty. Ctrl-D quits immediately.
+
+Replies remain plain text, including Markdown source, in terminal scrollback. ur has no local saved
+history, session browser, or resume command. Any saved history belongs to the server.
+
+For panes and persistence across terminal disconnects, install tmux and load the repository config
+explicitly on a separate socket:
+
+```sh
+tmux -L ur -f /absolute/path/to/ur/tmux.conf new-session -A -s ur
+```
+
+Run ur in a pane and ordinary shell commands in others. The prefix is Ctrl-b. Follow it with `|` for
+a side split, `-` for a stacked split, `[` for copy mode, or `d` to detach. The mouse selects and
+resizes panes. Standard window and copy bindings remain available. Reattach with:
+
+```sh
+tmux -L ur attach-session -t ur
+```
+
+Detaching tmux leaves live work running. Quitting ur ends its server connection and child process;
+stopping the tmux server ends live work in its panes. A failed or disconnected ACP server ends ur
+with an error; start ur again to create a new session.
+
+Run `make check` for Rust and documentation checks and `make e2e` for the isolated tmux tests.

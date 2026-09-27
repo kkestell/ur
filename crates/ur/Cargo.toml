@@ -6,19 +6,14 @@ version.workspace = true
 [dependencies]
 agent-client-protocol.workspace = true
 anyhow.workspace = true
-bytes.workspace = true
 clap.workspace = true
 futures.workspace = true
-portable-pty.workspace = true
+crossterm.workspace = true
+unicode-width.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["io-std", "io-util"] }
-tokio-util.workspace = true
-ur-client.workspace = true
-uuid.workspace = true
-vt100.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-tokio = { workspace = true, features = ["test-util"] }
 ur-fake-server.workspace = true

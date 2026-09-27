@@ -6,5 +6,5 @@
     "textWrap": "always"
   },
   "includes": ["**/*.{md,markdown}"],
-  "excludes": ["**/node_modules", "target", "app/dist"]
+  "excludes": ["target"]
 }

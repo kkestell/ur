@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ur", "crates/ur-client", "crates/ur-fake-server", "app/src-tauri"]
+members = ["crates/ur", "crates/ur-fake-server"]
 resolver = "3"
 
 [workspace.package]
@@ -8,29 +8,16 @@ version = "0.1.0"
 
 [workspace.dependencies]
 agent-client-protocol = "2.1.0"
-# The version `agent-client-protocol` pins, so these are the SDK's own types.
-agent-client-protocol-schema = { version = "=1.7.0", default-features = false }
 anyhow = "1.0.104"
-bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive"] }
+crossterm = { version = "0.29", features = ["event-stream"] }
 futures = "0.3.34"
-objc2 = "0.6.4"
-portable-pty = "0.9.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-tauri = { version = "2.11.5", features = ["tray-icon"] }
-tauri-build = "2.6.3"
-tauri-plugin-dialog = "2.7.3"
-tauri-plugin-opener = "2.5.5"
-tauri-plugin-wdio-webdriver = "1.2.0"
 tempfile = "3.27.0"
-tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
-tokio-util = { version = "0.7.19", features = ["codec"] }
-ts-rs = "12.0.1"
-ur-client = { path = "crates/ur-client" }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+unicode-width = "0.2"
 ur-fake-server = { path = "crates/ur-fake-server" }
-uuid = { version = "1", features = ["v4"] }
-vt100 = "0.16.2"
 
 # Dependencies build without debug info. Workspace crates keep file and line
 # numbers for panics and backtraces, and `packed` collects them into a `.dSYM`

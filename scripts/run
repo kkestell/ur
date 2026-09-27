@@ -1,28 +1,5 @@
 #!/bin/bash
-# `make run`: builds the daemon and the CLI, starts the daemon on the default
-# socket, runs the GUI in development mode, and stops the daemon when the GUI
-# exits. Another daemon on the socket stops the script.
 set -euo pipefail
-cd "$(dirname "$0")/.."
-
-cargo build -p ur
-
-socket="${UR_SOCKET:-${TMPDIR:-/tmp}/ur.sock}"
-if perl -MIO::Socket::UNIX -e 'exit !IO::Socket::UNIX->new(Peer => shift)' "$socket"; then
-  echo "a daemon is already running on $socket; stop it with: pkill -f 'ur daemon'" >&2
-  exit 1
-fi
-target/debug/ur daemon &
-daemon=$!
-trap 'kill "$daemon" 2>/dev/null; wait "$daemon" 2>/dev/null' EXIT
-until [ -S "$socket" ]; do
-  if ! kill -0 "$daemon" 2>/dev/null; then
-    wait "$daemon"
-  fi
-  sleep 0.1
-done
-echo "the daemon is running on $socket"
-
-# Closing the window or pressing Ctrl-C ends `tauri dev` with a nonzero status,
-# which is not an error here.
-pnpm -C app tauri dev || true
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+cargo build --manifest-path "$repo/Cargo.toml" -p ur
+exec "$repo/target/debug/ur" "$@"

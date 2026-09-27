@@ -1,7 +1,7 @@
 use agent_client_protocol::{ConnectTo, Stdio};
 use ur_fake_server::{Hold, SavedHistory, fake_server};
 
-/// The fake server over stdin and stdout, for the daemon to launch from the
+/// The fake server over stdin and stdout, for the ACP client to launch from the
 /// config file. Nothing releases its `hold` script. Its saved history lasts as
 /// long as the process, or, given a file as its argument, is kept in that file.
 #[tokio::main]

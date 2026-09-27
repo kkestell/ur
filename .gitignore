@@ -1,8 +1,2 @@
 /target
-node_modules/
-app/dist/
-app/src-tauri/binaries/
-
 .DS_Store
-
-app/e2e/artifacts/

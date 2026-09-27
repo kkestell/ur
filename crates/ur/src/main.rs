@@ -1,46 +1,58 @@
-use std::path::PathBuf;
-
-use clap::{Parser, Subcommand};
+mod acp;
 mod config;
-mod daemon;
-mod one_shot;
+mod tui;
+
+use std::path::{Path, PathBuf};
+
+use anyhow::Context;
+use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "ur")]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
+#[command(version, about = "An interactive ACP client")]
+struct Args {
+    #[arg(long)]
+    server: Option<String>,
+    #[arg(default_value = ".")]
+    directory: PathBuf,
 }
 
-#[derive(Subcommand)]
-enum Command {
-    /// Run the daemon on `$UR_SOCKET`, else `$TMPDIR/ur.sock`.
-    Daemon,
-    /// Run one prompt against the configured server without a daemon.
-    AgentRun {
-        #[arg(long)]
-        server: Option<String>,
-        workspace: PathBuf,
-        prompt: String,
-    },
+fn workspace(path: &Path) -> anyhow::Result<PathBuf> {
+    let path = path
+        .canonicalize()
+        .with_context(|| format!("opening {}", path.display()))?;
+    anyhow::ensure!(path.is_dir(), "{} is not a directory", path.display());
+    Ok(path)
 }
 
-fn main() -> anyhow::Result<()> {
-    let command = Cli::parse().command;
-    let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(async {
-        match command {
-            Command::Daemon => daemon::start(&ur_client::socket_path()).await,
-            Command::AgentRun {
-                server,
-                workspace,
-                prompt,
-            } => one_shot::start(&workspace, prompt, server.as_deref()).await,
-        }
-    });
-    // Tokio reads stdin with a blocking read that cannot be cancelled. If
-    // `agent-run` ends while waiting for an answer, such as when the server
-    // exits, waiting for that read would hold the process until the next line.
-    runtime.shutdown_background();
-    result
+#[tokio::main]
+async fn main() {
+    if let Err(error) = start().await {
+        eprintln!("ur: {}", tui::escape(&format!("{error:#}")));
+        std::process::exit(1);
+    }
+}
+
+async fn start() -> anyhow::Result<()> {
+    let args = Args::parse();
+    let directory = workspace(&args.directory)?;
+    let config_path = config::path()?;
+    let config = config::Config::read()?
+        .with_context(|| format!("{} does not exist", config_path.display()))?;
+    let server = config.select(args.server.as_deref())?;
+    acp::start(server, directory).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn requires_an_existing_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(workspace(temp.path()).is_ok());
+        assert!(workspace(&temp.path().join("missing")).is_err());
+        let file = temp.path().join("file");
+        std::fs::write(&file, "").unwrap();
+        assert!(workspace(&file).is_err());
+    }
 }

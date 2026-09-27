@@ -1,26 +1,28 @@
 //! The fake server: a scripted ACP server for testing ur without a model
-//! provider or Ox. Its binary is what the daemon launches in end-to-end tests,
-//! and its library is the test agent in the daemon's tests.
+//! provider or Ox. Its binary serves terminal tests; its library serves ACP tests.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    AgentCapabilities, AvailableCommand, AvailableCommandsUpdate, ConfigOptionUpdate, ContentBlock,
-    ContentChunk, Cost, DeleteSessionRequest, DeleteSessionResponse, InitializeRequest,
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PermissionOption,
-    PermissionOptionKind, PromptCapabilities, PromptRequest, PromptResponse,
-    RequestPermissionOutcome, RequestPermissionRequest, SessionCapabilities, SessionConfigOption,
-    SessionConfigOptionValue, SessionConfigSelectOption, SessionDeleteCapabilities, SessionId,
-    SessionInfo, SessionInfoUpdate, SessionListCapabilities, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StopReason, ToolCall,
-    ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
+    AgentCapabilities, AvailableCommand, AvailableCommandsUpdate, CancelNotification,
+    ConfigOptionUpdate, ContentBlock, ContentChunk, Cost, DeleteSessionRequest,
+    DeleteSessionResponse, InitializeRequest, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
+    NewSessionResponse, PermissionOption, PermissionOptionKind, PromptCapabilities, PromptRequest,
+    PromptResponse, RequestPermissionOutcome, RequestPermissionRequest, SessionCapabilities,
+    SessionConfigOption, SessionConfigOptionValue, SessionConfigSelectOption,
+    SessionDeleteCapabilities, SessionId, SessionInfo, SessionInfoUpdate, SessionListCapabilities,
+    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, StopReason, ToolCall, ToolCallContent, ToolCallStatus,
+    ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
 };
-use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, on_receive_request};
+use agent_client_protocol::{
+    Agent, Client, ConnectTo, ConnectionTo, on_receive_notification, on_receive_request,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
@@ -241,8 +243,21 @@ impl SavedHistory {
 pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> {
     // The sessions created or loaded during this ACP connection.
     let loaded = Arc::new(Mutex::new(HashSet::<SessionId>::new()));
+    let cancelled = Arc::new(Mutex::new(HashMap::<SessionId, Arc<Notify>>::new()));
     Agent
         .builder()
+        .on_receive_notification(
+            {
+                let cancelled = cancelled.clone();
+                async move |request: CancelNotification, _connection| {
+                    if let Some(notify) = cancelled.lock().unwrap().get(&request.session_id) {
+                        notify.notify_one();
+                    }
+                    Ok(())
+                }
+            },
+            on_receive_notification!(),
+        )
         .name("ur-fake-server")
         .on_receive_request(
             {
@@ -450,8 +465,7 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                     return responder
                         .respond_with_internal_error(format!("session {session} is not loaded"));
                 }
-                // Saved for replay only, so live transcripts hold the daemon's
-                // user prompt entry instead.
+                // Save user content for replay without echoing it to the client.
                 for block in request.prompt {
                     history.save(
                         &session,
@@ -460,6 +474,14 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                 }
                 // Scripts wait for a permission answer or the hold, so they run
                 // outside the dispatch loop.
+                let cancellation = Arc::new(Notify::new());
+                if text == "running" {
+                    cancelled
+                        .lock()
+                        .unwrap()
+                        .insert(session.clone(), cancellation.clone());
+                }
+                let cancelled = cancelled.clone();
                 let hold = hold.clone();
                 let history = history.clone();
                 connection.spawn({
@@ -471,6 +493,24 @@ pub fn fake_server(hold: Hold, history: SavedHistory) -> impl ConnectTo<Client> 
                             history,
                         };
                         let stop = match text.as_str() {
+                            "running" => {
+                                script.message("running; waiting for cancellation")?;
+                                cancellation.notified().await;
+                                cancelled.lock().unwrap().remove(&script.session);
+                                script.message("cancelled")?;
+                                StopReason::Cancelled
+                            }
+                            "stream" => {
+                                for text in ["stream ", "arrives ", "in order\n"] {
+                                    script.message(text)?;
+                                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                                }
+                                StopReason::EndTurn
+                            }
+                            "exit" => {
+                                return Err(agent_client_protocol::Error::internal_error()
+                                    .data("scripted server exit"));
+                            }
                             "hold" => script.hold(&hold).await?,
                             "tool" => script.tool().await?,
                             "tools" => script.tools().await?,
@@ -536,7 +576,7 @@ impl Script {
 
     /// Asks permission for two tool calls at once. If either is cancelled, it
     /// asks for a third, which a well-behaved server would not, so tests can
-    /// check that the daemon answers it `Cancelled`. Then it sends one message
+    /// check that the ACP client answers it `Cancelled`. Then it sends one message
     /// with each outcome, such as `tally-1: go, tally-2: cancelled`.
     async fn tools(&self) -> agent_client_protocol::Result<StopReason> {
         let (first, second) = tokio::join!(self.ask("tally-1"), self.ask("tally-2"));
