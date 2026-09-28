@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+conf="$(cd "$(dirname "$0")/.." && pwd)/tmux.conf"
+case "$*" in
+"") ;;
+restart)
+    # Ending the server from inside it would end this command before it starts a new one.
+    case "${TMUX-}" in
+    */ur,*)
+        echo "ur restart: run it outside ur" >&2
+        exit 1
+        ;;
+    esac
+    tmux -L ur kill-server 2>/dev/null || true
+    ;;
+*)
+    echo "usage: ur [restart]" >&2
+    exit 2
+    ;;
+esac
+exec tmux -L ur -f "$conf" new-session -A -s ur

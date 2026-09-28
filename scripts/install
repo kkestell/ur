@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import shlex
+
+repo = Path(__file__).resolve().parent.parent
+root = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "ur"
+hook = shlex.quote(str(repo / "scripts" / "hooks" / "attention"))
+config = root / "hooks"
+config.mkdir(parents=True, exist_ok=True)
+bin_dir = root / "bin"
+bin_dir.mkdir(parents=True, exist_ok=True)
+for agent in ("claude", "codex", "opencode"):
+    if agent == "opencode":
+        settings = {"plugin": [(repo / "scripts" / "hooks" / "opencode.js").as_uri()]}
+    else:
+        hooks = json.loads((repo / "scripts" / "hooks" / f"{agent}.json").read_text())["hooks"]
+        for groups in hooks.values():
+            for group in groups:
+                for entry in group["hooks"]:
+                    entry["command"] = f"{hook} {agent} {entry['command']}"
+        settings = {"hooks": hooks}
+    target = config / f"{agent}.json"
+    target.write_text(json.dumps(settings, indent=2) + "\n")
+    print(target)
+    launcher = bin_dir / agent
+    launcher.write_text(
+        f"#!/bin/sh\nexec {shlex.quote(str(repo / 'scripts' / 'agent'))} "
+        f"{agent} {shlex.quote(str(target))} \"$@\"\n"
+    )
+    launcher.chmod(0o755)
+
+local_bin = Path.home() / ".local" / "bin"
+local_bin.mkdir(parents=True, exist_ok=True)
+launcher = local_bin / "ur"
+launcher.write_text(f"#!/bin/sh\nexec {shlex.quote(str(repo / 'scripts' / 'ur'))} \"$@\"\n")
+launcher.chmod(0o755)
+print(launcher)

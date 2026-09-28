@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Run a disposable tmux server and reload its config when it changes."""
+
+import os
+from pathlib import Path
+import subprocess
+import sys
+import threading
+
+
+def main() -> int:
+    config = Path(sys.argv[1]).resolve()
+    env = os.environ.copy()
+    env.pop("TMUX", None)
+    tmux = ["tmux", "-L", "ur-dev"]
+
+    subprocess.run([*tmux, "kill-server"], env=env, capture_output=True)
+
+    stop = threading.Event()
+
+    def watch() -> None:
+        previous = (config.stat().st_mtime_ns, config.stat().st_size)
+        while not stop.wait(0.25):
+            try:
+                current = (config.stat().st_mtime_ns, config.stat().st_size)
+            except FileNotFoundError:
+                continue
+            if current == previous:
+                continue
+            previous = current
+            if stop.wait(0.15):
+                return
+            try:
+                current = (config.stat().st_mtime_ns, config.stat().st_size)
+            except FileNotFoundError:
+                continue
+            if current != previous:
+                continue
+            result = subprocess.run(
+                [*tmux, "source-file", str(config)],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode:
+                print(f"tmux config reload failed: {result.stderr.strip()}", file=sys.stderr)
+
+    watcher = threading.Thread(target=watch, daemon=True)
+    watcher.start()
+    try:
+        return subprocess.call(
+            [*tmux, "-f", str(config), "new-session", "-A", "-s", "ur"], env=env
+        )
+    finally:
+        stop.set()
+        watcher.join()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

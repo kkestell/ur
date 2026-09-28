@@ -1,16 +1,23 @@
 id,created,title,severity,lens,status,review
 OX-0001,2026-09-25 15:21,Prompting a session leaves its unread flag set,medium,correctness,fixed,reviews/2026-09-25-005-status-permissions-and-workspaces.md
-OX-0002,2026-09-25 15:21,Cancellation during workspace removal is untested,low,testing,unplanned,reviews/2026-09-25-005-status-permissions-and-workspaces.md
-OX-0003,2026-09-25 16:15,Removing a workspace during a load leaves waiting subscribes unanswered,low,correctness,unplanned,reviews/2026-09-25-007-restore-agent-history.md
-OX-0004,2026-09-25 16:15,Last activity is never tested,low,testing,unplanned,reviews/2026-09-25-007-restore-agent-history.md
+OX-0002,2026-09-25 15:21,Cancellation during workspace removal is untested,low,testing,wontfix,reviews/2026-09-25-005-status-permissions-and-workspaces.md
+OX-0003,2026-09-25 16:15,Removing a workspace during a load leaves waiting subscribes unanswered,low,correctness,wontfix,reviews/2026-09-25-007-restore-agent-history.md
+OX-0004,2026-09-25 16:15,Last activity is never tested,low,testing,wontfix,reviews/2026-09-25-007-restore-agent-history.md
 OX-0005,2026-09-25 17:21,A terminal attach error persists until the GUI restarts,low,correctness,fixed,reviews/2026-09-25-008-agent-gui.md
-OX-0006,2026-09-25 18:18,An interrupted turn reloaded from the server reads as a rejected prompt,low,correctness,unplanned,reviews/2026-09-25-009-attention-in-the-gui.md
+OX-0006,2026-09-25 18:18,An interrupted turn reloaded from the server reads as a rejected prompt,low,correctness,wontfix,reviews/2026-09-25-009-attention-in-the-gui.md
 OX-0007,2026-09-25 18:46,Agent message links replace the app with a web page,high,correctness,fixed,reviews/2026-09-25-010-thread-rendering.md
 OX-0008,2026-09-25 19:38,A session holding about 12 MB of images disconnects the GUI in a loop,high,correctness,fixed,reviews/2026-09-25-012-session-management-and-editor.md
-OX-0009,2026-09-25 21:03,A restored hidden terminal is sized to the whole dock area,low,correctness,unplanned,reviews/2026-09-25-015-pane-grid.md
+OX-0009,2026-09-25 21:03,A restored hidden terminal is sized to the whole dock area,low,correctness,wontfix,reviews/2026-09-25-015-pane-grid.md
 OX-0010,2026-09-26 06:33,Dropped images can be omitted or reordered in a prompt,high,correctness,fixed,reviews/2026-09-26-001-full-codebase.md
 OX-0011,2026-09-26 06:33,Followed CLI transcript misses replayed entries after a server restart,medium,correctness,wontfix,reviews/2026-09-26-001-full-codebase.md
-OX-0012,2026-09-26 06:33,The model picker interprets an Ox description as structured metadata,low,architecture,unscheduled,reviews/2026-09-26-001-full-codebase.md
-OX-0013,2026-09-26 07:30,A config picker reopens with its previous filter,low,correctness,unscheduled,reviews/2026-09-26-003-react-webview.md
+OX-0012,2026-09-26 06:33,The model picker interprets an Ox description as structured metadata,low,architecture,wontfix,reviews/2026-09-26-001-full-codebase.md
+OX-0013,2026-09-26 07:30,A config picker reopens with its previous filter,low,correctness,wontfix,reviews/2026-09-26-003-react-webview.md
 OX-0014,2026-09-26 17:12,Server removal and launch edits have no daemon tests,medium,testing,fixed,reviews/2026-09-26-005-multiple-acp-servers.md
-OX-0015,2026-09-26 17:12,The fake server saves its capability flags in its history file,low,simplicity,unscheduled,reviews/2026-09-26-005-multiple-acp-servers.md
+OX-0015,2026-09-26 17:12,The fake server saves its capability flags in its history file,low,simplicity,wontfix,reviews/2026-09-26-005-multiple-acp-servers.md
+OX-0016,2026-09-27 07:44,Claude permission rejection or cancellation leaves the tmux attention mark until the next prompt or exit,low,,fixed,
+OX-0017,2026-09-27 08:46,A declined or failed Codex command leaves the tmux permission mark until the next successful tool or the end of the turn,low,,unscheduled,
+OX-0018,2026-09-27 19:55,Shell startup files put the real agents ahead of ur's launchers,high,correctness,scheduled,reviews/2026-09-27-001-full-codebase.md
+OX-0019,2026-09-27 19:55,Workspace windows have no test,medium,testing,scheduled,reviews/2026-09-27-001-full-codebase.md
+OX-0020,2026-09-27 19:55,The workspaces file ignores XDG_CONFIG_HOME,low,correctness,unscheduled,reviews/2026-09-27-001-full-codebase.md
+OX-0021,2026-09-27 19:55,The permission watcher tracks Claude's process to stop early,low,simplicity,unscheduled,reviews/2026-09-27-001-full-codebase.md
+OX-0022,2026-09-27 19:55,The OpenCode plugin's turn and request tracking has no test,low,testing,unscheduled,reviews/2026-09-27-001-full-codebase.md

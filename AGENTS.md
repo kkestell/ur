@@ -2,20 +2,17 @@ Keep this document accurate and short.
 
 ## Code
 
-- `crates/ur` — the interactive Rust ACP client.
-- `crates/ur-fake-server` — the scripted ACP server used in tests.
-- `crates/ur/tests` — isolated tmux integration tests.
-- `scripts/` — build and run scripts.
 - `tmux.conf` — the explicitly loaded tmux configuration.
+- `scripts/` — install, launcher, and development scripts, and the agent hooks.
+- `tests/` — isolated tmux tests of the configuration and scripts.
 - `agents/` — agent docs, plans, work logs, reviews, and issues.
 
 ## Validation
 
 - `make check` runs every check. Run it after changing code.
 - `make check-docs` checks the Markdown. Run it after changing only docs or comments.
-- `make format` formats the code and the Markdown.
-- `make e2e` runs the isolated tmux tests. Run it after changing terminal behavior, which also needs
-  integration tests.
+- `make format` formats the Markdown.
+- `make e2e` runs the isolated tmux tests. Run it after changing anything outside `agents/`.
 
 Report any check that fails or is skipped.
 
@@ -30,10 +27,10 @@ Plans, work logs, reviews, and issues live in `agents/`.
 - `agents/todo.md` is the task list. High and medium severity issues are added under the task they
   affect, or as new top-level items.
 - `agents/issues.csv` is the issue log. Each row has an id (`OX-NNNN`), a created time, a title, a
-  severity (`low`, `medium`, `high`), the review lens that found it, a status (`unplanned`,
-  `planned`, `wontfix`, `fixed`), and the review that found it. Issues found outside a review leave
-  the lens and review empty. Append rows; never reorder or delete them, because `todo.md` links to
-  rows by line number.
+  severity (`low`, `medium`, `high`), the review lens that found it, a status (`unscheduled`,
+  `scheduled`, `wontfix`, `fixed`), and the review that found it. Issues found outside a review
+  leave the lens and review empty. Append rows; never reorder or delete them, because `todo.md`
+  links to rows by line number.
 
 ## Documentation
 
@@ -65,8 +62,7 @@ Read before planning and changing code:
 
 ## Backwards Compatibility
 
-Currently, there is none. Replace obsolete config files instead of adding migrations or versions. ur
-does not read or write workspace or layout state.
+Currently, there is none. Replace obsolete config files instead of adding migrations or versions.
 
 ## Communication
 

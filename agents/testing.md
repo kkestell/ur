@@ -1,20 +1,12 @@
 # Testing
 
-`make check` runs Rust tests, builds, Clippy, and formatting checks for Rust and Markdown.
-`make e2e` builds the fake server and runs the otherwise ignored tmux integration tests. Tests need
-no model provider or Ox.
+`make check` checks the Markdown formatting. `make e2e` runs the tmux tests. Tests need no model
+provider or agent.
 
 ## Where tests go
 
-- ACP behavior belongs in tests beside `acp.rs`, against the in-process fake server: session reuse,
-  ordered updates, permission IDs, concurrent requests, cancellation, errors, and disconnection.
-- Input editing, Unicode display width, text escaping, and partial tool updates belong beside
-  `tui.rs`.
-- Terminal behavior belongs in `crates/ur/tests/tui.rs`, against built ur and fake-server binaries
-  on an isolated tmux socket. Real keys, bracketed paste, resizing, detach and reattach, scrollback,
-  and shell recovery belong here.
-- Live checks against an authenticated server are manual. Use the acceptance check in `todo.md`.
-  Report a missing or unauthenticated server as a skipped live check.
+The tmux config, install scripts, launchers, and hooks belong in `tests`, as Python `unittest` tests
+against `tmux.conf` on an isolated tmux socket. They never start ox-tui.
 
 ## Test discipline
 
@@ -28,6 +20,6 @@ gained, lost, or moved their owning tests.
 
 ## Terminal integration
 
-Each test gets a temporary home, config, state directory, and tmux socket. Use bounded waits and
-terminate only that test's tmux server. Failures include the captured pane text. These tests require
-tmux on PATH and do not use the user's personal tmux config or server.
+Each test gets a temporary home and tmux socket. Use bounded waits and terminate only that test's
+tmux server. Failures include the captured pane text. These tests require tmux on PATH and do not
+use the user's personal tmux config or server.

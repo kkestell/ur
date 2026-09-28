@@ -10,26 +10,16 @@ unneeded case is better than hardening around a design that is still moving.
 
 ## Correctness and robustness
 
-- Use safe Rust.
 - Treat bad external input as normal. Return a clear error and keep running when recovery is
   possible.
 - Treat broken internal invariants as bugs. Fail loudly instead of continuing with bad state.
 - Do not add fallbacks or defensive machinery for failures not yet observed.
 
-## Rust style
-
-- Prefer ordinary, idiomatic Rust.
-- Use enums and exhaustive matching for closed data. Let the compiler find missing cases.
-- Prefer owned data in structs. Clone when it keeps the design clear. Avoid lifetime parameters and
-  optimization until measurement requires it.
-- Use concrete types until multiple real uses earn an abstraction. No speculative generality for a
-  single caller.
-- Keep dependencies few. Do not add a crate for one use.
-
 ## Structure and configuration
 
 - Keep one module focused on one concern, with shallow trees and clear boundaries. Cohesion matters
   more than short files.
+- Keep dependencies few. Do not add a package for one use.
 - Hardcode local tuning values near their use until user-facing configuration is needed.
 - Prefer direct functions and data flow. Split a module when the boundary clarifies responsibility,
   not because the file is long.

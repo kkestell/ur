@@ -5,6 +5,5 @@
     "lineWidth": 100,
     "textWrap": "always"
   },
-  "includes": ["**/*.{md,markdown}"],
-  "excludes": ["target"]
+  "includes": ["**/*.{md,markdown}"]
 }

@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "clear" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "clear" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "clear" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "permission" }] }],
+    "PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "permission" }] }],
+    "PostToolBatch": [{ "hooks": [{ "type": "command", "command": "clear" }] }],
+    "Elicitation": [{ "hooks": [{ "type": "command", "command": "permission" }] }],
+    "ElicitationResult": [{ "hooks": [{ "type": "command", "command": "clear" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "finished" }] }],
+    "StopFailure": [{ "hooks": [{ "type": "command", "command": "error" }] }]
+  }
+}
